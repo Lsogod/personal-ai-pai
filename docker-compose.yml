@@ -1,0 +1,65 @@
+services:
+  backend:
+    build: ./backend
+    image: pai-backend:v1.0
+    container_name: pai_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./backend/skills:/app/skills
+      - ./logs:/app/logs
+
+  frontend:
+    build: ./frontend
+    image: pai-frontend:v1.0
+    container_name: pai_frontend
+    restart: always
+    ports:
+      - "3001:80"
+    depends_on:
+      - backend
+
+  db:
+    image: postgres:15-alpine
+    container_name: pai_db
+    restart: always
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: pai_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: pai_db
+
+  redis:
+    image: redis/redis-stack-server:7.4.0-v6
+    container_name: pai_redis
+    restart: always
+    command: redis-stack-server --appendonly yes --protected-mode no
+
+  gewechat:
+    image: registry.cn-hangzhou.aliyuncs.com/gewe/gewe:latest
+    container_name: pai_gewechat
+    ports:
+      - "2531:2531"
+    volumes:
+      - ./data/gewe:/root/temp
+
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    container_name: pai_napcat
+    ports:
+      - "3000:3000"
+    environment:
+      - HTTP_ENABLE=true
+      - HTTP_POST_ENABLE=true
+      - HTTP_POST_URL=http://backend:8000/webhook/qq
+    volumes:
+      - ./data/napcat:/app/config
+
+volumes:
+  pg_data:

@@ -1,0 +1,62 @@
+from functools import lru_cache
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    app_name: str = "PAI"
+    api_prefix: str = "/api"
+
+    database_url: str = "postgresql+asyncpg://pai_user:password@db:5432/pai_db"
+    database_url_sync: str = "postgresql+psycopg2://pai_user:password@db:5432/pai_db"
+    redis_url: str = "redis://redis:6379/0"
+
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o"
+    vision_model: str = "gpt-4o"
+
+    timezone: str = "Asia/Shanghai"
+    log_level: str = "INFO"
+
+    # Webhook verification / auth (optional)
+    webhook_secret: str = ""
+
+    # Messaging bridges
+    telegram_bot_token: str = ""
+    telegram_webhook_secret: str = ""
+    telegram_polling_enabled: bool = False
+    telegram_polling_interval: int = 2
+    telegram_polling_timeout: int = 25
+    telegram_polling_limit: int = 50
+    feishu_app_id: str = ""
+    feishu_app_secret: str = ""
+    feishu_verification_token: str = ""
+    feishu_encrypt_key: str = ""
+    feishu_receive_id_type: str = "open_id"
+    bridge_base_url: str = "http://bridge"
+    onebot_base_url: str = "http://napcat:3000"
+    onebot_access_token: str = ""
+    gewechat_base_url: str = "http://gewechat:2531"
+    gewechat_app_id: str = ""
+    gewechat_token: str = ""
+
+    scheduler_enabled: bool = True
+    allow_memory_checkpointer_fallback: bool = False
+
+    admin_token: str = ""
+    dedup_ttl_seconds: int = 86400
+
+    jwt_secret: str = "change_me"
+    jwt_algorithm: str = "HS256"
+    jwt_exp_minutes: int = 60 * 24 * 7
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
