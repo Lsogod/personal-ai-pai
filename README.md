@@ -1,4 +1,4 @@
-# PAI v1.0
+# Personal AI (PAI) v1.0
 
 中心化多用户智能助理（多平台 + 独立 Web 客户端）。
 
