@@ -76,7 +76,7 @@ export function LedgerListCard({ token }: LedgerListCardProps) {
                     <div className="flex gap-1">
                       <button
                         onClick={() => beginEdit(row)}
-                        className="p-1 rounded-md text-content-tertiary hover:text-accent hover:bg-accent/10 transition-colors"
+                        className="p-1 rounded-md text-content-tertiary hover:text-accent hover:bg-surface-active transition-colors"
                       >
                         <Pencil size={13} />
                       </button>
@@ -84,7 +84,7 @@ export function LedgerListCard({ token }: LedgerListCardProps) {
                         onClick={() => {
                           if (window.confirm(`确认删除账单 #${row.id} 吗？`)) deleteMutation.mutate(row.id);
                         }}
-                        className="p-1 rounded-md text-content-tertiary hover:text-danger hover:bg-danger/10 transition-colors"
+                        className="p-1 rounded-md text-content-tertiary hover:text-danger hover:bg-surface-active transition-colors"
                       >
                         <Trash2 size={13} />
                       </button>

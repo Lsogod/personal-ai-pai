@@ -1,31 +1,20 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { Button } from "../../components/ui/button";
 import { apiRequest, streamSsePost } from "../../lib/api";
 import { useAuthStore } from "../../store/auth";
 import { useThemeStore } from "../../store/theme";
 import { ChatWindow, type ChatMessage } from "../../components/chat/ChatWindow";
 import { ConversationSidebar } from "../../components/chat/ConversationSidebar";
-import { LedgerStatsCard } from "../../components/chat/LedgerStatsCard";
-import { LedgerListCard } from "../../components/chat/LedgerListCard";
 import { ProfileCard } from "../../components/chat/ProfileCard";
-import { BindingCard } from "../../components/chat/BindingCard";
-import { SkillsPanel } from "../../components/skills/SkillsPanel";
-import { CalendarPanel } from "../../components/chat/CalendarPanel";
+import { RightInfoPanel } from "./RightInfoPanel";
 import {
-  MessageSquare,
-  Zap,
-  Calendar,
-  Wallet,
-  User,
-  Link2,
+  Menu,
+  Bot,
   LogOut,
   Sun,
   Moon,
-  Menu,
-  X,
-  Bot,
+  LayoutGrid
 } from "../../components/ui/icons";
 
 interface Profile {
@@ -45,24 +34,13 @@ interface LedgerStats {
 
 const emptyStats: LedgerStats = { total: 0, count: 0 };
 
-type ActiveView = "chat" | "skills" | "calendar" | "ledger" | "profile" | "binding";
-
-const NAV_ITEMS: { key: ActiveView; label: string; icon: React.ElementType }[] = [
-  { key: "chat", label: "对话", icon: MessageSquare },
-  { key: "skills", label: "技能", icon: Zap },
-  { key: "calendar", label: "日历", icon: Calendar },
-  { key: "ledger", label: "账单", icon: Wallet },
-  { key: "profile", label: "账号", icon: User },
-  { key: "binding", label: "绑定", icon: Link2 },
-];
-
 export function ChatPage() {
   const { token, setToken } = useAuthStore();
   const { theme, toggleTheme } = useThemeStore();
   const queryClient = useQueryClient();
   const [streamingReply, setStreamingReply] = useState("");
-  const [activeView, setActiveView] = useState<ActiveView>("chat");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [rightPanelOpen, setRightPanelOpen] = useState(true);
 
   const { data: profile } = useQuery<Profile>({
     queryKey: ["profile"],
@@ -108,180 +86,128 @@ export function ChatPage() {
     await sendMutation.mutateAsync({ content, imageUrls });
   }
 
-  function renderMain() {
-    switch (activeView) {
-      case "chat":
-        return (
-          <div className="flex h-full gap-4 animate-fade-in">
-            <div className="hidden xl:block w-72 shrink-0">
-              <ConversationSidebar token={token} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <ChatWindow
-                history={history}
-                streamingReply={streamingReply}
-                pending={sendMutation.isPending}
-                onSend={handleSend}
-                profile={profile}
-              />
-            </div>
-          </div>
-        );
-      case "skills":
-        return (
-          <div className="animate-fade-in h-full overflow-y-auto p-1">
-            <SkillsPanel token={token} />
-          </div>
-        );
-      case "calendar":
-        return (
-          <div className="animate-fade-in h-full overflow-y-auto p-1">
-            <CalendarPanel token={token} />
-          </div>
-        );
-      case "ledger":
-        return (
-          <div className="animate-fade-in h-full overflow-y-auto p-1">
-            <div className="max-w-2xl mx-auto space-y-4">
-              <LedgerStatsCard stats={stats} />
-              <LedgerListCard token={token} />
-            </div>
-          </div>
-        );
-      case "profile":
-        return (
-          <div className="animate-fade-in h-full overflow-y-auto p-1">
-            <div className="max-w-lg mx-auto">
-              <ProfileCard profile={profile} />
-            </div>
-          </div>
-        );
-      case "binding":
-        return (
-          <div className="animate-fade-in h-full overflow-y-auto p-1">
-            <div className="max-w-lg mx-auto">
-              <BindingCard token={token} />
-            </div>
-          </div>
-        );
+  const handleLogout = () => {
+    if (window.confirm("确定要退出登录吗？")) {
+      setToken(null);
     }
-  }
+  };
 
   return (
-    <div className="flex h-screen bg-surface overflow-hidden">
+    <div className="flex h-screen bg-surface overflow-hidden text-content">
       {/* Mobile overlay */}
-      {sidebarOpen && (
+      {mobileMenuOpen && (
         <div
           className="fixed inset-0 bg-black/40 z-40 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
+          onClick={() => setMobileMenuOpen(false)}
         />
       )}
 
-      {/* Sidebar */}
+      {/* Left Sidebar (History & User) */}
       <aside
         className={`
-          fixed inset-y-0 left-0 z-50 w-[220px] flex flex-col bg-surface-card border-r border-border
+          fixed inset-y-0 left-0 z-50 w-[280px] flex flex-col bg-surface-card border-r border-border
           transform transition-transform duration-300 ease-out
           lg:static lg:translate-x-0
-          ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
+          ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full"}
+          h-full
         `}
       >
-        {/* Logo area */}
-        <div className="flex items-center gap-3 px-5 h-16 shrink-0 border-b border-border">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-accent text-white">
+        {/* Header Logo */}
+        <div className="flex items-center gap-3 px-5 h-16 shrink-0 border-b border-border bg-surface-card z-10 transition-colors">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-content text-surface shadow-md">
             <Bot size={20} />
           </div>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-content truncate">
-              {profile?.ai_name || "PAI"}
-            </p>
+          <div className="min-w-0 flex-1">
+            <h1 className="font-bold text-lg text-content leading-tight tracking-tight">
+              PAI
+            </h1>
             <p className="text-xs text-content-tertiary truncate">
-              {profile?.nickname || "用户"}
+              Personal Assistant
             </p>
           </div>
-          <button
-            className="ml-auto lg:hidden text-content-secondary hover:text-content"
-            onClick={() => setSidebarOpen(false)}
+          {/* Mobile close button */}
+          <button 
+            onClick={() => setMobileMenuOpen(false)}
+            className="lg:hidden p-1 text-content-tertiary hover:text-content"
           >
-            <X size={18} />
+            <LayoutGrid size={20} />
           </button>
         </div>
 
-        {/* Nav items */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-          {NAV_ITEMS.map(({ key, label, icon: Icon }) => {
-            const active = activeView === key;
-            return (
-              <button
-                key={key}
-                onClick={() => {
-                  setActiveView(key);
-                  setSidebarOpen(false);
-                }}
-                className={`
-                  w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium
-                  transition-all duration-200 select-none
-                  ${
-                    active
-                      ? "bg-accent/10 text-accent"
-                      : "text-content-secondary hover:bg-surface-hover hover:text-content"
-                  }
-                `}
-              >
-                <Icon size={18} />
-                <span>{label}</span>
-              </button>
-            );
-          })}
-        </nav>
+        {/* Conversation List */}
+        <div className="flex-1 min-h-0 relative">
+          <ConversationSidebar token={token} />
+        </div>
 
-        {/* Bottom actions */}
-        <div className="shrink-0 border-t border-border px-3 py-3 space-y-1">
-          <button
-            onClick={toggleTheme}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-content-secondary hover:bg-surface-hover hover:text-content transition-all duration-200"
-          >
-            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-            <span>{theme === "dark" ? "浅色模式" : "深色模式"}</span>
-          </button>
-          <button
-            onClick={() => setToken(null)}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-danger hover:bg-danger/10 transition-all duration-200"
-          >
-            <LogOut size={18} />
-            <span>退出登录</span>
-          </button>
+        {/* Footer User Profile & Settings */}
+        <div className="p-4 border-t border-border bg-surface-secondary/40 space-y-3 shrink-0 backdrop-blur-sm">
+          {profile && <ProfileCard profile={profile} />}
+          
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <button
+              onClick={toggleTheme}
+              className="flex items-center justify-center h-8 w-8 rounded-lg text-content-secondary hover:bg-surface-hover hover:text-content transition-all active:scale-95 border border-transparent hover:border-border"
+              title={theme === "dark" ? "切换亮色" : "切换深色"}
+            >
+              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
+            
+            <button
+              onClick={handleLogout}
+              className="flex flex-1 items-center justify-end gap-1.5 h-8 px-2 rounded-lg text-content-tertiary hover:text-danger hover:bg-danger/5 transition-colors text-xs font-medium"
+            >
+              <span>退出</span>
+              <LogOut size={14} />
+            </button>
+          </div>
         </div>
       </aside>
 
-      {/* Main content */}
-      <main className="flex-1 flex flex-col min-w-0 h-screen">
-        {/* Top bar (mobile) */}
-        <header className="flex items-center h-14 px-4 shrink-0 border-b border-border bg-surface-card lg:hidden">
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="text-content-secondary hover:text-content mr-3"
-          >
-            <Menu size={22} />
-          </button>
-          <p className="text-sm font-semibold text-content">
-            {NAV_ITEMS.find((n) => n.key === activeView)?.label || "PAI"}
-          </p>
-          <div className="ml-auto flex items-center gap-2">
+      {/* Main Content Area (Chat) */}
+      <main className="flex-1 flex flex-col min-w-0 bg-surface relative h-full">
+        {/* Header Overlay for Mobile */}
+        <div className="lg:hidden h-14 flex items-center px-4 border-b border-border bg-surface/80 backdrop-blur-md sticky top-0 z-30 justify-between">
+          <div className="flex items-center gap-3">
             <button
-              onClick={toggleTheme}
-              className="p-2 rounded-lg text-content-secondary hover:text-content hover:bg-surface-hover transition-colors"
+              onClick={() => setMobileMenuOpen(true)}
+              className="p-2 -ml-2 text-content-secondary hover:text-content active:scale-95 transition-transform"
             >
-              {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+              <Menu size={20} />
             </button>
+            <span className="font-medium text-content">对话</span>
           </div>
-        </header>
+          <button
+            onClick={() => setRightPanelOpen(!rightPanelOpen)}
+            className={`p-2 -mr-2 transition-colors ${rightPanelOpen ? 'text-accent' : 'text-content-secondary'}`}
+          >
+            <LayoutGrid size={20} />
+          </button>
+        </div>
 
-        {/* Content area */}
-        <div className="flex-1 min-h-0 p-4 lg:p-6">
-          {renderMain()}
+        {/* Chat Window */}
+        <div className="flex-1 h-full min-h-0">
+          <ChatWindow
+            history={history}
+            streamingReply={streamingReply}
+            pending={sendMutation.isPending}
+            onSend={handleSend}
+            profile={profile}
+          />
         </div>
       </main>
+
+      {/* Right Sidebar (Widgets) */}
+      <aside 
+        className={`
+          flex-col h-full border-l border-border bg-surface-card shrink-0 transition-all duration-300 ease-in-out
+          ${rightPanelOpen ? "w-[360px] translate-x-0 opacity-100" : "w-0 translate-x-full opacity-0 hidden xl:hidden"}
+          hidden xl:flex
+        `}
+      >
+        <div className="w-[360px] h-full overflow-hidden">
+           <RightInfoPanel token={token} stats={stats} />
+        </div>
+      </aside>
     </div>
   );
 }

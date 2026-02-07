@@ -75,7 +75,7 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 lg:p-6">
         {isEmpty ? (
           <div className="flex flex-col items-center justify-center h-full text-center py-20">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10 text-accent mb-5">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-surface-hover text-accent mb-5">
               <Bot size={32} />
             </div>
             <h2 className="text-xl font-semibold text-content mb-2">
@@ -112,7 +112,7 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
                 }`}
               >
                 {msg.role === "assistant" && (
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-accent/10 text-accent text-sm">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-surface-hover text-accent text-sm">
                     <Bot size={16} />
                   </div>
                 )}
@@ -139,7 +139,7 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
                   </p>
                 </div>
                 {msg.role !== "assistant" && (
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-accent text-white text-xs font-medium">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-content text-surface text-xs font-medium">
                     {profile?.nickname?.charAt(0) || "我"}
                   </div>
                 )}
@@ -147,7 +147,7 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
             ))}
             {pending && !streamingReply && (
               <div className="flex gap-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-accent/10 text-accent">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-surface-hover text-accent">
                   <Bot size={16} />
                 </div>
                 <div className="bg-bubble-ai rounded-2xl rounded-tl-md px-4 py-3">
@@ -184,7 +184,7 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
               onClick={() => setShowImageInput(!showImageInput)}
               className={`shrink-0 p-2.5 rounded-xl transition-colors ${
                 showImageInput
-                  ? "text-accent bg-accent/10"
+                  ? "text-accent bg-surface-hover"
                   : "text-content-tertiary hover:text-content-secondary hover:bg-surface-hover"
               }`}
             >
@@ -205,7 +205,7 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
               <button
                 type="submit"
                 disabled={pending || (!content.trim() && !imageUrl.trim())}
-                className="absolute right-2 bottom-2 p-1.5 rounded-xl text-accent hover:bg-accent/10 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                className="absolute right-2 bottom-2 p-1.5 rounded-xl text-accent hover:bg-accent-subtle disabled:opacity-30 disabled:hover:bg-transparent transition-all"
               >
                 <ArrowUpCircle size={24} />
               </button>

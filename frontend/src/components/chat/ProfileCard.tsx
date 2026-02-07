@@ -25,31 +25,28 @@ const infoItems = (profile?: Profile) => [
 
 export function ProfileCard({ profile }: ProfileCardProps) {
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent">
-            <User size={20} />
-          </div>
-          <div>
-            <h2 className="text-sm font-semibold text-content">账号信息</h2>
-            <p className="text-xs text-content-tertiary">管理你的个人资料与 AI 设置</p>
-          </div>
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface text-content-secondary border border-border">
+          <User size={18} />
         </div>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          {infoItems(profile).map(({ label, value }) => (
-            <div
-              key={label}
-              className="flex items-center justify-between py-2 border-b border-border last:border-0"
-            >
-              <span className="text-sm text-content-secondary">{label}</span>
-              <span className="text-sm font-medium text-content">{value || "-"}</span>
-            </div>
-          ))}
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-content truncate">{profile?.nickname || "Guest"}</h2>
+          <p className="text-xs text-content-tertiary truncate">{profile?.email || "未绑定邮箱"}</p>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+      
+      <div className="space-y-1 pt-1">
+        {infoItems(profile).filter(i => ["AI 名称", "AI 表情"].includes(i.label)).map(({ label, value }) => (
+          <div
+            key={label}
+            className="flex items-center justify-between py-1 px-1"
+          >
+            <span className="text-xs text-content-tertiary">{label}</span>
+            <span className="text-xs font-medium text-content">{value || "-"}</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

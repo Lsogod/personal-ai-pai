@@ -98,13 +98,14 @@ export function ConversationSidebar({ token }: ConversationSidebarProps) {
   }
 
   return (
-    <div className="flex flex-col h-full rounded-2xl border border-border bg-surface-card overflow-hidden">
+    <div className="flex flex-col h-full bg-surface-card overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 h-12 shrink-0 border-b border-border">
-        <h2 className="text-sm font-semibold text-content">会话列表</h2>
+      <div className="flex items-center justify-between px-4 h-10 shrink-0 border-b border-border/50">
+        <h2 className="text-xs font-semibold text-content-tertiary uppercase tracking-wider">历史会话</h2>
         <button
           onClick={() => setShowNew(!showNew)}
-          className="p-1.5 rounded-lg text-content-secondary hover:text-accent hover:bg-accent/10 transition-colors"
+          className="p-1 rounded-md text-content-secondary hover:text-accent hover:bg-surface-hover transition-colors"
+          title="新建会话"
         >
           <Plus size={16} />
         </button>
@@ -143,7 +144,7 @@ export function ConversationSidebar({ token }: ConversationSidebarProps) {
                 key={item.id}
                 className={`group rounded-xl px-3 py-2.5 cursor-pointer transition-all duration-200 ${
                   active
-                    ? "bg-accent/10 text-accent"
+                    ? "bg-surface-active text-accent"
                     : "hover:bg-surface-hover text-content"
                 }`}
                 onClick={() => !active && switchMutation.mutate(item.id)}

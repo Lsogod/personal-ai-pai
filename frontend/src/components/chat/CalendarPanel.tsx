@@ -66,165 +66,161 @@ export function CalendarPanel({ token }: CalendarPanelProps) {
 
   const cells = useMemo(() => buildCalendarCells(cursor), [cursor]);
   const selected = dayMap.get(selectedDate);
-  const totalMonthSpend = (data?.days || []).reduce((acc, day) => acc + day.ledger_total, 0);
-  const totalMonthSchedules = (data?.days || []).reduce((acc, day) => acc + day.schedule_count, 0);
   const today = formatDate(new Date());
 
+  // Auto-select first day of month if cursor changes and selection is out of range
   useEffect(() => {
     const currentMonth = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`;
     if (!selectedDate.startsWith(currentMonth)) {
-      setSelectedDate(`${currentMonth}-01`);
-      return;
+      // Don't auto-select here to allow user to see text "No date selected" or keep previous selection logic
+      // But for better UX, maybe select today if in current month, or 1st day
+      if (currentMonth === formatDate(new Date()).slice(0, 7)) {
+         setSelectedDate(formatDate(new Date()));
+      } else {
+         setSelectedDate(`${currentMonth}-01`);
+      }
     }
-    if (data?.days && !dayMap.has(selectedDate)) {
-      setSelectedDate(data.days[0]?.date || `${currentMonth}-01`);
-    }
-  }, [cursor, data, dayMap, selectedDate]);
+  }, [cursor]);
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent">
-                <Calendar size={20} />
-              </div>
-              <h2 className="text-sm font-semibold text-content">账单与日程日历</h2>
+    <div className="flex flex-col h-full space-y-4 p-1">
+      {/* Calendar Header */}
+      <div className="flex items-center justify-between px-2 py-1">
+        <h2 className="text-sm font-semibold text-content">{monthTitle(cursor)}</h2>
+        <div className="flex gap-1">
+          <button
+            onClick={() => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+            className="p-1.5 rounded-lg text-content-secondary hover:text-content hover:bg-surface-hover transition-colors"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <button
+            onClick={() => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+            className="p-1.5 rounded-lg text-content-secondary hover:text-content hover:bg-surface-hover transition-colors"
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+
+      {/* Calendar Grid */}
+      <div className="bg-surface-card rounded-2xl border border-border p-3 shadow-sm">
+        <div className="grid grid-cols-7 gap-1 mb-2">
+          {["日", "一", "二", "三", "四", "五", "六"].map((name) => (
+            <div key={name} className="text-center text-xs text-content-tertiary py-1">
+              {name}
             </div>
-            <div className="flex items-center gap-1">
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-sm">
+          {cells.map((cell, index) => {
+            if (!cell) {
+              return <div key={`blank-${index}`} className="aspect-square" />;
+            }
+            const day = dayMap.get(cell);
+            const active = selectedDate === cell;
+            const isToday = cell === today;
+            const hasData = day && (day.ledger_count > 0 || day.schedule_count > 0);
+            
+            return (
               <button
-                onClick={() => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
-                className="p-2 rounded-lg text-content-secondary hover:text-content hover:bg-surface-hover transition-colors"
+                key={cell}
+                onClick={() => setSelectedDate(cell)}
+                className={`
+                  aspect-square rounded-lg flex flex-col items-center justify-center relative transition-all
+                  ${active 
+                    ? "bg-content text-surface shadow-md scale-105 z-10" 
+                    : isToday 
+                      ? "bg-accent-subtle text-accent font-semibold"
+                      : "text-content hover:bg-surface-hover"
+                  }
+                `}
               >
-                <ChevronLeft size={18} />
-              </button>
-              <p className="text-sm font-semibold text-content min-w-[100px] text-center">
-                {monthTitle(cursor)}
-              </p>
-              <button
-                onClick={() => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
-                className="p-2 rounded-lg text-content-secondary hover:text-content hover:bg-surface-hover transition-colors"
-              >
-                <ChevronRight size={18} />
-              </button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="mb-3 grid grid-cols-7 gap-1 text-center text-xs font-medium text-content-tertiary">
-            {["日", "一", "二", "三", "四", "五", "六"].map((name) => (
-              <div key={name} className="py-2">{name}</div>
-            ))}
-          </div>
-          <div className="grid grid-cols-7 gap-1">
-            {cells.map((cell, index) => {
-              if (!cell) {
-                return <div key={`blank-${index}`} className="aspect-square" />;
-              }
-              const day = dayMap.get(cell);
-              const active = selectedDate === cell;
-              const isToday = cell === today;
-              const hasData = day && (day.ledger_count > 0 || day.schedule_count > 0);
-              return (
-                <button
-                  key={cell}
-                  type="button"
-                  onClick={() => setSelectedDate(cell)}
-                  className={`
-                    aspect-square rounded-xl p-1 text-left flex flex-col items-center justify-center
-                    transition-all duration-200 relative
-                    ${active
-                      ? "bg-accent text-white shadow-subtle"
-                      : isToday
-                        ? "bg-accent/10 text-accent"
-                        : "hover:bg-surface-hover text-content"
-                    }
-                  `}
-                >
-                  <span className={`text-sm font-medium ${active ? "text-white" : ""}`}>
-                    {dayNumber(cell)}
-                  </span>
-                  {hasData && !active && (
-                    <span className="w-1 h-1 rounded-full bg-accent mt-0.5" />
+                <span>{dayNumber(cell)}</span>
+                {/* Dots indicators */}
+                <div className="flex gap-0.5 mt-0.5 h-1">
+                  {day && day.ledger_count > 0 && (
+                    <span className={`w-1 h-1 rounded-full ${active ? "bg-white/80" : "bg-warning/80"}`} title="有账单" />
                   )}
-                </button>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
-
-      <div className="space-y-4">
-        {/* Monthly overview */}
-        <Card>
-          <CardHeader>
-            <h2 className="text-sm font-semibold text-content">当月概览</h2>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl bg-surface-secondary p-3">
-                <p className="text-xs text-content-tertiary">总支出</p>
-                <p className="text-lg font-bold text-content mt-1">¥{totalMonthSpend.toFixed(0)}</p>
-              </div>
-              <div className="rounded-xl bg-surface-secondary p-3">
-                <p className="text-xs text-content-tertiary">日程数</p>
-                <p className="text-lg font-bold text-content mt-1">{totalMonthSchedules}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Day detail */}
-        <Card>
-          <CardHeader>
-            <h2 className="text-sm font-semibold text-content">{selectedDate} 详情</h2>
-          </CardHeader>
-          <CardContent>
-            {selected ? (
-              <div className="space-y-4">
-                <div>
-                  <p className="text-xs font-semibold text-content-secondary mb-2">📝 账单</p>
-                  {selected.ledgers.length === 0 ? (
-                    <p className="text-xs text-content-tertiary">无账单</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {selected.ledgers.map((item) => (
-                        <div key={item.id} className="flex justify-between text-xs">
-                          <span className="text-content-secondary">{item.item}</span>
-                          <span className="text-content font-medium">¥{item.amount.toFixed(2)}</span>
-                        </div>
-                      ))}
-                    </div>
+                  {day && day.schedule_count > 0 && (
+                     <span className={`w-1 h-1 rounded-full ${active ? "bg-white/80" : "bg-success/80"}`} title="有日程" />
                   )}
                 </div>
-                <div>
-                  <p className="text-xs font-semibold text-content-secondary mb-2">📅 日程</p>
-                  {selected.schedules.length === 0 ? (
-                    <p className="text-xs text-content-tertiary">无日程</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {selected.schedules.map((item) => (
-                        <div key={item.id} className="flex justify-between text-xs">
-                          <span className="text-content-secondary">{item.content}</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] ${
-                            item.status === "done"
-                              ? "bg-success/10 text-success"
-                              : "bg-accent/10 text-accent"
-                          }`}>
-                            {item.status}
-                          </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Details Section */}
+      <div className="flex-1 min-h-0 flex flex-col border-t border-border pt-4 mt-2">
+        <h3 className="text-sm font-semibold text-content px-2 mb-3 flex items-center justify-between">
+          <span>{selectedDate} 详情</span>
+          {selected && (
+             <span className="text-xs font-normal text-content-tertiary">
+               支出 ¥{selected.ledger_total.toFixed(0)} · {selected.schedule_count} 日程
+             </span>
+          )}
+        </h3>
+
+        <div className="flex-1 overflow-y-auto space-y-4 px-2 custom-scrollbar">
+          {!selected || (selected.ledgers.length === 0 && selected.schedules.length === 0) ? (
+            <div className="flex flex-col items-center justify-center h-32 text-content-tertiary space-y-2">
+              <Calendar size={24} className="opacity-20" />
+              <p className="text-xs">暂无记录</p>
+            </div>
+          ) : (
+            <>
+              {/* Ledgers */}
+              {selected.ledgers.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-content-secondary flex items-center gap-1">
+                    <span className="w-1 h-3 rounded-full bg-warning/60"></span>
+                    账单记录
+                  </p>
+                  <div className="space-y-2">
+                    {selected.ledgers.map((item) => (
+                      <div key={item.id} className="group flex items-center justify-between p-2.5 rounded-xl bg-surface-secondary/50 border border-border/50 hover:border-border transition-colors">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-content truncate">{item.item}</p>
+                          {item.notes && <p className="text-xs text-content-tertiary truncate">{item.notes}</p>}
                         </div>
-                      ))}
-                    </div>
-                  )}
+                        <span className="text-sm font-bold text-content font-mono">
+                          -¥{item.amount.toFixed(2)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <p className="text-xs text-content-tertiary text-center py-4">当天无记录</p>
-            )}
-          </CardContent>
-        </Card>
+              )}
+
+              {/* Schedules */}
+              {selected.schedules.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-content-secondary flex items-center gap-1">
+                    <span className="w-1 h-3 rounded-full bg-success/60"></span>
+                    日程安排
+                  </p>
+                  <div className="space-y-2">
+                    {selected.schedules.map((item) => (
+                      <div key={item.id} className="group flex items-start gap-2.5 p-2.5 rounded-xl bg-surface-secondary/50 border border-border/50 hover:border-border transition-colors">
+                         <div className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${item.status === 'done' ? 'bg-success' : 'bg-accent'}`} />
+                         <div className="flex-1 min-w-0">
+                           <p className={`text-sm text-content leading-relaxed ${item.status === 'done' ? 'line-through text-content-tertiary' : ''}`}>
+                             {item.content}
+                           </p>
+                           <p className="text-xs text-content-tertiary mt-0.5">
+                             {new Date(item.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                           </p>
+                         </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

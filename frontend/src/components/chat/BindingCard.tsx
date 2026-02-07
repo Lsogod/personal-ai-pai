@@ -71,7 +71,7 @@ export function BindingCard({ token }: BindingCardProps) {
     <Card>
       <CardHeader>
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-hover text-accent">
             <Link2 size={20} />
           </div>
           <div>

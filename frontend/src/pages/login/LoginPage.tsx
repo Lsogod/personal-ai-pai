@@ -44,7 +44,7 @@ export function LoginPage() {
 
       {/* Logo & Title */}
       <div className="flex flex-col items-center mb-10 animate-fade-in">
-        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent text-white mb-5 shadow-elevated">
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-content text-surface mb-5 shadow-elevated">
           <Bot size={32} />
         </div>
         <h1 className="text-3xl font-bold text-content tracking-tight">PAI</h1>

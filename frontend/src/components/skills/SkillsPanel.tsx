@@ -143,7 +143,7 @@ export function SkillsPanel({ token }: SkillsPanelProps) {
                     className={`
                       w-full rounded-xl px-3 py-3 text-left transition-all duration-200
                       ${active
-                        ? "bg-accent/10 text-accent"
+                        ? "bg-surface-active text-accent"
                         : "hover:bg-surface-hover text-content"
                       }
                     `}
@@ -153,7 +153,7 @@ export function SkillsPanel({ token }: SkillsPanelProps) {
                       <span className={`text-[10px] px-1.5 py-0.5 rounded-md ${
                         isBuiltin
                           ? "bg-surface-secondary text-content-tertiary"
-                          : "bg-accent/10 text-accent"
+                          : "bg-surface-active text-accent"
                       }`}>
                         {isBuiltin ? "内置" : "用户"}
                       </span>
