@@ -37,6 +37,10 @@
 ### 🧠 LangGraph 智能工作流
 基于 LangGraph 的有向图工作流，通过 LLM 自动识别用户意图并路由到专业节点：
 
+<p align="center">
+  <img src="docs/agent-workflow.svg" alt="PAI 智能体决策调度流程图" width="100%"/>
+</p>
+
 - **🔀 Router** — 意图分类器，自动识别消息类型
 - **💰 Finance** — 记账、消费统计、小票 OCR 识别
 - **📅 Secretary** — 日程管理、定时提醒（APScheduler 持久化）

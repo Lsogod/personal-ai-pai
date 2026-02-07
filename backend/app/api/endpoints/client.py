@@ -214,8 +214,12 @@ async def chat_history(
     )
     messages = list(reversed(result.scalars().all()))
     if not messages and user.setup_stage == SetupStage.NEW:
-        greeting = "你好！我是您的私人助理 PAI。初次见面，请问我该怎么称呼您？"
-        user.setup_stage = SetupStage.USER_NAMED
+        if int(user.binding_stage or 0) < 2:
+            greeting = "在其他客户端有账号吗？回复“有”或“没有”。有的话可稍后用 `/bind new` 与 `/bind <6位码>` 绑定数据。"
+            user.binding_stage = 1
+        else:
+            greeting = "你好！我是您的私人助理 PAI。初次见面，请问我该怎么称呼您？"
+            user.setup_stage = SetupStage.USER_NAMED
         session.add(user)
         session.add(
             Message(
@@ -362,11 +366,11 @@ async def conversations_delete(
 
 
 async def _sse_stream(text: str):
-    chunk_size = 12
+    chunk_size = 32
     for i in range(0, len(text), chunk_size):
         chunk = text[i : i + chunk_size]
         yield f"data: {chunk}\n\n"
-        await asyncio.sleep(0.02)
+        await asyncio.sleep(0.03)
     yield "data: [DONE]\n\n"
 
 

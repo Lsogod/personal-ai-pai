@@ -43,10 +43,18 @@ async def parse_update(data: dict[str, Any]) -> Optional[dict[str, Any]]:
 
     text = message.get("text") or message.get("caption") or ""
     photos = message.get("photo") or []
+    document = message.get("document") or {}
     image_urls: list[str] = []
     if photos:
         file_id = photos[-1].get("file_id")
         if file_id:
+            url = await _get_file_url(file_id)
+            if url:
+                image_urls.append(url)
+    if not image_urls and document:
+        mime_type = str(document.get("mime_type") or "")
+        file_id = document.get("file_id")
+        if file_id and mime_type.startswith("image/"):
             url = await _get_file_url(file_id)
             if url:
                 image_urls.append(url)

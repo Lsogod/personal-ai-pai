@@ -1,0 +1,258 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 700" font-family="Inter, system-ui, sans-serif">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f0f14"/>
+      <stop offset="100%" stop-color="#1a1a28"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+    <linearGradient id="orange" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fb923c"/>
+      <stop offset="100%" stop-color="#f97316"/>
+    </linearGradient>
+    <linearGradient id="pink" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f472b6"/>
+      <stop offset="100%" stop-color="#ec4899"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+    <linearGradient id="red" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f87171"/>
+      <stop offset="100%" stop-color="#ef4444"/>
+    </linearGradient>
+    <linearGradient id="purple" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
+    <style>
+      @keyframes dash { to { stroke-dashoffset: -20; } }
+      @keyframes pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+      @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+      .flow-line { stroke-dasharray: 6 4; animation: dash 1.5s linear infinite; }
+      .pulse-node { animation: pulse 3s ease-in-out infinite; }
+      .float-box { animation: float 4s ease-in-out infinite; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="960" height="700" rx="16" fill="url(#bgGrad)"/>
+
+  <!-- Title -->
+  <text x="480" y="42" text-anchor="middle" fill="#e2e8f0" font-size="20" font-weight="700">PAI · 智能体决策调度流程</text>
+  <text x="480" y="62" text-anchor="middle" fill="#64748b" font-size="11">LangGraph StateGraph · LLM 意图分类 · 条件边路由 · Redis Checkpointer</text>
+
+  <!-- ═══════ Layer 1: Entry Point ═══════ -->
+  <g class="float-box">
+    <rect x="380" y="84" width="200" height="44" rx="22" fill="#1e1e2e" stroke="url(#accent)" stroke-width="2" filter="url(#shadow)"/>
+    <text x="480" y="111" text-anchor="middle" fill="#c7d2fe" font-size="13" font-weight="700">▶  Entry Point</text>
+  </g>
+  <circle cx="480" cy="106" r="2.5" fill="#818cf8" class="pulse-node"/>
+
+  <!-- Entry label -->
+  <rect x="610" y="84" width="170" height="44" rx="12" fill="#818cf810" stroke="#818cf830" stroke-width="1"/>
+  <text x="695" y="103" text-anchor="middle" fill="#818cf8" font-size="10" font-weight="600">set_entry_point</text>
+  <text x="695" y="118" text-anchor="middle" fill="#64748b" font-size="9">graph.ainvoke(state)</text>
+
+  <!-- Flow: Entry → Router -->
+  <line x1="480" y1="128" x2="480" y2="166" stroke="#818cf860" stroke-width="1.5" class="flow-line"/>
+
+  <!-- ═══════ Layer 2: Router Node ═══════ -->
+  <rect x="300" y="162" width="360" height="82" rx="14" fill="#1e1e2e" stroke="url(#green)" stroke-width="2" filter="url(#shadow)"/>
+  <text x="480" y="190" text-anchor="middle" fill="#34d399" font-size="14" font-weight="700">🔀 Router · 意图路由器</text>
+  <text x="480" y="208" text-anchor="middle" fill="#94a3b8" font-size="10">router_node()  →  LLM 意图分类  →  route_intent()</text>
+  <text x="480" y="224" text-anchor="middle" fill="#64748b" font-size="9">上下文增强: has_image · has_pending_ledger · conversation_id</text>
+
+  <circle cx="480" cy="190" r="2.5" fill="#34d399" class="pulse-node"/>
+
+  <!-- Router 判断逻辑面板 -->
+  <rect x="710" y="135" width="220" height="140" rx="12" fill="#1e1e2e" stroke="#34d39950" stroke-width="1" filter="url(#shadow)"/>
+  <text x="820" y="150" text-anchor="middle" fill="#34d399" font-size="10" font-weight="600">🧠 路由三级判断</text>
+  <line x1="725" y1="157" x2="915" y2="157" stroke="#34d39930" stroke-width="1"/>
+  <text x="725" y="173" fill="#fbbf24" font-size="9" font-weight="600">① 优先规则</text>
+  <text x="735" y="186" fill="#94a3b8" font-size="8.5">setup_stage &lt; 3 → onboarding</text>
+  <text x="735" y="198" fill="#94a3b8" font-size="8.5">空消息 → writer 兜底</text>
+  <text x="725" y="213" fill="#fbbf24" font-size="9" font-weight="600">② LLM 分类</text>
+  <text x="735" y="226" fill="#94a3b8" font-size="8.5">_classify_intent_with_llm()</text>
+  <text x="725" y="241" fill="#fbbf24" font-size="9" font-weight="600">③ 规则兜底</text>
+  <text x="735" y="254" fill="#94a3b8" font-size="8.5">/help /skill /ledger /calendar</text>
+
+  <line x1="660" y1="200" x2="706" y2="200" stroke="#34d39940" stroke-width="1" class="flow-line"/>
+
+  <!-- ═══════ Layer 3: Conditional Edges ═══════ -->
+  <!-- 6 个条件边标签 -->
+  <text x="480" y="260" text-anchor="middle" fill="#64748b" font-size="9" font-weight="500">add_conditional_edges("router", route_intent)</text>
+
+  <!-- Flow lines: Router → Worker Nodes -->
+  <!-- 节点中心 X: 88, 248, 390, 530, 672, 848 -->
+  <line x1="370" y1="244" x2="88" y2="310" stroke="#a78bfa50" stroke-width="1" class="flow-line" style="animation-delay:.1s"/>
+  <line x1="390" y1="244" x2="248" y2="310" stroke="#34d39950" stroke-width="1" class="flow-line" style="animation-delay:.2s"/>
+  <line x1="440" y1="244" x2="390" y2="310" stroke="#60a5fa50" stroke-width="1" class="flow-line" style="animation-delay:.3s"/>
+  <line x1="520" y1="244" x2="530" y2="310" stroke="#f472b650" stroke-width="1" class="flow-line" style="animation-delay:.4s"/>
+  <line x1="560" y1="244" x2="672" y2="310" stroke="#fb923c50" stroke-width="1" class="flow-line" style="animation-delay:.5s"/>
+  <line x1="590" y1="244" x2="848" y2="310" stroke="#22d3ee50" stroke-width="1" class="flow-line" style="animation-delay:.6s"/>
+
+  <!-- Edge labels on lines -->
+  <text x="192" y="284" fill="#a78bfa" font-size="7.5" font-weight="600" transform="rotate(-16,192,284)">setup_stage&lt;3</text>
+  <text x="296" y="284" fill="#34d399" font-size="7.5" font-weight="600">finance</text>
+  <text x="402" y="280" fill="#60a5fa" font-size="7.5" font-weight="600">secretary</text>
+  <text x="520" y="280" fill="#f472b6" font-size="7.5" font-weight="600">writer</text>
+  <text x="624" y="284" fill="#fb923c" font-size="7.5" font-weight="600">skill_mgr</text>
+  <text x="748" y="284" fill="#22d3ee" font-size="7.5" font-weight="600">guide</text>
+
+  <!-- ═══════ Layer 4: Worker Nodes ═══════ -->
+
+  <!-- ─── Onboarding ─── -->
+  <g class="float-box" style="animation-delay:0s">
+    <rect x="30" y="308" width="116" height="148" rx="12" fill="#1e1e2e" stroke="#a78bfa50" stroke-width="1.5" filter="url(#shadow)"/>
+    <text x="88" y="332" text-anchor="middle" fill="#a78bfa" font-size="11" font-weight="700">🚀 Onboarding</text>
+    <text x="88" y="346" text-anchor="middle" fill="#64748b" font-size="8">新用户引导</text>
+    <line x1="42" y1="352" x2="134" y2="352" stroke="#a78bfa20" stroke-width="1"/>
+    <text x="46" y="366" fill="#94a3b8" font-size="7.5">Step 1 设置昵称</text>
+    <text x="46" y="380" fill="#94a3b8" font-size="7.5">Step 2 命名 AI</text>
+    <text x="46" y="394" fill="#94a3b8" font-size="7.5">Step 3 选择表情</text>
+    <line x1="42" y1="401" x2="134" y2="401" stroke="#a78bfa20" stroke-width="1"/>
+    <text x="46" y="415" fill="#64748b" font-size="7" font-style="italic">LLM 提取字段</text>
+    <text x="46" y="428" fill="#64748b" font-size="7" font-style="italic">stage 0→1→2→3</text>
+    <text x="46" y="444" fill="#64748b" font-size="7" font-style="italic">更新 User 模型</text>
+  </g>
+
+  <!-- ─── Finance ─── -->
+  <g class="float-box" style="animation-delay:.3s">
+    <rect x="160" y="308" width="176" height="148" rx="12" fill="#1e1e2e" stroke="#34d39950" stroke-width="1.5" filter="url(#shadow)"/>
+    <text x="248" y="332" text-anchor="middle" fill="#34d399" font-size="11" font-weight="700">💰 Finance · 智能记账</text>
+    <text x="248" y="346" text-anchor="middle" fill="#64748b" font-size="8">finance_node()</text>
+    <line x1="172" y1="352" x2="324" y2="352" stroke="#34d39920" stroke-width="1"/>
+    <text x="176" y="366" fill="#94a3b8" font-size="7.5">LLM 解析金额/分类/摘要</text>
+    <text x="176" y="380" fill="#94a3b8" font-size="7.5">小票 OCR (Vision Model)</text>
+    <text x="176" y="394" fill="#94a3b8" font-size="7.5">增 / 删 / 改 / 查账单</text>
+    <line x1="172" y1="401" x2="324" y2="401" stroke="#34d39920" stroke-width="1"/>
+    <text x="176" y="415" fill="#64748b" font-size="7" font-style="italic">Text2SQL 统计查询</text>
+    <text x="176" y="428" fill="#64748b" font-size="7" font-style="italic">pending_ledger 多笔确认</text>
+    <text x="176" y="441" fill="#64748b" font-size="7" font-style="italic">analyze_receipt()</text>
+  </g>
+
+  <!-- ─── Secretary ─── -->
+  <g class="float-box" style="animation-delay:.6s">
+    <rect x="350" y="308" width="148" height="148" rx="12" fill="#1e1e2e" stroke="#60a5fa50" stroke-width="1.5" filter="url(#shadow)"/>
+    <text x="424" y="332" text-anchor="middle" fill="#60a5fa" font-size="11" font-weight="700">📅 Secretary</text>
+    <text x="424" y="346" text-anchor="middle" fill="#64748b" font-size="8">secretary_node()</text>
+    <line x1="362" y1="352" x2="486" y2="352" stroke="#60a5fa20" stroke-width="1"/>
+    <text x="366" y="366" fill="#94a3b8" font-size="7.5">自然语言→时间解析</text>
+    <text x="366" y="380" fill="#94a3b8" font-size="7.5">APScheduler 持久化</text>
+    <text x="366" y="394" fill="#94a3b8" font-size="7.5">日历查询 (日/周/月)</text>
+    <line x1="362" y1="401" x2="486" y2="401" stroke="#60a5fa20" stroke-width="1"/>
+    <text x="366" y="415" fill="#64748b" font-size="7" font-style="italic">send_reminder_job()</text>
+    <text x="366" y="428" fill="#64748b" font-size="7" font-style="italic">LLM 结构化提取</text>
+    <text x="366" y="441" fill="#64748b" font-size="7" font-style="italic">账单+日程日历聚合</text>
+  </g>
+
+  <!-- ─── Writer ─── -->
+  <g class="float-box" style="animation-delay:.9s">
+    <rect x="512" y="308" width="148" height="148" rx="12" fill="#1e1e2e" stroke="#f472b650" stroke-width="1.5" filter="url(#shadow)"/>
+    <text x="586" y="332" text-anchor="middle" fill="#f472b6" font-size="11" font-weight="700">✍️ Writer</text>
+    <text x="586" y="346" text-anchor="middle" fill="#64748b" font-size="8">writer_node()</text>
+    <line x1="524" y1="352" x2="648" y2="352" stroke="#f472b620" stroke-width="1"/>
+    <text x="528" y="366" fill="#94a3b8" font-size="7.5">翻译 / 润色 / 写作</text>
+    <text x="528" y="380" fill="#94a3b8" font-size="7.5">动态加载用户技能</text>
+    <text x="528" y="394" fill="#94a3b8" font-size="7.5">技能文档注入 Prompt</text>
+    <line x1="524" y1="401" x2="648" y2="401" stroke="#f472b620" stroke-width="1"/>
+    <text x="528" y="415" fill="#64748b" font-size="7" font-style="italic">load_skills() → LLM</text>
+    <text x="528" y="428" fill="#64748b" font-size="7" font-style="italic">unknown → writer</text>
+    <text x="528" y="441" fill="#64748b" font-size="7" font-style="italic">通用问答兜底路由</text>
+  </g>
+
+  <!-- ─── Skill Manager ─── -->
+  <g class="float-box" style="animation-delay:1.2s">
+    <rect x="674" y="308" width="136" height="148" rx="12" fill="#1e1e2e" stroke="#fb923c50" stroke-width="1.5" filter="url(#shadow)"/>
+    <text x="742" y="332" text-anchor="middle" fill="#fb923c" font-size="11" font-weight="700">🎯 Skill Mgr</text>
+    <text x="742" y="346" text-anchor="middle" fill="#64748b" font-size="8">skill_manager_node()</text>
+    <line x1="686" y1="352" x2="798" y2="352" stroke="#fb923c20" stroke-width="1"/>
+    <text x="690" y="366" fill="#94a3b8" font-size="7.5">创建/更新技能草稿</text>
+    <text x="690" y="380" fill="#94a3b8" font-size="7.5">发布 / 停用技能</text>
+    <text x="690" y="394" fill="#94a3b8" font-size="7.5">查看技能版本内容</text>
+    <line x1="686" y1="401" x2="798" y2="401" stroke="#fb923c20" stroke-width="1"/>
+    <text x="690" y="415" fill="#64748b" font-size="7" font-style="italic">parse_skill_intent()</text>
+    <text x="690" y="428" fill="#64748b" font-size="7" font-style="italic">render_skill()</text>
+    <text x="690" y="441" fill="#64748b" font-size="7" font-style="italic">SKILL.md 模板</text>
+  </g>
+
+  <!-- ─── Guide ─── -->
+  <g class="float-box" style="animation-delay:1.5s">
+    <rect x="824" y="308" width="106" height="148" rx="12" fill="#1e1e2e" stroke="#22d3ee50" stroke-width="1.5" filter="url(#shadow)"/>
+    <text x="877" y="332" text-anchor="middle" fill="#22d3ee" font-size="11" font-weight="700">📖 Guide</text>
+    <text x="877" y="346" text-anchor="middle" fill="#64748b" font-size="8">guide_node()</text>
+    <line x1="836" y1="352" x2="918" y2="352" stroke="#22d3ee20" stroke-width="1"/>
+    <text x="840" y="366" fill="#94a3b8" font-size="7.5">使用手册生成</text>
+    <text x="840" y="380" fill="#94a3b8" font-size="7.5">命令帮助说明</text>
+    <text x="840" y="394" fill="#94a3b8" font-size="7.5">平台差异提示</text>
+    <line x1="836" y1="401" x2="918" y2="401" stroke="#22d3ee20" stroke-width="1"/>
+    <text x="840" y="415" fill="#64748b" font-size="7" font-style="italic">_build_manual()</text>
+    <text x="840" y="428" fill="#64748b" font-size="7" font-style="italic">/help 兜底</text>
+    <text x="840" y="441" fill="#64748b" font-size="7" font-style="italic">能力概览说明</text>
+  </g>
+
+  <!-- ═══════ Layer 5: Fixed Edges → END ═══════ -->
+  <!-- Worker → END flow lines -->
+  <line x1="88" y1="456" x2="88" y2="498" stroke="#a78bfa40" stroke-width="1" class="flow-line"/>
+  <line x1="248" y1="456" x2="248" y2="498" stroke="#34d39940" stroke-width="1" class="flow-line"/>
+  <line x1="424" y1="456" x2="424" y2="498" stroke="#60a5fa40" stroke-width="1" class="flow-line"/>
+  <line x1="586" y1="456" x2="586" y2="498" stroke="#f472b640" stroke-width="1" class="flow-line"/>
+  <line x1="742" y1="456" x2="742" y2="498" stroke="#fb923c40" stroke-width="1" class="flow-line"/>
+  <line x1="877" y1="456" x2="877" y2="498" stroke="#22d3ee40" stroke-width="1" class="flow-line"/>
+
+  <!-- 汇聚横线 -->
+  <line x1="88" y1="498" x2="877" y2="498" stroke="#64748b30" stroke-width="1.5"/>
+  <text x="480" y="494" text-anchor="middle" fill="#64748b" font-size="8">add_edge("node", END)</text>
+
+  <!-- 汇聚 → END -->
+  <line x1="480" y1="498" x2="480" y2="526" stroke="#64748b50" stroke-width="1.5" class="flow-line"/>
+
+  <!-- ═══════ END Node ═══════ -->
+  <g filter="url(#glow)">
+    <rect x="410" y="524" width="140" height="40" rx="20" fill="#1e1e2e" stroke="url(#red)" stroke-width="2"/>
+    <text x="480" y="549" text-anchor="middle" fill="#f87171" font-size="13" font-weight="700">🏁  END</text>
+  </g>
+  <circle cx="480" cy="544" r="2.5" fill="#f87171" class="pulse-node"/>
+
+  <!-- END → responses -->
+  <line x1="480" y1="564" x2="480" y2="590" stroke="#f8717140" stroke-width="1" class="flow-line"/>
+  <text x="480" y="604" text-anchor="middle" fill="#94a3b8" font-size="10">responses: List[str] → UnifiedSender</text>
+
+  <!-- ═══════ Bottom: GraphState & Legend ═══════ -->
+
+  <!-- GraphState 面板 -->
+  <rect x="60" y="622" width="260" height="58" rx="12" fill="#1e1e2e" stroke="#818cf830" stroke-width="1" filter="url(#shadow)"/>
+  <text x="80" y="643" fill="#818cf8" font-size="10" font-weight="600">📦 GraphState</text>
+  <text x="80" y="658" fill="#64748b" font-size="8" font-family="monospace">user_id · conversation_id · user_setup_stage</text>
+  <text x="80" y="672" fill="#64748b" font-size="8" font-family="monospace">message · intent · responses · extra</text>
+
+  <!-- 图例面板 -->
+  <rect x="640" y="622" width="260" height="58" rx="12" fill="#1e1e2e" stroke="#818cf830" stroke-width="1" filter="url(#shadow)"/>
+  <text x="660" y="643" fill="#818cf8" font-size="10" font-weight="600">📐 图例</text>
+  <line x1="700" y1="642" x2="730" y2="642" stroke="#34d399" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="738" y="645" fill="#94a3b8" font-size="8">条件边 (conditional_edges)</text>
+  <line x1="700" y1="658" x2="730" y2="658" stroke="#64748b" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="738" y="661" fill="#94a3b8" font-size="8">固定边 (add_edge → END)</text>
+  <circle cx="708" cy="674" r="2.5" fill="#818cf8" class="pulse-node"/>
+  <text x="738" y="677" fill="#94a3b8" font-size="8">脉冲节点 = 核心决策点</text>
+
+</svg>

@@ -25,6 +25,9 @@ HALF_PATTERN = re.compile(r"(\d{1,2})\s*点半")
 CALENDAR_CMD_PATTERN = re.compile(r"^/calendar(?:\s+(.+))?$", re.IGNORECASE)
 CALENDAR_HINT_PATTERN = re.compile(r"(日历|日程|行程|安排)")
 DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
+TIME_QUERY_PATTERN = re.compile(
+    r"(现在|此刻|当前).*(几点|时间|日期|几号|星期)|^(几点|时间|日期|今天几号|今天星期几)$"
+)
 
 
 def _parse_relative_time(text: str) -> datetime | None:
@@ -242,18 +245,6 @@ async def secretary_node(state: GraphState) -> GraphState:
         return {**state, "responses": ["未找到用户信息。"]}
     content = (message.content or "").strip()
 
-    # Command fallback: deterministic calendar command.
-    calendar_window = _resolve_calendar_window(content)
-    if CALENDAR_CMD_PATTERN.match(content.strip()):
-        if not calendar_window:
-            return {
-                **state,
-                "responses": ["日历命令格式：`/calendar today|week|month|YYYY-MM-DD`。"],
-            }
-        start_at, end_at, label = calendar_window
-        response = await _render_calendar_text(session, user.id, start_at, end_at, label)
-        return {**state, "responses": [response]}
-
     parsed: dict = {}
     try:
         parsed = await _understand_secretary_message(content)
@@ -307,6 +298,31 @@ async def secretary_node(state: GraphState) -> GraphState:
                 "responses": [f"好的，提醒已设置：{trigger_time.strftime('%Y-%m-%d %H:%M')}。"],
             }
 
+    # Non-reminder factual query handled here to avoid poor reminder fallback UX.
+    if TIME_QUERY_PATTERN.search(content):
+        settings = get_settings()
+        now_local = datetime.now(ZoneInfo(settings.timezone))
+        weekday_map = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+        weekday_text = weekday_map[now_local.weekday()]
+        return {
+            **state,
+            "responses": [
+                f"现在时间：{now_local.strftime('%Y-%m-%d %H:%M')}（{weekday_text}，时区 {settings.timezone}）。"
+            ],
+        }
+
+    # Deterministic command fallback when LLM is uncertain.
+    calendar_window = _resolve_calendar_window(content)
+    if CALENDAR_CMD_PATTERN.match(content.strip()):
+        if not calendar_window:
+            return {
+                **state,
+                "responses": ["日历命令格式：`/calendar today|week|month|YYYY-MM-DD`。"],
+            }
+        start_at, end_at, label = calendar_window
+        response = await _render_calendar_text(session, user.id, start_at, end_at, label)
+        return {**state, "responses": [response]}
+
     # Non-command fallback when LLM is uncertain.
     if CALENDAR_HINT_PATTERN.search(content):
         fallback_window = _resolve_calendar_window(content)
@@ -320,7 +336,7 @@ async def secretary_node(state: GraphState) -> GraphState:
         return {
             **state,
             "responses": [
-                "请告诉我具体提醒时间，例如：10分钟后提醒我喝水。也可用 `/calendar week` 查看账单和日程日历。"
+                "我这边主要负责提醒和日历。可直接说：`明天中午12点提醒我开会`，或 `看下本周日程和账单`。"
             ],
         }
 

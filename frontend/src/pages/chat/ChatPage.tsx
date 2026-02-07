@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiRequest, streamSsePost } from "../../lib/api";
@@ -41,6 +41,8 @@ export function ChatPage() {
   const [streamingReply, setStreamingReply] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const streamBufferRef = useRef("");
+  const streamFlushTimerRef = useRef<number | null>(null);
 
   const { data: profile } = useQuery<Profile>({
     queryKey: ["profile"],
@@ -60,17 +62,57 @@ export function ChatPage() {
     queryFn: () => apiRequest("/api/stats/ledger", {}, token),
   });
 
-  const sendMutation = useMutation({
+  const sendMutation = useMutation<
+    void,
+    Error,
+    { content: string; imageUrls: string[] },
+    { previousHistory: ChatMessage[] }
+  >({
+    onMutate: async (payload) => {
+      await queryClient.cancelQueries({ queryKey: ["history"] });
+      const previousHistory = queryClient.getQueryData<ChatMessage[]>(["history"]) || [];
+      const optimisticMessage: ChatMessage = {
+        role: "user",
+        content: payload.content,
+        image_urls: payload.imageUrls,
+        created_at: new Date().toISOString(),
+      };
+      queryClient.setQueryData<ChatMessage[]>(["history"], [...previousHistory, optimisticMessage]);
+      return { previousHistory };
+    },
     mutationFn: async (payload: { content: string; imageUrls: string[] }) => {
+      streamBufferRef.current = "";
+      if (streamFlushTimerRef.current !== null) {
+        window.clearTimeout(streamFlushTimerRef.current);
+        streamFlushTimerRef.current = null;
+      }
       setStreamingReply("");
       await streamSsePost(
         "/api/chat/send?stream=true",
         { content: payload.content, image_urls: payload.imageUrls },
         token,
-        (chunk) => setStreamingReply((prev) => prev + chunk)
+        (chunk) => {
+          streamBufferRef.current += chunk;
+          if (streamFlushTimerRef.current === null) {
+            streamFlushTimerRef.current = window.setTimeout(() => {
+              streamFlushTimerRef.current = null;
+              setStreamingReply(streamBufferRef.current);
+            }, 40);
+          }
+        }
       );
+      if (streamFlushTimerRef.current !== null) {
+        window.clearTimeout(streamFlushTimerRef.current);
+        streamFlushTimerRef.current = null;
+      }
+      setStreamingReply(streamBufferRef.current);
     },
     onSuccess: async () => {
+      streamBufferRef.current = "";
+      if (streamFlushTimerRef.current !== null) {
+        window.clearTimeout(streamFlushTimerRef.current);
+        streamFlushTimerRef.current = null;
+      }
       setStreamingReply("");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["conversations"] }),
@@ -79,7 +121,17 @@ export function ChatPage() {
         queryClient.invalidateQueries({ queryKey: ["stats"] }),
       ]);
     },
-    onError: () => setStreamingReply(""),
+    onError: (_error, _payload, context) => {
+      if (context?.previousHistory) {
+        queryClient.setQueryData<ChatMessage[]>(["history"], context.previousHistory);
+      }
+      streamBufferRef.current = "";
+      if (streamFlushTimerRef.current !== null) {
+        window.clearTimeout(streamFlushTimerRef.current);
+        streamFlushTimerRef.current = null;
+      }
+      setStreamingReply("");
+    },
   });
 
   async function handleSend(content: string, imageUrls: string[]) {

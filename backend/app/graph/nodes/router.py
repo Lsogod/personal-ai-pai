@@ -5,6 +5,7 @@ import json
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.graph.state import GraphState
+from app.services.ledger_pending import has_pending_ledger
 from app.services.llm import get_llm
 
 
@@ -24,7 +25,11 @@ def _extract_json_object(text: str) -> dict:
         return {}
 
 
-async def _classify_intent_with_llm(content: str) -> str:
+async def _classify_intent_with_llm(
+    content: str,
+    has_image: bool,
+    has_pending_ledger: bool,
+) -> str:
     llm = get_llm()
     system = SystemMessage(
         content=(
@@ -33,12 +38,21 @@ async def _classify_intent_with_llm(content: str) -> str:
             "当用户在管理技能（新增/创建/更新/发布/停用/列出技能）时，intent=skill_manager。"
             "当用户记账、消费统计、小票识别、账单增删改查时，intent=finance。"
             "当用户提醒、日程、定时任务、日历查询时，intent=secretary。"
-            "当用户在询问怎么用、教程、帮助、命令说明、功能介绍时，intent=guide。"
+            "当用户在询问怎么用、教程、帮助、命令说明、手册时，intent=guide。"
+            "当用户询问“你能做什么/有哪些功能”时，也归类为 guide（但应是简洁能力说明，不是命令手册）。"
             "写作/翻译/润色/普通问答时，intent=writer。"
             "若不确定，intent=unknown。"
+            "如果 has_pending_ledger=true，优先判断为 finance，除非用户明确在取消该流程。"
+            "如果 has_image=true，优先判断为 finance 或 writer（取决于用户是否在做账单/票据/支付分析）。"
         )
     )
-    human = HumanMessage(content=content)
+    human = HumanMessage(
+        content=(
+            f"has_image={str(has_image).lower()}\n"
+            f"has_pending_ledger={str(has_pending_ledger).lower()}\n"
+            f"user_message={content}"
+        )
+    )
     response = await llm.ainvoke([system, human])
     data = _extract_json_object(str(response.content))
     intent = str(data.get("intent") or "unknown").strip().lower()
@@ -48,17 +62,28 @@ async def _classify_intent_with_llm(content: str) -> str:
 async def router_node(state: GraphState) -> GraphState:
     if state.get("user_setup_stage", 0) < 3:
         return state
+    user_id = int(state.get("user_id") or 0)
+    conversation_id = int(state.get("conversation_id") or 0)
     message = state["message"]
     content = (message.content or "").strip()
     if not content and not message.image_urls:
         return {**state, "intent": "writer"}
-    if message.image_urls:
-        # Image receipts should still strongly prefer finance.
-        return {**state, "intent": "finance"}
+    has_pending = False
+    if user_id > 0 and conversation_id > 0:
+        has_pending = await has_pending_ledger(user_id, conversation_id)
     try:
-        intent = await _classify_intent_with_llm(content)
+        intent = await _classify_intent_with_llm(
+            content=content,
+            has_image=bool(message.image_urls),
+            has_pending_ledger=has_pending,
+        )
     except Exception:
         intent = "unknown"
+    if intent != "unknown":
+        return {**state, "intent": intent}
+    # Rule fallback when LLM is uncertain/unavailable.
+    if message.image_urls or has_pending:
+        return {**state, "intent": "finance"}
     return {**state, "intent": intent}
 
 def route_intent(state: GraphState) -> str:

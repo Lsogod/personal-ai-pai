@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -37,6 +38,7 @@ from app.services.runtime_context import (
 
 _sender = UnifiedSender()
 _scheduler = get_scheduler()
+logger = logging.getLogger(__name__)
 
 
 def _format_history_lines(current_id: int | None, rows: list) -> str:
@@ -192,6 +194,7 @@ async def handle_message(
 
     state = {
         "user_id": user_id,
+        "conversation_id": conversation.id,
         "user_setup_stage": user_setup_stage,
         "message": message,
         "responses": [],
@@ -239,15 +242,19 @@ async def handle_message(
         scheduler_token = set_scheduler(_scheduler)
         sender_token = set_sender(_sender)
         try:
-            result = await graph.ainvoke(
-                state,
-                config={"configurable": {"thread_id": f"{user_uuid}:{conversation.id}"}},
-            )
+            try:
+                result = await graph.ainvoke(
+                    state,
+                    config={"configurable": {"thread_id": f"{user_uuid}:{conversation.id}"}},
+                )
+                responses = result.get("responses") or []
+            except Exception as exc:
+                logger.exception("graph invoke failed: platform=%s user_id=%s", platform, user_id)
+                responses = ["我处理这条消息时失败了。请重试，或先用文字描述金额/分类/事项。"]
         finally:
             reset_sender(sender_token)
             reset_scheduler(scheduler_token)
             reset_session(session_token)
-        responses = result.get("responses") or []
 
     for text in responses:
         await _sender.send_text(reply_platform, reply_platform_id, text)

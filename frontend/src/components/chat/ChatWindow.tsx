@@ -40,17 +40,37 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [history, streamingReply]);
+  }, [history]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceToBottom > 160) return;
+    const frame = requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [streamingReply]);
 
   async function handleSubmit(event?: FormEvent) {
     event?.preventDefault();
     const trimmed = content.trim();
     const images = imageUrl.trim() ? [imageUrl.trim()] : [];
     if (!trimmed && images.length === 0) return;
-    await onSend(trimmed, images);
+
+    // Clear input immediately for responsive UX; restore if request fails.
     setContent("");
     setImageUrl("");
     setShowImageInput(false);
+
+    try {
+      await onSend(trimmed, images);
+    } catch {
+      setContent(trimmed);
+      setImageUrl(images[0] || "");
+      setShowImageInput(images.length > 0);
+    }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {

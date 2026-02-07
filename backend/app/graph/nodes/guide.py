@@ -1,32 +1,40 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from app.graph.state import GraphState
+from app.models.user import User
+from app.services.llm import get_llm
+from app.services.runtime_context import get_session
+from app.services.skills import list_skills_with_source
 
 
-def _build_manual(platform: str) -> str:
+GUIDE_DOC_PATH = Path(__file__).resolve().parents[2] / "knowledge" / "AGENT_GUIDE.md"
+
+
+def _load_guide_doc() -> str:
+    try:
+        return GUIDE_DOC_PATH.read_text(encoding="utf-8").strip()
+    except Exception:
+        return (
+            "PAI 使用说明缺失。你可以直接说需求：记账、提醒、日历、技能管理。"
+            "若要命令示例，可输入 /help。"
+        )
+
+
+def _build_skill_context(skills: list[dict]) -> str:
+    if not skills:
+        return "无技能信息。"
     lines: list[str] = []
-    lines.append("PAI 使用手册（快速版）")
-    lines.append("")
-    lines.append("1. 直接自然语言即可，不必记命令。")
-    lines.append("2. 常见能力：记账、改账、删账、提醒、查看日历、创建/管理技能。")
-    lines.append("")
-    lines.append("常用表达示例：")
-    lines.append("- 记账：`今天晚饭30元`")
-    lines.append("- 改账：`把账单#12改成28元 分类餐饮`")
-    lines.append("- 删账：`删除账单#12` / `删除今天的所有订单`")
-    lines.append("- 提醒：`明天中午12点提醒我开会`")
-    lines.append("- 日历：`看下本周日程和账单`")
-    lines.append("- 新建技能：`帮我新增一个角色设定技能`")
-    lines.append("")
-    lines.append("命令兜底（可选）：")
-    lines.append("- 会话：`/new` ` /history` ` /switch <id>` ` /rename <新标题>` ` /rename <id> <新标题>` ` /delete [id]`")
-    lines.append("- 账单：`/ledger list` ` /ledger update <id> <金额> [分类] [摘要]` ` /ledger delete <id|latest>`")
-    lines.append("- 日历：`/calendar today|week|month|YYYY-MM-DD`")
-    lines.append("- 技能：`/skill list` ` /skill show <source:slug>` ` /skill create ...`")
-    lines.append("- 帮助：`/help`")
-    if platform == "web":
-        lines.append("")
-        lines.append("Web 端：顶部可切换 `聊天 / 技能 / 日历` 页面。")
+    for item in skills:
+        source = str(item.get("source") or "")
+        name = str(item.get("name") or item.get("slug") or "")
+        slug = str(item.get("slug") or "")
+        status = str(item.get("status") or "")
+        description = str(item.get("description") or "")
+        lines.append(f"- [{source}] {name} ({slug}) | {status} | {description}")
     return "\n".join(lines)
 
 
@@ -34,9 +42,54 @@ async def guide_node(state: GraphState) -> GraphState:
     message = state["message"]
     content = (message.content or "").strip()
     platform = (message.platform or "").strip().lower()
-    manual = _build_manual(platform)
 
-    if "记账" in content and "改" in content:
-        extra = "你也可以直接说“我刚那笔记错了，改成28元”，系统会尽量基于上下文理解。"
-        return {**state, "responses": [f"{manual}\n\n{extra}"]}
-    return {**state, "responses": [manual]}
+    session = get_session()
+    user = await session.get(User, state["user_id"])
+    if not user:
+        return {**state, "responses": ["未找到用户信息。"]}
+
+    skills = await list_skills_with_source(session, user.id)
+    skill_context = _build_skill_context(skills)
+    guide_doc = _load_guide_doc()
+
+    llm = get_llm()
+    system = SystemMessage(
+        content=(
+            "你是 PAI 的帮助与能力说明助手。"
+            "你必须基于提供的《平台说明文档》与《当前用户技能上下文》回答。"
+            "不要编造文档外功能。"
+            "涉及命令时，只能使用以下命令族："
+            "/new /history /switch /rename /delete /ledger(list|update|delete) "
+            "/calendar(today|week|month|YYYY-MM-DD) "
+            "/skill(list|show|create|publish|disable) /help。"
+            "严禁输出不存在的命令（例如 /skill use、/ledger --limit）。"
+            "按用户问题自动决定回答粒度："
+            "1) 若用户问“怎么用/帮助/命令/教程/手册”，给结构化使用说明；"
+            "2) 若用户问“你能做什么/有哪些功能”，给简洁能力清单；"
+            "3) 其它导向类问题，给短引导并给1-2个可执行示例。"
+            "避免整段照抄；请按问题选取相关内容。"
+            f"当前平台: {platform or 'unknown'}。"
+        )
+    )
+    human = HumanMessage(
+        content=(
+            f"《平台说明文档》:\n{guide_doc}\n\n"
+            f"《当前用户技能上下文》:\n{skill_context}\n\n"
+            f"用户提问:\n{content}"
+        )
+    )
+
+    try:
+        response = await llm.ainvoke([system, human])
+        text = str(response.content).strip()
+        if text:
+            return {**state, "responses": [text]}
+    except Exception:
+        pass
+
+    return {
+        **state,
+        "responses": [
+            "你可以直接说目标，例如：`今天晚饭30元`、`明天中午12点提醒我开会`、`看下本周日程和账单`。"
+        ],
+    }

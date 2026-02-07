@@ -95,6 +95,34 @@ async def _extract_ai_profile_with_llm(raw: str) -> tuple[str, str]:
     return ai_name, emoji
 
 
+async def _understand_binding_answer(raw: str) -> str:
+    text = (raw or "").strip()
+    if not text:
+        return "unknown"
+    llm = get_llm()
+    system = SystemMessage(
+        content=(
+            "你是绑定引导意图解析器。只输出 JSON。"
+            "字段: decision。"
+            "decision 仅可为: has_account, no_account, continue, unknown。"
+            "当用户表示在其他客户端已有账号时，decision=has_account。"
+            "当用户表示没有其他账号时，decision=no_account。"
+            "当用户表示继续下一步（如“继续”）时，decision=continue。"
+            "无法确定时 decision=unknown。"
+        )
+    )
+    human = HumanMessage(content=text)
+    try:
+        response = await llm.ainvoke([system, human])
+        data = _parse_json_object(str(response.content))
+        decision = str(data.get("decision") or "").strip().lower()
+        if decision in {"has_account", "no_account", "continue", "unknown"}:
+            return decision
+    except Exception:
+        pass
+    return "unknown"
+
+
 async def onboarding_node(state: GraphState) -> GraphState:
     message = state["message"]
     session = get_session()
@@ -116,9 +144,25 @@ async def onboarding_node(state: GraphState) -> GraphState:
 
     if user.setup_stage == SetupStage.NEW and int(user.binding_stage or 0) == 1:
         answer = (message.content or "").strip().lower()
+        decision = await _understand_binding_answer(answer)
         yes_tokens = ("有", "有的", "有账号", "yes", "y")
         no_tokens = ("没有", "没", "无", "no", "n")
-        if any(token in answer for token in no_tokens):
+        continue_tokens = ("继续", "continue", "go on", "next")
+        if decision in {"no_account", "continue"}:
+            user.binding_stage = 2
+            session.add(user)
+            await session.commit()
+        elif decision == "has_account":
+            user.binding_stage = 2
+            session.add(user)
+            await session.commit()
+            return {
+                **state,
+                "responses": [
+                    "好的。你可以先在已有账号所在客户端发送 `/bind new` 获取6位绑定码，再回到这里发送 `/bind <code>`。完成后回复“继续”。"
+                ],
+            }
+        elif any(token in answer for token in no_tokens) or any(token in answer for token in continue_tokens):
             user.binding_stage = 2
             session.add(user)
             await session.commit()
