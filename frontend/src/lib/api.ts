@@ -35,6 +35,13 @@ export interface ConversationItem {
   active: boolean;
 }
 
+export interface ConversationDeleteResponse {
+  ok: boolean;
+  deleted_id: number;
+  deleted_title: string;
+  active_conversation: ConversationItem;
+}
+
 export interface LedgerItem {
   id: number;
   amount: number;
@@ -74,6 +81,24 @@ export interface CalendarResponse {
   start_date: string;
   end_date: string;
   days: CalendarDay[];
+}
+
+export interface IdentityItem {
+  platform: string;
+  platform_id: string;
+}
+
+export interface BindCodeCreateResponse {
+  code: string;
+  expires_at: string;
+  ttl_minutes: number;
+}
+
+export interface BindCodeConsumeResponse {
+  ok: boolean;
+  message: string;
+  canonical_user_id?: number | null;
+  access_token?: string | null;
 }
 
 export async function apiRequest(
@@ -221,6 +246,29 @@ export function switchConversation(conversationId: number, token: string | null 
   ) as Promise<ConversationItem>;
 }
 
+export function renameConversation(
+  conversationId: number,
+  title: string,
+  token: string | null | undefined
+) {
+  return apiRequest(
+    `/api/conversations/${conversationId}`,
+    { method: "PATCH", body: JSON.stringify({ title }) },
+    token
+  ) as Promise<ConversationItem>;
+}
+
+export function deleteConversation(
+  conversationId: number,
+  token: string | null | undefined
+) {
+  return apiRequest(
+    `/api/conversations/${conversationId}`,
+    { method: "DELETE" },
+    token
+  ) as Promise<ConversationDeleteResponse>;
+}
+
 export function fetchLedgers(
   token: string | null | undefined,
   limit = 30
@@ -261,4 +309,30 @@ export function fetchCalendar(
     {},
     token
   ) as Promise<CalendarResponse>;
+}
+
+export function fetchIdentities(token: string | null | undefined) {
+  return apiRequest("/api/user/identities", {}, token) as Promise<IdentityItem[]>;
+}
+
+export function createBindCode(
+  token: string | null | undefined,
+  ttlMinutes = 10
+) {
+  return apiRequest(
+    "/api/user/bind-code",
+    { method: "POST", body: JSON.stringify({ ttl_minutes: ttlMinutes }) },
+    token
+  ) as Promise<BindCodeCreateResponse>;
+}
+
+export function consumeBindCode(
+  token: string | null | undefined,
+  code: string
+) {
+  return apiRequest(
+    "/api/user/bind-consume",
+    { method: "POST", body: JSON.stringify({ code }) },
+    token
+  ) as Promise<BindCodeConsumeResponse>;
 }

@@ -9,6 +9,7 @@ import { ConversationSidebar } from "../../components/chat/ConversationSidebar";
 import { LedgerStatsCard } from "../../components/chat/LedgerStatsCard";
 import { LedgerListCard } from "../../components/chat/LedgerListCard";
 import { ProfileCard } from "../../components/chat/ProfileCard";
+import { BindingCard } from "../../components/chat/BindingCard";
 import { SkillsPanel } from "../../components/skills/SkillsPanel";
 import { CalendarPanel } from "../../components/chat/CalendarPanel";
 
@@ -146,6 +147,7 @@ export function ChatPage() {
               <LedgerStatsCard stats={stats} />
               <LedgerListCard token={token} />
               <ProfileCard profile={profile} />
+              <BindingCard token={token} />
             </aside>
           </main>
         ) : activeView === "skills" ? (

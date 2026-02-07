@@ -15,6 +15,12 @@ from app.models.message import Message
 from app.models.ledger import Ledger
 from app.models.schedule import Schedule
 from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse
+from app.schemas.binding import (
+    BindCodeConsumeRequest,
+    BindCodeConsumeResponse,
+    BindCodeCreateRequest,
+    BindCodeCreateResponse,
+)
 from app.schemas.calendar import (
     CalendarDayResponse,
     CalendarLedgerItem,
@@ -23,6 +29,7 @@ from app.schemas.calendar import (
 )
 from app.schemas.chat import ChatSendRequest, ChatSendResponse, ProfileResponse
 from app.schemas.conversation import ConversationCreateRequest, ConversationResponse
+from app.schemas.conversation import ConversationDeleteResponse, ConversationUpdateRequest
 from app.schemas.ledger import LedgerDeleteResponse, LedgerItemResponse, LedgerUpdateRequest
 from app.schemas.skill import (
     SkillDetailResponse,
@@ -38,12 +45,19 @@ from app.core.security import (
     verify_password,
 )
 from app.services.audit import log_event
-from app.services.binding import ensure_identity, list_identities
+from app.services.binding import (
+    consume_bind_code,
+    create_bind_code_record,
+    ensure_identity,
+    list_identities,
+)
 from app.services.message_handler import handle_message
 from app.services.conversations import (
     create_new_conversation,
+    delete_conversation,
     ensure_active_conversation,
     list_conversations,
+    rename_conversation,
     switch_conversation,
 )
 from app.services.skills import (
@@ -77,7 +91,7 @@ def _parse_date(value: str | None) -> date | None:
 @router.post("/auth/register", response_model=TokenResponse)
 async def register(payload: RegisterRequest, session: AsyncSession = Depends(get_session)):
     result = await session.execute(
-        select(User).where(User.platform == "web", User.email == payload.email)
+        select(User).where(User.email == payload.email).limit(1)
     )
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="email already exists")
@@ -101,7 +115,7 @@ async def register(payload: RegisterRequest, session: AsyncSession = Depends(get
 @router.post("/auth/login", response_model=TokenResponse)
 async def login(payload: LoginRequest, session: AsyncSession = Depends(get_session)):
     result = await session.execute(
-        select(User).where(User.platform == "web", User.email == payload.email)
+        select(User).where(User.email == payload.email).order_by(User.id.desc()).limit(1)
     )
     user = result.scalar_one_or_none()
     if not user or not user.hashed_password:
@@ -135,6 +149,51 @@ async def user_identities(
 ):
     rows = await list_identities(session, user.id)
     return rows
+
+
+@router.post("/user/bind-code", response_model=BindCodeCreateResponse)
+async def user_bind_code_create(
+    payload: BindCodeCreateRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    bind = await create_bind_code_record(
+        session=session,
+        owner_user_id=user.id,
+        ttl_minutes=payload.ttl_minutes,
+    )
+    return BindCodeCreateResponse(
+        code=bind.code,
+        expires_at=bind.expires_at,
+        ttl_minutes=payload.ttl_minutes,
+    )
+
+
+@router.post("/user/bind-consume", response_model=BindCodeConsumeResponse)
+async def user_bind_code_consume(
+    payload: BindCodeConsumeRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    code = (payload.code or "").strip()
+    if not code.isdigit() or len(code) != 6:
+        raise HTTPException(status_code=400, detail="invalid bind code format")
+    ok, message, canonical_user_id = await consume_bind_code(
+        session=session,
+        code=code,
+        current_user_id=user.id,
+    )
+    if not ok:
+        return BindCodeConsumeResponse(ok=False, message=message, canonical_user_id=canonical_user_id)
+    new_token = None
+    if canonical_user_id and canonical_user_id != user.id:
+        new_token = create_access_token(canonical_user_id)
+    return BindCodeConsumeResponse(
+        ok=True,
+        message=message,
+        canonical_user_id=canonical_user_id,
+        access_token=new_token,
+    )
 
 
 @router.get("/chat/history")
@@ -253,6 +312,55 @@ async def conversations_switch(
     return _to_conversation_response(switched, switched.id)
 
 
+@router.patch("/conversations/{conversation_id}", response_model=ConversationResponse)
+async def conversations_rename(
+    conversation_id: int,
+    payload: ConversationUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    renamed = await rename_conversation(session, user, conversation_id, payload.title)
+    if not renamed:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    await log_event(
+        session,
+        action="conversation_renamed",
+        platform=user.platform,
+        user_id=user.id,
+        detail={"conversation_id": renamed.id, "title": renamed.title, "via": "api"},
+    )
+    return _to_conversation_response(renamed, user.active_conversation_id)
+
+
+@router.delete("/conversations/{conversation_id}", response_model=ConversationDeleteResponse)
+async def conversations_delete(
+    conversation_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    replacement, deleted_title = await delete_conversation(session, user, conversation_id)
+    if not replacement or not deleted_title:
+        raise HTTPException(status_code=404, detail="conversation not found")
+    await log_event(
+        session,
+        action="conversation_deleted",
+        platform=user.platform,
+        user_id=user.id,
+        detail={
+            "conversation_id": conversation_id,
+            "deleted_title": deleted_title,
+            "active_conversation_id": replacement.id,
+            "via": "api",
+        },
+    )
+    return ConversationDeleteResponse(
+        ok=True,
+        deleted_id=conversation_id,
+        deleted_title=deleted_title,
+        active_conversation=_to_conversation_response(replacement, replacement.id),
+    )
+
+
 async def _sse_stream(text: str):
     chunk_size = 12
     for i in range(0, len(text), chunk_size):
@@ -269,8 +377,10 @@ async def chat_send(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
+    web_platform_id = f"web:{user.id}"
+    await ensure_identity(session, user.id, "web", web_platform_id)
     normalized = {
-        "platform_id": user.platform_id,
+        "platform_id": web_platform_id,
         "content": payload.content,
         "image_urls": payload.image_urls,
         "message_id": f"web-{datetime.utcnow().timestamp()}",
@@ -318,11 +428,13 @@ async def chat_ws(websocket: WebSocket):
                 await websocket.close(code=4401)
                 return
             while True:
+                web_platform_id = f"web:{user.id}"
+                await ensure_identity(session, user.id, "web", web_platform_id)
                 payload = await websocket.receive_json()
                 content = str(payload.get("content") or "")
                 image_urls = payload.get("image_urls") or []
                 normalized = {
-                    "platform_id": user.platform_id,
+                    "platform_id": web_platform_id,
                     "content": content,
                     "image_urls": image_urls,
                     "message_id": f"web-ws-{datetime.utcnow().timestamp()}",

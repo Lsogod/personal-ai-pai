@@ -102,6 +102,44 @@ async def onboarding_node(state: GraphState) -> GraphState:
     if not user:
         return {**state, "responses": ["未找到用户信息。"]}
 
+    # Optional cross-platform account binding prompt for first-time users.
+    if user.setup_stage == SetupStage.NEW and int(user.binding_stage or 0) == 0:
+        user.binding_stage = 1
+        session.add(user)
+        await session.commit()
+        return {
+            **state,
+            "responses": [
+                "在其他客户端有账号吗？回复“有”或“没有”。有的话可稍后用 `/bind new` 与 `/bind <6位码>` 绑定数据。"
+            ],
+        }
+
+    if user.setup_stage == SetupStage.NEW and int(user.binding_stage or 0) == 1:
+        answer = (message.content or "").strip().lower()
+        yes_tokens = ("有", "有的", "有账号", "yes", "y")
+        no_tokens = ("没有", "没", "无", "no", "n")
+        if any(token in answer for token in no_tokens):
+            user.binding_stage = 2
+            session.add(user)
+            await session.commit()
+        elif any(token in answer for token in yes_tokens):
+            user.binding_stage = 2
+            session.add(user)
+            await session.commit()
+            return {
+                **state,
+                "responses": [
+                    "好的。你可以先在已有账号所在客户端发送 `/bind new` 获取6位绑定码，再回到这里发送 `/bind <code>`。完成后回复“继续”。"
+                ],
+            }
+        else:
+            return {
+                **state,
+                "responses": [
+                    "请回复“有”或“没有”。如果要立即绑定，也可直接使用 `/bind new` 或 `/bind <6位码>`。"
+                ],
+            }
+
     if user.setup_stage == SetupStage.NEW:
         user.setup_stage = SetupStage.USER_NAMED
         session.add(user)

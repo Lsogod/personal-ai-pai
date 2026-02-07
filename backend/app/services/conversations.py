@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.conversation import Conversation
@@ -101,6 +101,61 @@ async def switch_conversation(
     return conversation
 
 
+async def rename_conversation(
+    session: AsyncSession,
+    user: User,
+    conversation_id: int,
+    title: str,
+) -> Conversation | None:
+    conversation = await session.get(Conversation, conversation_id)
+    if not conversation or conversation.user_id != user.id:
+        return None
+    clean_title = _trim_text(title or "", 60) or "未命名会话"
+    conversation.title = clean_title
+    conversation.updated_at = datetime.utcnow()
+    session.add(conversation)
+    await session.commit()
+    await session.refresh(conversation)
+    return conversation
+
+
+async def delete_conversation(
+    session: AsyncSession,
+    user: User,
+    conversation_id: int,
+) -> tuple[Conversation | None, str | None]:
+    conversation = await session.get(Conversation, conversation_id)
+    if not conversation or conversation.user_id != user.id:
+        return None, None
+    deleted_title = conversation.title
+
+    await session.execute(
+        delete(Message).where(
+            Message.user_id == user.id,
+            Message.conversation_id == conversation.id,
+        )
+    )
+    await session.delete(conversation)
+    await session.flush()
+
+    result = await session.execute(
+        select(Conversation)
+        .where(Conversation.user_id == user.id)
+        .order_by(Conversation.last_message_at.desc(), Conversation.id.desc())
+        .limit(1)
+    )
+    replacement = result.scalar_one_or_none()
+    if not replacement:
+        replacement = Conversation(user_id=user.id, title="默认会话", summary="")
+        session.add(replacement)
+        await session.flush()
+    user.active_conversation_id = replacement.id
+    session.add(user)
+    await session.commit()
+    await session.refresh(replacement)
+    return replacement, deleted_title
+
+
 def apply_user_message_updates(conversation: Conversation, content: str) -> None:
     conversation.last_message_at = datetime.utcnow()
     if conversation.title in {"新会话", "默认会话"}:
@@ -114,4 +169,3 @@ def apply_assistant_message_updates(conversation: Conversation, content: str) ->
     preview = _trim_text(content, 120)
     if preview:
         conversation.summary = preview
-

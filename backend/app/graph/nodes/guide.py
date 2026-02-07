@@ -19,7 +19,7 @@ def _build_manual(platform: str) -> str:
     lines.append("- 新建技能：`帮我新增一个角色设定技能`")
     lines.append("")
     lines.append("命令兜底（可选）：")
-    lines.append("- 会话：`/new` ` /history` ` /switch <id>`")
+    lines.append("- 会话：`/new` ` /history` ` /switch <id>` ` /rename <新标题>` ` /rename <id> <新标题>` ` /delete [id]`")
     lines.append("- 账单：`/ledger list` ` /ledger update <id> <金额> [分类] [摘要]` ` /ledger delete <id|latest>`")
     lines.append("- 日历：`/calendar today|week|month|YYYY-MM-DD`")
     lines.append("- 技能：`/skill list` ` /skill show <source:slug>` ` /skill create ...`")
