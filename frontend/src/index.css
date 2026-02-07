@@ -2,32 +2,135 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  color: #111827;
-  background-color: #f3f4f6;
-}
+@layer base {
+  :root {
+    --color-bg: 248 250 252;
+    --color-bg-secondary: 241 245 249;
+    --color-bg-card: 255 255 255;
+    --color-bg-input: 255 255 255;
+    --color-bg-hover: 241 245 249;
+    --color-bg-active: 226 232 240;
+    --color-border: 226 232 240;
+    --color-border-hover: 203 213 225;
+    --color-text-primary: 15 23 42;
+    --color-text-secondary: 100 116 139;
+    --color-text-tertiary: 148 163 184;
+    --color-accent: 99 102 241;
+    --color-accent-hover: 79 70 229;
+    --color-accent-subtle: 238 242 255;
+    --color-success: 34 197 94;
+    --color-danger: 239 68 68;
+    --color-scrollbar: 203 213 225;
+    --color-scrollbar-hover: 148 163 184;
+    --color-bubble-user: 99 102 241;
+    --color-bubble-ai: 241 245 249;
+  }
 
-body {
-  font-family: "IBM Plex Sans", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
-  margin: 0;
-  min-height: 100vh;
-  background-color: #f3f4f6;
-}
-
-#root {
-  min-height: 100vh;
+  .dark {
+    --color-bg: 15 15 20;
+    --color-bg-secondary: 24 24 32;
+    --color-bg-card: 24 24 32;
+    --color-bg-input: 32 32 44;
+    --color-bg-hover: 38 38 50;
+    --color-bg-active: 50 50 65;
+    --color-border: 45 45 60;
+    --color-border-hover: 65 65 80;
+    --color-text-primary: 237 237 245;
+    --color-text-secondary: 156 163 175;
+    --color-text-tertiary: 107 114 128;
+    --color-accent: 129 140 248;
+    --color-accent-hover: 99 102 241;
+    --color-accent-subtle: 30 27 75;
+    --color-success: 34 197 94;
+    --color-danger: 248 113 113;
+    --color-scrollbar: 55 55 70;
+    --color-scrollbar-hover: 75 75 90;
+    --color-bubble-user: 79 70 229;
+    --color-bubble-ai: 32 32 44;
+  }
 }
 
 * {
   box-sizing: border-box;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: "Inter", "SF Pro Display", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  margin: 0;
+  min-height: 100vh;
+  background-color: rgb(var(--color-bg));
+  color: rgb(var(--color-text-primary));
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+#root {
+  min-height: 100vh;
+}
+
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #d1d5db;
+  background: rgb(var(--color-scrollbar));
   border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--color-scrollbar-hover));
+}
+
+.prose {
+  line-height: 1.7;
+}
+.prose p {
+  margin: 0.5em 0;
+}
+.prose code {
+  background: rgb(var(--color-bg-hover));
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.875em;
+}
+.prose pre {
+  background: rgb(var(--color-bg-secondary));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: 8px;
+  padding: 0.75em 1em;
+  overflow-x: auto;
+}
+.prose pre code {
+  background: transparent;
+  padding: 0;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+.animate-slide-in {
+  animation: slideIn 0.2s ease-out;
+}
+.animate-pulse-soft {
+  animation: pulse-soft 2s ease-in-out infinite;
 }

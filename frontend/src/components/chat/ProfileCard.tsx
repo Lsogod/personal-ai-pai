@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader } from "../ui/card";
+import { User } from "../ui/icons";
 
 interface Profile {
   nickname: string;
@@ -13,19 +14,41 @@ interface ProfileCardProps {
   profile?: Profile;
 }
 
+const infoItems = (profile?: Profile) => [
+  { label: "昵称", value: profile?.nickname },
+  { label: "AI 名称", value: profile?.ai_name },
+  { label: "AI 表情", value: profile?.ai_emoji },
+  { label: "平台", value: profile?.platform },
+  { label: "邮箱", value: profile?.email },
+  { label: "引导阶段", value: profile?.setup_stage?.toString() },
+];
+
 export function ProfileCard({ profile }: ProfileCardProps) {
   return (
     <Card>
       <CardHeader>
-        <h2 className="text-sm font-semibold text-slate-900">账号与助手</h2>
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent">
+            <User size={20} />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-content">账号信息</h2>
+            <p className="text-xs text-content-tertiary">管理你的个人资料与 AI 设置</p>
+          </div>
+        </div>
       </CardHeader>
-      <CardContent className="space-y-2 pt-3 text-sm">
-        <p className="text-slate-600">昵称：<span className="text-slate-900">{profile?.nickname || "-"}</span></p>
-        <p className="text-slate-600">AI 名称：<span className="text-slate-900">{profile?.ai_name || "-"}</span></p>
-        <p className="text-slate-600">AI 表情：<span className="text-slate-900">{profile?.ai_emoji || "-"}</span></p>
-        <p className="text-slate-600">平台：<span className="text-slate-900">{profile?.platform || "-"}</span></p>
-        <p className="text-slate-600">邮箱：<span className="text-slate-900">{profile?.email || "-"}</span></p>
-        <p className="text-slate-600">引导阶段：<span className="text-slate-900">{profile?.setup_stage ?? "-"}</span></p>
+      <CardContent>
+        <div className="space-y-3">
+          {infoItems(profile).map(({ label, value }) => (
+            <div
+              key={label}
+              className="flex items-center justify-between py-2 border-b border-border last:border-0"
+            >
+              <span className="text-sm text-content-secondary">{label}</span>
+              <span className="text-sm font-medium text-content">{value || "-"}</span>
+            </div>
+          ))}
+        </div>
       </CardContent>
     </Card>
   );

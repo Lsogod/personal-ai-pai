@@ -3,24 +3,27 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../../lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center whitespace-nowrap rounded-lg text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center whitespace-nowrap rounded-xl text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:pointer-events-none disabled:opacity-40 select-none",
   {
     variants: {
       variant: {
-        default: "bg-slate-900 text-white hover:bg-slate-800",
-        ghost: "border border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
-        subtle: "bg-slate-100 text-slate-700 hover:bg-slate-200"
+        default: "bg-accent text-white hover:bg-accent-hover shadow-subtle active:scale-[0.97]",
+        ghost: "border border-border bg-surface-card text-content hover:bg-surface-hover hover:border-border-hover",
+        subtle: "bg-surface-hover text-content-secondary hover:bg-surface-active",
+        danger: "bg-danger/10 text-danger hover:bg-danger/20",
+        icon: "text-content-secondary hover:text-content hover:bg-surface-hover rounded-lg",
       },
       size: {
-        default: "h-10 px-4",
-        sm: "h-8 px-3",
-        lg: "h-11 px-5"
-      }
+        default: "h-10 px-4 gap-2",
+        sm: "h-8 px-3 text-xs gap-1.5",
+        lg: "h-11 px-5 gap-2",
+        icon: "h-9 w-9",
+      },
     },
     defaultVariants: {
       variant: "default",
-      size: "default"
-    }
+      size: "default",
+    },
   }
 );
 

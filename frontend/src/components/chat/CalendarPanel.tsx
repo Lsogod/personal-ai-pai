@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchCalendar, type CalendarDay, type CalendarResponse } from "../../lib/api";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader } from "../ui/card";
+import { ChevronLeft, ChevronRight, Calendar } from "../ui/icons";
 
 interface CalendarPanelProps {
   token: string | null;
@@ -17,7 +18,7 @@ function formatDate(date: Date): string {
 }
 
 function monthTitle(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  return `${date.getFullYear()} 年 ${date.getMonth() + 1} 月`;
 }
 
 function firstDay(date: Date): Date {
@@ -30,25 +31,19 @@ function nextMonth(date: Date): Date {
 
 function buildCalendarCells(cursor: Date): string[] {
   const start = firstDay(cursor);
-  const firstWeekday = start.getDay(); // 0 = Sun
+  const firstWeekday = start.getDay();
   const daysInMonth = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
   const cells: string[] = [];
-  for (let i = 0; i < firstWeekday; i++) {
-    cells.push("");
-  }
+  for (let i = 0; i < firstWeekday; i++) cells.push("");
   for (let day = 1; day <= daysInMonth; day++) {
     cells.push(formatDate(new Date(cursor.getFullYear(), cursor.getMonth(), day)));
   }
-  while (cells.length % 7 !== 0) {
-    cells.push("");
-  }
+  while (cells.length % 7 !== 0) cells.push("");
   return cells;
 }
 
 function dayNumber(value: string): string {
-  if (!value) {
-    return "";
-  }
+  if (!value) return "";
   return String(Number(value.slice(-2)));
 }
 
@@ -60,7 +55,7 @@ export function CalendarPanel({ token }: CalendarPanelProps) {
 
   const { data } = useQuery<CalendarResponse>({
     queryKey: ["calendar", startDate, endDate],
-    queryFn: () => fetchCalendar(token, startDate, endDate)
+    queryFn: () => fetchCalendar(token, startDate, endDate),
   });
 
   const dayMap = useMemo(() => {
@@ -73,6 +68,7 @@ export function CalendarPanel({ token }: CalendarPanelProps) {
   const selected = dayMap.get(selectedDate);
   const totalMonthSpend = (data?.days || []).reduce((acc, day) => acc + day.ledger_total, 0);
   const totalMonthSchedules = (data?.days || []).reduce((acc, day) => acc + day.schedule_count, 0);
+  const today = formatDate(new Date());
 
   useEffect(() => {
     const currentMonth = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}`;
@@ -86,59 +82,72 @@ export function CalendarPanel({ token }: CalendarPanelProps) {
   }, [cursor, data, dayMap, selectedDate]);
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-900">账单与日程日历</h2>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10 text-accent">
+                <Calendar size={20} />
+              </div>
+              <h2 className="text-sm font-semibold text-content">账单与日程日历</h2>
+            </div>
+            <div className="flex items-center gap-1">
+              <button
                 onClick={() => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+                className="p-2 rounded-lg text-content-secondary hover:text-content hover:bg-surface-hover transition-colors"
               >
-                上月
-              </Button>
-              <p className="text-sm font-semibold text-slate-700">{monthTitle(cursor)}</p>
-              <Button
-                variant="ghost"
-                size="sm"
+                <ChevronLeft size={18} />
+              </button>
+              <p className="text-sm font-semibold text-content min-w-[100px] text-center">
+                {monthTitle(cursor)}
+              </p>
+              <button
                 onClick={() => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+                className="p-2 rounded-lg text-content-secondary hover:text-content hover:bg-surface-hover transition-colors"
               >
-                下月
-              </Button>
+                <ChevronRight size={18} />
+              </button>
             </div>
           </div>
         </CardHeader>
-        <CardContent className="pt-3">
-          <div className="mb-3 grid grid-cols-7 gap-2 text-center text-xs text-slate-500">
+        <CardContent>
+          <div className="mb-3 grid grid-cols-7 gap-1 text-center text-xs font-medium text-content-tertiary">
             {["日", "一", "二", "三", "四", "五", "六"].map((name) => (
-              <div key={name}>{name}</div>
+              <div key={name} className="py-2">{name}</div>
             ))}
           </div>
-          <div className="grid grid-cols-7 gap-2">
+          <div className="grid grid-cols-7 gap-1">
             {cells.map((cell, index) => {
               if (!cell) {
-                return <div key={`blank-${index}`} className="h-24 rounded-lg border border-transparent bg-transparent" />;
+                return <div key={`blank-${index}`} className="aspect-square" />;
               }
               const day = dayMap.get(cell);
               const active = selectedDate === cell;
+              const isToday = cell === today;
+              const hasData = day && (day.ledger_count > 0 || day.schedule_count > 0);
               return (
                 <button
                   key={cell}
                   type="button"
                   onClick={() => setSelectedDate(cell)}
-                  className={[
-                    "h-24 rounded-lg border px-2 py-2 text-left",
-                    active ? "border-slate-900 bg-slate-100" : "border-slate-200 bg-white hover:bg-slate-50"
-                  ].join(" ")}
+                  className={`
+                    aspect-square rounded-xl p-1 text-left flex flex-col items-center justify-center
+                    transition-all duration-200 relative
+                    ${active
+                      ? "bg-accent text-white shadow-subtle"
+                      : isToday
+                        ? "bg-accent/10 text-accent"
+                        : "hover:bg-surface-hover text-content"
+                    }
+                  `}
                 >
-                  <p className="text-xs font-semibold text-slate-800">{dayNumber(cell)}</p>
-                  <p className="mt-2 text-[11px] text-slate-600">账单 {day?.ledger_count || 0}</p>
-                  <p className="text-[11px] text-slate-600">日程 {day?.schedule_count || 0}</p>
-                  {day && day.ledger_total > 0 ? (
-                    <p className="mt-1 text-[11px] font-semibold text-slate-900">¥{day.ledger_total.toFixed(0)}</p>
-                  ) : null}
+                  <span className={`text-sm font-medium ${active ? "text-white" : ""}`}>
+                    {dayNumber(cell)}
+                  </span>
+                  {hasData && !active && (
+                    <span className="w-1 h-1 rounded-full bg-accent mt-0.5" />
+                  )}
                 </button>
               );
             })}
@@ -146,51 +155,77 @@ export function CalendarPanel({ token }: CalendarPanelProps) {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <h2 className="text-sm font-semibold text-slate-900">当月概览</h2>
-        </CardHeader>
-        <CardContent className="space-y-3 pt-3 text-sm text-slate-700">
-          <p>总支出：¥{totalMonthSpend.toFixed(2)}</p>
-          <p>总日程：{totalMonthSchedules} 条</p>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-            <p className="text-xs font-semibold text-slate-600">{selectedDate} 详情</p>
+      <div className="space-y-4">
+        {/* Monthly overview */}
+        <Card>
+          <CardHeader>
+            <h2 className="text-sm font-semibold text-content">当月概览</h2>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl bg-surface-secondary p-3">
+                <p className="text-xs text-content-tertiary">总支出</p>
+                <p className="text-lg font-bold text-content mt-1">¥{totalMonthSpend.toFixed(0)}</p>
+              </div>
+              <div className="rounded-xl bg-surface-secondary p-3">
+                <p className="text-xs text-content-tertiary">日程数</p>
+                <p className="text-lg font-bold text-content mt-1">{totalMonthSchedules}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Day detail */}
+        <Card>
+          <CardHeader>
+            <h2 className="text-sm font-semibold text-content">{selectedDate} 详情</h2>
+          </CardHeader>
+          <CardContent>
             {selected ? (
-              <div className="mt-2 space-y-2">
+              <div className="space-y-4">
                 <div>
-                  <p className="text-xs font-semibold text-slate-600">账单</p>
+                  <p className="text-xs font-semibold text-content-secondary mb-2">📝 账单</p>
                   {selected.ledgers.length === 0 ? (
-                    <p className="text-xs text-slate-500">无账单</p>
+                    <p className="text-xs text-content-tertiary">无账单</p>
                   ) : (
-                    selected.ledgers.map((item) => (
-                      <p key={item.id} className="text-xs text-slate-700">
-                        #{item.id} {item.item} ¥{item.amount.toFixed(2)} ({item.category})
-                      </p>
-                    ))
+                    <div className="space-y-1.5">
+                      {selected.ledgers.map((item) => (
+                        <div key={item.id} className="flex justify-between text-xs">
+                          <span className="text-content-secondary">{item.item}</span>
+                          <span className="text-content font-medium">¥{item.amount.toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
                 <div>
-                  <p className="text-xs font-semibold text-slate-600">日程</p>
+                  <p className="text-xs font-semibold text-content-secondary mb-2">📅 日程</p>
                   {selected.schedules.length === 0 ? (
-                    <p className="text-xs text-slate-500">无日程</p>
+                    <p className="text-xs text-content-tertiary">无日程</p>
                   ) : (
-                    selected.schedules.map((item) => (
-                      <p key={item.id} className="text-xs text-slate-700">
-                        #{item.id} {item.content} [{item.status}]
-                      </p>
-                    ))
+                    <div className="space-y-1.5">
+                      {selected.schedules.map((item) => (
+                        <div key={item.id} className="flex justify-between text-xs">
+                          <span className="text-content-secondary">{item.content}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                            item.status === "done"
+                              ? "bg-success/10 text-success"
+                              : "bg-accent/10 text-accent"
+                          }`}>
+                            {item.status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               </div>
             ) : (
-              <p className="mt-2 text-xs text-slate-500">当天无记录。</p>
+              <p className="text-xs text-content-tertiary text-center py-4">当天无记录</p>
             )}
-          </div>
-          <p className="text-xs text-slate-500">
-            Telegram/飞书可用命令：`/calendar today`、`/calendar week`、`/calendar month`。
-          </p>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
