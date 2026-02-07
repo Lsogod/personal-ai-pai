@@ -13,6 +13,23 @@ interface LedgerListCardProps {
 
 const CATEGORIES = ["餐饮", "交通", "购物", "居家", "娱乐", "医疗", "其他"];
 
+function formatDateTime(value: string): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "--";
+  const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) {
+    return raw;
+  }
+  return date.toLocaleString([], {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export function LedgerListCard({ token }: LedgerListCardProps) {
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -24,6 +41,7 @@ export function LedgerListCard({ token }: LedgerListCardProps) {
     queryKey: ["ledgers"],
     enabled: !!token,
     queryFn: () => fetchLedgers(token, 20),
+    refetchInterval: token ? 15000 : false,
   });
 
   const updateMutation = useMutation({
@@ -34,6 +52,7 @@ export function LedgerListCard({ token }: LedgerListCardProps) {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["ledgers"] }),
         queryClient.invalidateQueries({ queryKey: ["stats"] }),
+        queryClient.invalidateQueries({ queryKey: ["calendar"] }),
       ]);
     },
   });
@@ -45,6 +64,7 @@ export function LedgerListCard({ token }: LedgerListCardProps) {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["ledgers"] }),
         queryClient.invalidateQueries({ queryKey: ["stats"] }),
+        queryClient.invalidateQueries({ queryKey: ["calendar"] }),
       ]);
     },
   });
@@ -70,7 +90,7 @@ export function LedgerListCard({ token }: LedgerListCardProps) {
               <div key={row.id} className="rounded-xl border border-border p-3 transition-colors hover:bg-surface-hover">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs text-content-tertiary">
-                    #{row.id} · {new Date(row.created_at).toLocaleDateString()}
+                    #{row.id} · {formatDateTime(row.transaction_date || row.created_at)}
                   </span>
                   {editingId !== row.id && (
                     <div className="flex gap-1">

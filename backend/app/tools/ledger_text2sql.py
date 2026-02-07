@@ -115,7 +115,7 @@ def _is_safe_sql(sql: str, intent: str, user_message: str) -> tuple[bool, str]:
     return False, "unsupported_intent"
 
 
-async def _plan_sql(message: str) -> dict[str, Any]:
+async def _plan_sql(message: str, conversation_context: str = "") -> dict[str, Any]:
     llm = get_llm()
     now = datetime.utcnow().isoformat()
     system_prompt = (
@@ -138,7 +138,13 @@ async def _plan_sql(message: str) -> dict[str, Any]:
     response = await llm.ainvoke(
         [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": message},
+            {
+                "role": "user",
+                "content": (
+                    f"会话上下文:\n{conversation_context or '（无）'}\n\n"
+                    f"用户输入:\n{message}"
+                ),
+            },
         ]
     )
     return _parse_json(str(response.content))
@@ -147,8 +153,9 @@ async def _plan_sql(message: str) -> dict[str, Any]:
 async def try_execute_ledger_text2sql(
     user_id: int,
     message: str,
+    conversation_context: str = "",
 ) -> str | None:
-    plan = await _plan_sql(message)
+    plan = await _plan_sql(message, conversation_context)
     if not plan or not plan.get("matched"):
         return None
 
@@ -194,7 +201,11 @@ async def try_execute_ledger_text2sql(
                     currency = str(row.get("currency") or "CNY")
                     category = str(row.get("category") or "其他")
                     item = str(row.get("item") or "")
-                    lines.append(f"#{row_id} | {amount:.2f} {currency} | {category} | {item}")
+                    transaction_date = str(row.get("transaction_date") or row.get("created_at") or "")
+                    time_text = transaction_date.replace("T", " ")[:16] if transaction_date else "未知时间"
+                    lines.append(
+                        f"#{row_id} | {time_text} | {amount:.2f} {currency} | {category} | {item}"
+                    )
                 return "\n".join(lines)
 
             if intent == "insert":

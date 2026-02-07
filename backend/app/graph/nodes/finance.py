@@ -4,6 +4,7 @@ from datetime import datetime
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
 from app.models.user import User
 from app.services.llm import get_llm
@@ -53,6 +54,12 @@ CATEGORY_MAP = {
     "医疗": "医疗",
     "看病": "医疗",
 }
+
+
+def _fmt_dt(dt: datetime | None) -> str:
+    if not dt:
+        return ""
+    return dt.strftime("%Y-%m-%d %H:%M")
 
 
 def _extract_amount(text: str) -> float | None:
@@ -254,7 +261,12 @@ def _pick_amount_from_indexes(raw_indexes: object, candidates: list[float]) -> f
     return round(sum(candidates[idx - 1] for idx in picked), 2)
 
 
-async def _understand_pending_selection(content: str, candidates: list[float], pending: dict) -> dict:
+async def _understand_pending_selection(
+    content: str,
+    candidates: list[float],
+    pending: dict,
+    conversation_context: str,
+) -> dict:
     llm = get_llm()
     system = SystemMessage(
         content=(
@@ -271,6 +283,7 @@ async def _understand_pending_selection(content: str, candidates: list[float], p
     )
     human = HumanMessage(
         content=(
+            f"会话上下文:\n{conversation_context}\n\n"
             f"候选金额列表（序号从1开始）: {candidates}\n"
             f"识别来源摘要: {pending.get('item') or pending.get('merchant') or '消费'}\n"
             f"默认分类: {pending.get('category') or '其他'}\n"
@@ -305,7 +318,7 @@ def _render_pending_candidates(candidates: list[float]) -> str:
     return "\n".join(lines)
 
 
-async def _understand_finance_message(content: str) -> dict:
+async def _understand_finance_message(content: str, conversation_context: str) -> dict:
     llm = get_llm()
     system = SystemMessage(
         content=(
@@ -324,7 +337,12 @@ async def _understand_finance_message(content: str) -> dict:
             "category 不确定填“其他”。"
         )
     )
-    human = HumanMessage(content=content)
+    human = HumanMessage(
+        content=(
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"用户输入:\n{content}"
+        )
+    )
     response = await llm.ainvoke([system, human])
     return _parse_json_object(str(response.content))
 
@@ -346,7 +364,7 @@ async def _handle_ledger_command(
         lines = ["最近账单："]
         for row in rows:
             lines.append(
-                f"#{row.id} | {row.amount:.2f} {row.currency} | {row.category} | {row.item}"
+                f"#{row.id} | {_fmt_dt(row.transaction_date)} | {row.amount:.2f} {row.currency} | {row.category} | {row.item}"
             )
         lines.append("可用：`/ledger update <id> <金额> [分类] [摘要]`、`/ledger delete <id|latest>`")
         return ["\n".join(lines)]
@@ -381,7 +399,9 @@ async def _handle_ledger_command(
         )
         if not updated:
             return [f"未找到账单 #{ledger_id}，或它不属于你。"]
-        return [f"已更新账单 #{updated.id}：{updated.item} {updated.amount} {updated.currency}，分类 {updated.category}。"]
+        return [
+            f"已更新账单 #{updated.id}：{updated.item} {updated.amount} {updated.currency}，分类 {updated.category}，时间 {_fmt_dt(updated.transaction_date)}。"
+        ]
 
     if content.startswith("/ledger delete"):
         m = re.match(r"^/ledger\s+delete\s+(.+)$", content)
@@ -400,7 +420,9 @@ async def _handle_ledger_command(
             )
             if not deleted:
                 return ["删除失败，请稍后重试。"]
-            return [f"已删除最近一笔：#{deleted.id} {deleted.item} {deleted.amount} {deleted.currency}。"]
+            return [
+                f"已删除最近一笔：#{deleted.id} {deleted.item} {deleted.amount} {deleted.currency}，时间 {_fmt_dt(deleted.transaction_date)}。"
+            ]
         if not target.isdigit():
             return ["用法：`/ledger delete <id|latest>`，例如 `/ledger delete 12`。"]
         ledger_id = int(target)
@@ -412,7 +434,9 @@ async def _handle_ledger_command(
         )
         if not deleted:
             return [f"未找到账单 #{ledger_id}，或它不属于你。"]
-        return [f"已删除账单 #{deleted.id}：{deleted.item} {deleted.amount} {deleted.currency}。"]
+        return [
+            f"已删除账单 #{deleted.id}：{deleted.item} {deleted.amount} {deleted.currency}，时间 {_fmt_dt(deleted.transaction_date)}。"
+        ]
 
     return ["可用命令：`/ledger list`、`/ledger update <id> <金额> [分类] [摘要]`、`/ledger delete <id|latest>`。"]
 
@@ -428,6 +452,7 @@ async def finance_node(state: GraphState) -> GraphState:
     conversation_id = int(state.get("conversation_id") or 0)
 
     content = (message.content or "").strip()
+    context_text = render_conversation_context(state)
 
     if not message.image_urls and conversation_id > 0:
         pending = await get_pending_ledger(user_id=user_id, conversation_id=conversation_id)
@@ -439,7 +464,12 @@ async def finance_node(state: GraphState) -> GraphState:
 
             # LLM-first: use semantic understanding for pending confirmation.
             try:
-                parsed = await _understand_pending_selection(content, candidates, pending)
+                parsed = await _understand_pending_selection(
+                    content,
+                    candidates,
+                    pending,
+                    context_text,
+                )
             except Exception:
                 parsed = {}
 
@@ -500,7 +530,9 @@ async def finance_node(state: GraphState) -> GraphState:
             await clear_pending_ledger(user_id=user_id, conversation_id=conversation_id)
             return {
                 **state,
-                "responses": [f"已记账：{ledger.item} {ledger.amount:.2f} {ledger.currency}，分类 {ledger.category}。"],
+                "responses": [
+                    f"已记账：{ledger.item} {ledger.amount:.2f} {ledger.currency}，分类 {ledger.category}，时间 {_fmt_dt(ledger.transaction_date)}。"
+                ],
             }
 
     if message.image_urls:
@@ -564,7 +596,9 @@ async def finance_node(state: GraphState) -> GraphState:
             source_hint = "（支付截图识别）" if image_type == "payment_screenshot" else ""
             return {
                 **state,
-                "responses": [f"已记账{source_hint}：{ledger.item} {ledger.amount} {ledger.currency}，分类 {ledger.category}。"],
+                "responses": [
+                    f"已记账{source_hint}：{ledger.item} {ledger.amount} {ledger.currency}，分类 {ledger.category}，时间 {_fmt_dt(ledger.transaction_date)}。"
+                ],
             }
 
         candidate_values = candidate_values[:3]
@@ -598,7 +632,7 @@ async def finance_node(state: GraphState) -> GraphState:
     # LLM-first: understand natural-language ledger intent first.
     parsed: dict = {}
     try:
-        parsed = await _understand_finance_message(content)
+        parsed = await _understand_finance_message(content, context_text)
     except Exception:
         parsed = {}
 
@@ -646,6 +680,7 @@ async def finance_node(state: GraphState) -> GraphState:
             sql_response = await try_execute_ledger_text2sql(
                 user_id=user_id,
                 message=content,
+                conversation_context=context_text,
             )
         except Exception:
             sql_response = None
@@ -676,7 +711,7 @@ async def finance_node(state: GraphState) -> GraphState:
         lines = ["最近账单："]
         for row in rows:
             lines.append(
-                f"#{row.id} | {row.amount:.2f} {row.currency} | {row.category} | {row.item}"
+                f"#{row.id} | {_fmt_dt(row.transaction_date)} | {row.amount:.2f} {row.currency} | {row.category} | {row.item}"
             )
         lines.append("要修改指定账单可说：`把账单#12改成28元 分类餐饮`。删除可说：`删除账单#12`。")
         return {**state, "responses": ["\n".join(lines)]}
@@ -697,7 +732,9 @@ async def finance_node(state: GraphState) -> GraphState:
             return {**state, "responses": [f"未找到账单 #{ledger_id}，或它不属于你。"]}
         return {
             **state,
-            "responses": [f"已删除账单 #{deleted.id}：{deleted.item} {deleted.amount} {deleted.currency}。"],
+            "responses": [
+                f"已删除账单 #{deleted.id}：{deleted.item} {deleted.amount} {deleted.currency}，时间 {_fmt_dt(deleted.transaction_date)}。"
+            ],
         }
 
     if intent == "delete_latest":
@@ -714,7 +751,9 @@ async def finance_node(state: GraphState) -> GraphState:
             return {**state, "responses": ["删除失败，请稍后重试。"]}
         return {
             **state,
-            "responses": [f"已删除最近一笔：#{deleted.id} {deleted.item} {deleted.amount} {deleted.currency}。"],
+            "responses": [
+                f"已删除最近一笔：#{deleted.id} {deleted.item} {deleted.amount} {deleted.currency}，时间 {_fmt_dt(deleted.transaction_date)}。"
+            ],
         }
 
     if amount is None:
@@ -737,7 +776,7 @@ async def finance_node(state: GraphState) -> GraphState:
         return {
             **state,
             "responses": [
-                f"已更正账单 #{updated.id}：{updated.item} {updated.amount} {updated.currency}，分类 {updated.category}。"
+                f"已更正账单 #{updated.id}：{updated.item} {updated.amount} {updated.currency}，分类 {updated.category}，时间 {_fmt_dt(updated.transaction_date)}。"
             ],
         }
 
@@ -759,7 +798,7 @@ async def finance_node(state: GraphState) -> GraphState:
         return {
             **state,
             "responses": [
-                f"已更正最近一笔：{updated.item} {updated.amount} {updated.currency}，分类 {updated.category}（账单 #{updated.id}）。"
+                f"已更正最近一笔：{updated.item} {updated.amount} {updated.currency}，分类 {updated.category}（账单 #{updated.id}，时间 {_fmt_dt(updated.transaction_date)}）。"
             ],
         }
 
@@ -774,5 +813,7 @@ async def finance_node(state: GraphState) -> GraphState:
     )
     return {
         **state,
-        "responses": [f"已记账：{ledger.item} {ledger.amount} {ledger.currency}，分类 {ledger.category}。"],
+        "responses": [
+            f"已记账：{ledger.item} {ledger.amount} {ledger.currency}，分类 {ledger.category}，时间 {_fmt_dt(ledger.transaction_date)}。"
+        ],
     }

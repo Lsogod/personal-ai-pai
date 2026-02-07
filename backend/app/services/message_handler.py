@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import Any
 
+from langchain_core.messages import HumanMessage, SystemMessage
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_or_create_user
 from app.schemas.unified import UnifiedMessage
+from app.services.llm import get_llm
 from app.services.sender import UnifiedSender
 from app.services.scheduler import get_scheduler
 from app.graph.workflow import get_graph
@@ -26,6 +30,7 @@ from app.services.conversations import (
     switch_conversation,
 )
 from app.services.binding import consume_bind_code, create_bind_code
+from app.services.realtime import get_notification_hub
 from app.services.runtime_context import (
     set_session,
     reset_session,
@@ -39,6 +44,7 @@ from app.services.runtime_context import (
 _sender = UnifiedSender()
 _scheduler = get_scheduler()
 logger = logging.getLogger(__name__)
+UNSUPPORTED_REBIND_TEXT = "当前版本暂不支持换绑/解绑。你仍可使用 `/bind new` 与 `/bind <6位码>` 进行账号绑定合并。"
 
 
 def _format_history_lines(current_id: int | None, rows: list) -> str:
@@ -51,6 +57,41 @@ def _format_history_lines(current_id: int | None, rows: list) -> str:
         summary = (item.summary or "（暂无摘要）").strip()
         lines.append(f"{marker} #{item.id} | {item.title} | {time_str} | {summary}")
     return "\n".join(lines)
+
+
+def _parse_json_object(content: str) -> dict:
+    text = (content or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if len(lines) >= 3:
+            text = "\n".join(lines[1:-1]).strip()
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+async def _is_rebind_natural_intent(text: str) -> bool:
+    content = (text or "").strip()
+    if not content or content.startswith("/"):
+        return False
+    llm = get_llm()
+    system = SystemMessage(
+        content=(
+            "你是意图分类器。判断用户是否在表达“换绑/解绑/重新绑定账号”的诉求。"
+            "只输出 JSON：{\"block\": true|false}。"
+            "block=true 仅在用户明确要求更换绑定关系、解除绑定、改绑账号时。"
+            "咨询一般功能、普通绑定、记账、提醒等都应是 block=false。"
+        )
+    )
+    human = HumanMessage(content=content)
+    try:
+        response = await llm.ainvoke([system, human])
+        data = _parse_json_object(str(response.content))
+        return bool(data.get("block") is True)
+    except Exception:
+        return False
 
 
 async def _handle_conversation_command(
@@ -163,6 +204,39 @@ async def _handle_conversation_command(
     return None
 
 
+async def _load_context_messages(
+    session: AsyncSession,
+    user_id: int,
+    conversation_id: int,
+    limit: int = 20,
+) -> list[dict[str, str]]:
+    result = await session.execute(
+        select(Message)
+        .where(
+            Message.user_id == user_id,
+            Message.conversation_id == conversation_id,
+        )
+        .order_by(Message.id.desc())
+        .limit(limit)
+    )
+    rows = list(result.scalars().all())
+    rows.reverse()
+
+    context_messages: list[dict[str, str]] = []
+    for row in rows:
+        content = (row.content or "").strip()
+        if not content:
+            continue
+        context_messages.append(
+            {
+                "role": (row.role or "user").strip().lower(),
+                "content": content,
+                "created_at": row.created_at.isoformat() if row.created_at else "",
+            }
+        )
+    return context_messages
+
+
 async def handle_message(
     platform: str,
     normalized: dict[str, Any],
@@ -223,38 +297,63 @@ async def handle_message(
         )
     )
     await session.commit()
+    if platform != "web":
+        await get_notification_hub().send_to_user(
+            user_id,
+            {
+                "type": "message",
+                "role": "user",
+                "content": message.content,
+                "platform": platform,
+                "conversation_id": conversation.id,
+                "created_at": datetime.utcnow().isoformat(),
+            },
+        )
 
-    command_result = await _handle_conversation_command(
-        session=session,
-        user=user,
-        conversation=conversation,
-        text=message.content,
-    )
-
-    if command_result is not None:
-        responses, response_conversation = command_result
-        conversation = response_conversation
-        skip_summary_update = True
-    else:
+    if await _is_rebind_natural_intent(message.content):
+        responses = [UNSUPPORTED_REBIND_TEXT]
         skip_summary_update = False
-        graph = await get_graph()
-        session_token = set_session(session)
-        scheduler_token = set_scheduler(_scheduler)
-        sender_token = set_sender(_sender)
-        try:
+    else:
+        command_result = await _handle_conversation_command(
+            session=session,
+            user=user,
+            conversation=conversation,
+            text=message.content,
+        )
+
+        if command_result is not None:
+            responses, response_conversation = command_result
+            conversation = response_conversation
+            skip_summary_update = True
+        else:
+            skip_summary_update = False
+            state["extra"] = {
+                "conversation_summary": (conversation.summary or "").strip(),
+                "context_messages": await _load_context_messages(
+                    session=session,
+                    user_id=user_id,
+                    conversation_id=conversation.id,
+                    limit=20,
+                ),
+            }
+            graph = await get_graph()
+            session_token = set_session(session)
+            scheduler_token = set_scheduler(_scheduler)
+            sender_token = set_sender(_sender)
             try:
-                result = await graph.ainvoke(
-                    state,
-                    config={"configurable": {"thread_id": f"{user_uuid}:{conversation.id}"}},
-                )
-                responses = result.get("responses") or []
-            except Exception as exc:
-                logger.exception("graph invoke failed: platform=%s user_id=%s", platform, user_id)
-                responses = ["我处理这条消息时失败了。请重试，或先用文字描述金额/分类/事项。"]
-        finally:
-            reset_sender(sender_token)
-            reset_scheduler(scheduler_token)
-            reset_session(session_token)
+                try:
+                    result = await graph.ainvoke(
+                        state,
+                        config={"configurable": {"thread_id": f"{user_uuid}:{conversation.id}"}},
+                    )
+                    responses = result.get("responses") or []
+                except Exception as exc:
+                    logger.exception("graph invoke failed: platform=%s user_id=%s", platform, user_id)
+                    responses = ["我处理这条消息时失败了。请重试，或先用文字描述金额/分类/事项。"]
+            finally:
+                reset_sender(sender_token)
+                reset_scheduler(scheduler_token)
+                reset_session(session_token)
 
     for text in responses:
         await _sender.send_text(reply_platform, reply_platform_id, text)
@@ -280,5 +379,17 @@ async def handle_message(
             )
         )
         await session.commit()
+        if platform != "web":
+            await get_notification_hub().send_to_user(
+                user_id,
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": text,
+                    "platform": platform,
+                    "conversation_id": conversation.id,
+                    "created_at": datetime.utcnow().isoformat(),
+                },
+            )
 
     return {"ok": True, "responses": responses}

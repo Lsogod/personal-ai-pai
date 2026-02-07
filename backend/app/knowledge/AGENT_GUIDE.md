@@ -22,6 +22,7 @@ PAI is a multi-tenant personal AI assistant for Web, Telegram, Feishu, WeChat (G
 6. Cross-platform account binding:
 - Generate bind code on one platform and consume it on another.
 - Merge data under one canonical user account.
+- Rebind/unbind is currently not supported in natural language flow.
 
 ## Natural Language First
 - Prefer natural language understanding for user intent.

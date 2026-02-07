@@ -4,12 +4,25 @@ import json
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
 from app.services.ledger_pending import has_pending_ledger
 from app.services.llm import get_llm
 
 
 VALID_INTENTS = {"skill_manager", "finance", "secretary", "writer", "guide", "unknown"}
+CONTEXT_RECALL_TOKENS = (
+    "之前我",
+    "我刚才",
+    "我之前",
+    "上一句",
+    "上一条",
+    "前面我",
+    "上文",
+    "我问了什么",
+    "我们刚才聊",
+    "还记得我",
+)
 
 
 def _extract_json_object(text: str) -> dict:
@@ -29,6 +42,7 @@ async def _classify_intent_with_llm(
     content: str,
     has_image: bool,
     has_pending_ledger: bool,
+    conversation_context: str,
 ) -> str:
     llm = get_llm()
     system = SystemMessage(
@@ -41,6 +55,8 @@ async def _classify_intent_with_llm(
             "当用户在询问怎么用、教程、帮助、命令说明、手册时，intent=guide。"
             "当用户询问“你能做什么/有哪些功能”时，也归类为 guide（但应是简洁能力说明，不是命令手册）。"
             "写作/翻译/润色/普通问答时，intent=writer。"
+            "当用户询问“我刚才问了什么/之前聊了什么/你记得什么”这类回忆上下文问题时，intent=writer。"
+            "必须优先依据 user_message 本身判断；conversation_context 仅作辅助。"
             "若不确定，intent=unknown。"
             "如果 has_pending_ledger=true，优先判断为 finance，除非用户明确在取消该流程。"
             "如果 has_image=true，优先判断为 finance 或 writer（取决于用户是否在做账单/票据/支付分析）。"
@@ -50,6 +66,7 @@ async def _classify_intent_with_llm(
         content=(
             f"has_image={str(has_image).lower()}\n"
             f"has_pending_ledger={str(has_pending_ledger).lower()}\n"
+            f"conversation_context=\n{conversation_context}\n\n"
             f"user_message={content}"
         )
     )
@@ -68,14 +85,19 @@ async def router_node(state: GraphState) -> GraphState:
     content = (message.content or "").strip()
     if not content and not message.image_urls:
         return {**state, "intent": "writer"}
+    lowered = content.lower()
+    if any(token in lowered for token in CONTEXT_RECALL_TOKENS):
+        return {**state, "intent": "writer"}
     has_pending = False
     if user_id > 0 and conversation_id > 0:
         has_pending = await has_pending_ledger(user_id, conversation_id)
+    context_text = render_conversation_context(state)
     try:
         intent = await _classify_intent_with_llm(
             content=content,
             has_image=bool(message.image_urls),
             has_pending_ledger=has_pending,
+            conversation_context=context_text,
         )
     except Exception:
         intent = "unknown"

@@ -335,7 +335,10 @@ async def render_skill_from_request(
     return str(response2.content).strip()
 
 
-async def parse_skill_intent(message_content: str) -> dict:
+async def parse_skill_intent(
+    message_content: str,
+    conversation_context: str = "",
+) -> dict:
     text = (message_content or "").strip()
     if text.startswith("/skill"):
         parts = text.split(maxsplit=2)
@@ -359,7 +362,12 @@ async def parse_skill_intent(message_content: str) -> dict:
             "只输出 JSON。"
         )
     )
-    human = HumanMessage(content=text)
+    human = HumanMessage(
+        content=(
+            f"会话上下文:\n{conversation_context or '（无）'}\n\n"
+            f"用户输入:\n{text}"
+        )
+    )
     try:
         response = await llm.ainvoke([system, human])
         data = _extract_json_object(str(response.content))

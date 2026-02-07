@@ -11,17 +11,17 @@ interface RightInfoPanelProps {
   stats: any;
 }
 
-type TabKey = "skills" | "calendar" | "ledger" | "binding";
+type TabKey = "ledger" | "calendar" | "skills" | "binding";
 
 const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
-  { key: "skills", label: "技能", icon: Zap },
-  { key: "calendar", label: "日历", icon: Calendar },
   { key: "ledger", label: "账单", icon: Wallet },
+  { key: "calendar", label: "日程", icon: Calendar },
+  { key: "skills", label: "技能", icon: Zap },
   { key: "binding", label: "绑定", icon: Link2 },
 ];
 
 export function RightInfoPanel({ token, stats }: RightInfoPanelProps) {
-  const [activeTab, setActiveTab] = useState<TabKey>("skills");
+  const [activeTab, setActiveTab] = useState<TabKey>("ledger");
 
   return (
     <div className="flex flex-col h-full bg-surface-card border-l border-border">

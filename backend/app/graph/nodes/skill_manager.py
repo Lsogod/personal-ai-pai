@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
 from app.models.user import User
 from app.services.audit import log_event
@@ -39,7 +40,8 @@ async def skill_manager_node(state: GraphState) -> GraphState:
         return {**state, "responses": ["未找到用户信息。"]}
 
     content = (message.content or "").strip()
-    intent = await parse_skill_intent(content)
+    context_text = render_conversation_context(state)
+    intent = await parse_skill_intent(content, conversation_context=context_text)
     action = str(intent.get("action") or "help").lower()
     target = str(intent.get("target") or intent.get("skill_slug") or "").strip()
     skill_name = str(intent.get("skill_name") or "").strip()

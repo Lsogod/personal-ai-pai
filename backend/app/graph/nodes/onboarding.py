@@ -3,6 +3,7 @@ import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
 from app.models.user import SetupStage, User
 from app.services.llm import get_llm
@@ -32,7 +33,7 @@ def _parse_json_object(content: str) -> dict:
         return {}
 
 
-async def _extract_nickname_with_llm(raw: str) -> str:
+async def _extract_nickname_with_llm(raw: str, conversation_context: str) -> str:
     text = (raw or "").strip()
     if not text:
         return "主人"
@@ -48,7 +49,12 @@ async def _extract_nickname_with_llm(raw: str) -> str:
             "只输出 JSON: {\"nickname\":\"...\"}，不要输出其他文本。"
         )
     )
-    human = HumanMessage(content=f"用户消息:\n{text}")
+    human = HumanMessage(
+        content=(
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"用户消息:\n{text}"
+        )
+    )
 
     try:
         response = await llm.ainvoke([system, human])
@@ -62,7 +68,7 @@ async def _extract_nickname_with_llm(raw: str) -> str:
     return text.splitlines()[0].strip() or "主人"
 
 
-async def _extract_ai_profile_with_llm(raw: str) -> tuple[str, str]:
+async def _extract_ai_profile_with_llm(raw: str, conversation_context: str) -> tuple[str, str]:
     text = (raw or "").strip()
     if not text:
         return "PAI", "🤖"
@@ -77,7 +83,12 @@ async def _extract_ai_profile_with_llm(raw: str) -> tuple[str, str]:
             "只输出 JSON: {\"ai_name\":\"...\",\"ai_emoji\":\"...\"}，不要输出其他文本。"
         )
     )
-    human = HumanMessage(content=f"用户消息:\n{text}")
+    human = HumanMessage(
+        content=(
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"用户消息:\n{text}"
+        )
+    )
 
     ai_name = ""
     ai_emoji = ""
@@ -95,7 +106,7 @@ async def _extract_ai_profile_with_llm(raw: str) -> tuple[str, str]:
     return ai_name, emoji
 
 
-async def _understand_binding_answer(raw: str) -> str:
+async def _understand_binding_answer(raw: str, conversation_context: str) -> str:
     text = (raw or "").strip()
     if not text:
         return "unknown"
@@ -111,7 +122,12 @@ async def _understand_binding_answer(raw: str) -> str:
             "无法确定时 decision=unknown。"
         )
     )
-    human = HumanMessage(content=text)
+    human = HumanMessage(
+        content=(
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"用户输入:\n{text}"
+        )
+    )
     try:
         response = await llm.ainvoke([system, human])
         data = _parse_json_object(str(response.content))
@@ -129,6 +145,7 @@ async def onboarding_node(state: GraphState) -> GraphState:
     user = await session.get(User, state["user_id"])
     if not user:
         return {**state, "responses": ["未找到用户信息。"]}
+    context_text = render_conversation_context(state)
 
     # Optional cross-platform account binding prompt for first-time users.
     if user.setup_stage == SetupStage.NEW and int(user.binding_stage or 0) == 0:
@@ -144,7 +161,7 @@ async def onboarding_node(state: GraphState) -> GraphState:
 
     if user.setup_stage == SetupStage.NEW and int(user.binding_stage or 0) == 1:
         answer = (message.content or "").strip().lower()
-        decision = await _understand_binding_answer(answer)
+        decision = await _understand_binding_answer(answer, context_text)
         yes_tokens = ("有", "有的", "有账号", "yes", "y")
         no_tokens = ("没有", "没", "无", "no", "n")
         continue_tokens = ("继续", "continue", "go on", "next")
@@ -194,7 +211,7 @@ async def onboarding_node(state: GraphState) -> GraphState:
         }
 
     if user.setup_stage == SetupStage.USER_NAMED:
-        nickname = await _extract_nickname_with_llm(message.content or "")
+        nickname = await _extract_nickname_with_llm(message.content or "", context_text)
         user.nickname = nickname
         user.setup_stage = SetupStage.AI_NAMED
         session.add(user)
@@ -205,7 +222,7 @@ async def onboarding_node(state: GraphState) -> GraphState:
         }
 
     if user.setup_stage == SetupStage.AI_NAMED:
-        ai_name, emoji = await _extract_ai_profile_with_llm(message.content or "")
+        ai_name, emoji = await _extract_ai_profile_with_llm(message.content or "", context_text)
         user.ai_name = ai_name
         user.ai_emoji = emoji
         user.setup_stage = SetupStage.COMPLETED

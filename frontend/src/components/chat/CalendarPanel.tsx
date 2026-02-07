@@ -47,6 +47,18 @@ function dayNumber(value: string): string {
   return String(Number(value.slice(-2)));
 }
 
+function formatTimeValue(value: string): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "--:--";
+  const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) {
+    // Fallback: keep useful substring, avoid "Invalid Date" on UI.
+    return raw.length >= 16 ? raw.slice(11, 16) : raw;
+  }
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 export function CalendarPanel({ token }: CalendarPanelProps) {
   const [cursor, setCursor] = useState<Date>(() => firstDay(new Date()));
   const startDate = formatDate(firstDay(cursor));
@@ -56,6 +68,8 @@ export function CalendarPanel({ token }: CalendarPanelProps) {
   const { data } = useQuery<CalendarResponse>({
     queryKey: ["calendar", startDate, endDate],
     queryFn: () => fetchCalendar(token, startDate, endDate),
+    enabled: !!token,
+    refetchInterval: token ? 15000 : false,
   });
 
   const dayMap = useMemo(() => {
@@ -210,7 +224,7 @@ export function CalendarPanel({ token }: CalendarPanelProps) {
                              {item.content}
                            </p>
                            <p className="text-xs text-content-tertiary mt-0.5">
-                             {new Date(item.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                             {formatTimeValue(item.trigger_time)}
                            </p>
                          </div>
                       </div>

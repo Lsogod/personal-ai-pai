@@ -4,6 +4,7 @@ from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
 from app.models.user import User
 from app.services.llm import get_llm
@@ -51,12 +52,14 @@ async def guide_node(state: GraphState) -> GraphState:
     skills = await list_skills_with_source(session, user.id)
     skill_context = _build_skill_context(skills)
     guide_doc = _load_guide_doc()
+    context_text = render_conversation_context(state)
 
     llm = get_llm()
     system = SystemMessage(
         content=(
             "你是 PAI 的帮助与能力说明助手。"
             "你必须基于提供的《平台说明文档》与《当前用户技能上下文》回答。"
+            "如果用户问到之前聊过什么，必须优先参考会话上下文作答。"
             "不要编造文档外功能。"
             "涉及命令时，只能使用以下命令族："
             "/new /history /switch /rename /delete /ledger(list|update|delete) "
@@ -75,6 +78,7 @@ async def guide_node(state: GraphState) -> GraphState:
         content=(
             f"《平台说明文档》:\n{guide_doc}\n\n"
             f"《当前用户技能上下文》:\n{skill_context}\n\n"
+            f"《当前会话上下文》:\n{context_text}\n\n"
             f"用户提问:\n{content}"
         )
     )

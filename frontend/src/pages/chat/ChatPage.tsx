@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiRequest, streamSsePost } from "../../lib/api";
@@ -54,13 +54,59 @@ export function ChatPage() {
     queryKey: ["history"],
     enabled: !!token,
     queryFn: () => apiRequest("/api/chat/history", {}, token),
+    refetchInterval: token ? 15000 : false,
   });
 
   const { data: stats = emptyStats } = useQuery<LedgerStats>({
     queryKey: ["stats"],
     enabled: !!token,
     queryFn: () => apiRequest("/api/stats/ledger", {}, token),
+    refetchInterval: token ? 15000 : false,
   });
+
+  async function refreshSideData() {
+    await Promise.all([
+      queryClient.refetchQueries({ queryKey: ["history"], type: "active" }),
+      queryClient.refetchQueries({ queryKey: ["calendar"], type: "active" }),
+      queryClient.refetchQueries({ queryKey: ["ledgers"], type: "active" }),
+      queryClient.refetchQueries({ queryKey: ["stats"], type: "active" }),
+      queryClient.refetchQueries({ queryKey: ["conversations"], type: "active" }),
+    ]);
+  }
+
+  useEffect(() => {
+    if (!token) return;
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const url = `${protocol}://${window.location.host}/api/notifications/ws?token=${encodeURIComponent(token)}`;
+    const ws = new WebSocket(url);
+
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data || "{}");
+        if (payload?.type === "reminder" && payload?.content) {
+          const reminderMessage: ChatMessage = {
+            role: "assistant",
+            content: String(payload.content),
+            created_at: String(payload.created_at || new Date().toISOString()),
+          };
+          queryClient.setQueryData<ChatMessage[]>(["history"], (prev) => [
+            ...(prev || []),
+            reminderMessage,
+          ]);
+          void refreshSideData();
+        }
+        if (payload?.type === "message" && payload?.content) {
+          void refreshSideData();
+        }
+      } catch {
+        // Ignore malformed websocket payloads.
+      }
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [token, queryClient]);
 
   const sendMutation = useMutation<
     void,
@@ -114,12 +160,8 @@ export function ChatPage() {
         streamFlushTimerRef.current = null;
       }
       setStreamingReply("");
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["conversations"] }),
-        queryClient.invalidateQueries({ queryKey: ["history"] }),
-        queryClient.invalidateQueries({ queryKey: ["profile"] }),
-        queryClient.invalidateQueries({ queryKey: ["stats"] }),
-      ]);
+      await queryClient.invalidateQueries({ queryKey: ["profile"] });
+      await refreshSideData();
     },
     onError: (_error, _payload, context) => {
       if (context?.previousHistory) {

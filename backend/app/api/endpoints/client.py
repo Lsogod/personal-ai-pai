@@ -71,6 +71,7 @@ from app.services.skills import (
     render_skill_from_request,
 )
 from app.tools.finance import delete_ledger, query_stats, update_ledger
+from app.services.realtime import get_notification_hub
 
 
 router = APIRouter(prefix="/api")
@@ -452,6 +453,30 @@ async def chat_ws(websocket: WebSocket):
                     await websocket.send_json({"ok": True, "responses": result.get("responses", [])})
     except WebSocketDisconnect:
         return
+
+
+@router.websocket("/notifications/ws")
+async def notifications_ws(websocket: WebSocket):
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4401)
+        return
+    try:
+        user_id = decode_token(token)
+    except Exception:
+        await websocket.close(code=4401)
+        return
+
+    hub = get_notification_hub()
+    await hub.connect(user_id, websocket)
+    try:
+        while True:
+            # Keep connection open; incoming content is optional (client ping/no-op).
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await hub.disconnect(user_id, websocket)
+    except Exception:
+        await hub.disconnect(user_id, websocket)
 
 
 @router.get("/stats/ledger")

@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import select
 
 from app.core.config import get_settings
+from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
 from app.models.ledger import Ledger
 from app.models.schedule import Schedule
@@ -27,6 +28,18 @@ CALENDAR_HINT_PATTERN = re.compile(r"(日历|日程|行程|安排)")
 DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
 TIME_QUERY_PATTERN = re.compile(
     r"(现在|此刻|当前).*(几点|时间|日期|几号|星期)|^(几点|时间|日期|今天几号|今天星期几)$"
+)
+CONTEXT_RECALL_TOKENS = (
+    "之前我",
+    "我刚才",
+    "我之前",
+    "上一句",
+    "上一条",
+    "前面我",
+    "上文",
+    "我问了什么",
+    "我们刚才聊",
+    "还记得我",
 )
 
 
@@ -131,7 +144,7 @@ def _parse_run_at_local(value: str | None, timezone: str) -> datetime | None:
     return None
 
 
-async def _understand_secretary_message(content: str) -> dict:
+async def _understand_secretary_message(content: str, conversation_context: str) -> dict:
     settings = get_settings()
     tz = settings.timezone
     now_local = datetime.now(ZoneInfo(tz)).strftime("%Y-%m-%d %H:%M")
@@ -149,9 +162,34 @@ async def _understand_secretary_message(content: str) -> dict:
             f"用户时区: {tz}。当前本地时间: {now_local}。"
         )
     )
-    human = HumanMessage(content=content)
+    human = HumanMessage(
+        content=(
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"用户输入:\n{content}"
+        )
+    )
     response = await llm.ainvoke([system, human])
     return _parse_json_object(str(response.content))
+
+
+async def _answer_context_recall(content: str, conversation_context: str) -> str:
+    llm = get_llm()
+    system = SystemMessage(
+        content=(
+            "你是会话回忆助手。请仅依据给定会话上下文回答用户问题。"
+            "若上下文不足，明确说明缺失点，不要假装没有记忆能力。"
+            "回答简洁。"
+        )
+    )
+    human = HumanMessage(
+        content=(
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"用户问题:\n{content}"
+        )
+    )
+    response = await llm.ainvoke([system, human])
+    text = str(response.content or "").strip()
+    return text or "我这边没有提取到足够的历史内容，请你再说一次具体要回忆的点。"
 
 
 def _resolve_calendar_window_from_fields(
@@ -244,10 +282,21 @@ async def secretary_node(state: GraphState) -> GraphState:
     if not user:
         return {**state, "responses": ["未找到用户信息。"]}
     content = (message.content or "").strip()
+    context_text = render_conversation_context(state)
+    lowered = content.lower()
+    if any(token in lowered for token in CONTEXT_RECALL_TOKENS):
+        try:
+            recall_text = await _answer_context_recall(content, context_text)
+            return {**state, "responses": [recall_text]}
+        except Exception:
+            return {
+                **state,
+                "responses": ["我能读取当前会话上下文，但这次回忆失败了，请重试一次。"],
+            }
 
     parsed: dict = {}
     try:
-        parsed = await _understand_secretary_message(content)
+        parsed = await _understand_secretary_message(content, context_text)
     except Exception:
         parsed = {}
 
