@@ -156,9 +156,42 @@ async def list_user_skills(session: AsyncSession, user_id: int) -> list[dict]:
             "description": skill.description,
             "status": skill.status,
             "active_version": skill.active_version,
+            "source": "user",
+            "read_only": False,
         }
         for skill in skills
     ]
+
+
+def list_builtin_skills() -> list[dict]:
+    docs = _load_static_skill_docs()
+    return [
+        {
+            "slug": doc.slug,
+            "name": doc.name,
+            "description": doc.description,
+            "status": "BUILTIN",
+            "active_version": 1,
+            "source": "builtin",
+            "read_only": True,
+        }
+        for doc in docs
+    ]
+
+
+def get_builtin_skill(slug: str) -> SkillDoc | None:
+    target = _slugify(slug or "")
+    for doc in _load_static_skill_docs():
+        if _slugify(doc.slug) == target:
+            return doc
+    return None
+
+
+async def list_skills_with_source(session: AsyncSession, user_id: int) -> list[dict]:
+    builtin = list_builtin_skills()
+    user = await list_user_skills(session, user_id)
+    builtin_sorted = sorted(builtin, key=lambda item: item["name"].lower())
+    return [*builtin_sorted, *user]
 
 
 async def get_skill(session: AsyncSession, user_id: int, slug: str) -> Skill | None:

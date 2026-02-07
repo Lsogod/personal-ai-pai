@@ -6,6 +6,8 @@ export interface SkillItem {
   description: string;
   status: string;
   active_version: number;
+  source: "builtin" | "user" | string;
+  read_only: boolean;
 }
 
 export interface SkillDetail extends SkillItem {
@@ -41,6 +43,37 @@ export interface LedgerItem {
   item: string;
   transaction_date: string;
   created_at: string;
+}
+
+export interface CalendarLedgerItem {
+  id: number;
+  amount: number;
+  currency: string;
+  category: string;
+  item: string;
+  transaction_date: string;
+}
+
+export interface CalendarScheduleItem {
+  id: number;
+  content: string;
+  trigger_time: string;
+  status: string;
+}
+
+export interface CalendarDay {
+  date: string;
+  ledger_total: number;
+  ledger_count: number;
+  schedule_count: number;
+  ledgers: CalendarLedgerItem[];
+  schedules: CalendarScheduleItem[];
+}
+
+export interface CalendarResponse {
+  start_date: string;
+  end_date: string;
+  days: CalendarDay[];
 }
 
 export async function apiRequest(
@@ -126,8 +159,16 @@ export function fetchSkills(token: string | null | undefined) {
   return apiRequest("/api/skills", {}, token) as Promise<SkillItem[]>;
 }
 
-export function fetchSkillDetail(slug: string, token: string | null | undefined) {
-  return apiRequest(`/api/skills/${slug}`, {}, token) as Promise<SkillDetail>;
+export function fetchSkillDetail(
+  slug: string,
+  source: string,
+  token: string | null | undefined
+) {
+  return apiRequest(
+    `/api/skills/${slug}?source=${encodeURIComponent(source || "user")}`,
+    {},
+    token
+  ) as Promise<SkillDetail>;
 }
 
 export function createSkillDraft(
@@ -208,4 +249,16 @@ export function deleteLedger(
     { method: "DELETE" },
     token
   ) as Promise<{ ok: boolean; id: number }>;
+}
+
+export function fetchCalendar(
+  token: string | null | undefined,
+  startDate: string,
+  endDate: string
+) {
+  return apiRequest(
+    `/api/calendar?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`,
+    {},
+    token
+  ) as Promise<CalendarResponse>;
 }

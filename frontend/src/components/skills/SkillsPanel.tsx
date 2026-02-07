@@ -37,7 +37,7 @@ function prettyApiError(err: unknown): string {
 
 export function SkillsPanel({ token }: SkillsPanelProps) {
   const queryClient = useQueryClient();
-  const [selectedSlug, setSelectedSlug] = useState<string>("");
+  const [selectedKey, setSelectedKey] = useState<string>("");
   const [skillName, setSkillName] = useState("");
   const [requestText, setRequestText] = useState("");
   const [draftPreview, setDraftPreview] = useState("");
@@ -49,14 +49,14 @@ export function SkillsPanel({ token }: SkillsPanelProps) {
   });
 
   const selected = useMemo(
-    () => skills.find((item) => item.slug === selectedSlug),
-    [skills, selectedSlug]
+    () => skills.find((item) => `${item.source}:${item.slug}` === selectedKey),
+    [skills, selectedKey]
   );
 
   const { data: selectedDetail } = useQuery<SkillDetail>({
-    queryKey: ["skill-detail", selectedSlug],
-    enabled: !!selectedSlug,
-    queryFn: () => fetchSkillDetail(selectedSlug, token)
+    queryKey: ["skill-detail", selected?.source, selected?.slug],
+    enabled: !!selected,
+    queryFn: () => fetchSkillDetail(selected!.slug, selected!.source, token)
   });
 
   const draftMutation = useMutation({
@@ -65,17 +65,17 @@ export function SkillsPanel({ token }: SkillsPanelProps) {
         {
           request: requestText,
           skill_name: payload.update ? undefined : skillName || undefined,
-          skill_slug: payload.update ? selectedSlug : undefined
+          skill_slug: payload.update ? selected?.slug : undefined
         },
         token
       ),
     onSuccess: async (res) => {
       setDraftPreview(res.content_md);
-      setSelectedSlug(res.slug);
+      setSelectedKey(`user:${res.slug}`);
       setFeedback(`草稿已保存：${res.slug} v${res.version}`);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["skills"] }),
-        queryClient.invalidateQueries({ queryKey: ["skill-detail", res.slug] })
+        queryClient.invalidateQueries({ queryKey: ["skill-detail", "user", res.slug] })
       ]);
     },
     onError: (err) => {
@@ -84,12 +84,12 @@ export function SkillsPanel({ token }: SkillsPanelProps) {
   });
 
   const publishMutation = useMutation({
-    mutationFn: () => publishSkill(selectedSlug, token),
+    mutationFn: () => publishSkill(selected!.slug, token),
     onSuccess: async () => {
-      setFeedback(`已发布技能：${selectedSlug}`);
+      setFeedback(`已发布技能：${selected?.slug}`);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["skills"] }),
-        queryClient.invalidateQueries({ queryKey: ["skill-detail", selectedSlug] })
+        queryClient.invalidateQueries({ queryKey: ["skill-detail", selected?.source, selected?.slug] })
       ]);
     },
     onError: (err) => {
@@ -98,12 +98,12 @@ export function SkillsPanel({ token }: SkillsPanelProps) {
   });
 
   const disableMutation = useMutation({
-    mutationFn: () => disableSkill(selectedSlug, token),
+    mutationFn: () => disableSkill(selected!.slug, token),
     onSuccess: async () => {
-      setFeedback(`已停用技能：${selectedSlug}`);
+      setFeedback(`已停用技能：${selected?.slug}`);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["skills"] }),
-        queryClient.invalidateQueries({ queryKey: ["skill-detail", selectedSlug] })
+        queryClient.invalidateQueries({ queryKey: ["skill-detail", selected?.source, selected?.slug] })
       ]);
     },
     onError: (err) => {
@@ -127,16 +127,18 @@ export function SkillsPanel({ token }: SkillsPanelProps) {
           </Button>
           <div className="space-y-2">
             {skills.length === 0 ? (
-              <p className="text-sm text-slate-500">暂无动态技能。先在右侧生成草稿。</p>
+              <p className="text-sm text-slate-500">暂无技能。</p>
             ) : (
               skills.map((item) => {
-                const active = selectedSlug === item.slug;
+                const itemKey = `${item.source}:${item.slug}`;
+                const active = selectedKey === itemKey;
+                const sourceLabel = item.source === "builtin" ? "内置" : "用户";
                 return (
                   <button
-                    key={item.slug}
+                    key={itemKey}
                     type="button"
                     onClick={() => {
-                      setSelectedSlug(item.slug);
+                      setSelectedKey(itemKey);
                       setDraftPreview("");
                       setFeedback("");
                     }}
@@ -150,7 +152,7 @@ export function SkillsPanel({ token }: SkillsPanelProps) {
                     <p className="text-sm font-semibold text-slate-900">{item.name}</p>
                     <p className="mt-1 text-xs text-slate-500">{item.slug}</p>
                     <p className="mt-1 text-xs text-slate-600">
-                      {item.status} · v{item.active_version}
+                      {sourceLabel} · {item.status} · v{item.active_version}
                     </p>
                   </button>
                 );
@@ -192,21 +194,21 @@ export function SkillsPanel({ token }: SkillsPanelProps) {
                 setFeedback("");
                 draftMutation.mutate({ update: true });
               }}
-              disabled={!selectedSlug || !requestText.trim() || draftMutation.isPending}
+              disabled={!selected || selected.source !== "user" || !requestText.trim() || draftMutation.isPending}
             >
               更新当前技能
             </Button>
             <Button
               variant="subtle"
               onClick={() => publishMutation.mutate()}
-              disabled={!selectedSlug || publishMutation.isPending}
+              disabled={!selected || selected.read_only || publishMutation.isPending}
             >
               发布
             </Button>
             <Button
               variant="ghost"
               onClick={() => disableMutation.mutate()}
-              disabled={!selectedSlug || disableMutation.isPending}
+              disabled={!selected || selected.read_only || disableMutation.isPending}
             >
               停用
             </Button>
@@ -224,7 +226,7 @@ export function SkillsPanel({ token }: SkillsPanelProps) {
               {draftPreview
                 ? "本次生成草稿"
                 : selected
-                  ? `已选技能 ${selected.slug} 当前版本`
+                  ? `已选技能 ${selected.source}:${selected.slug} 当前版本`
                   : "未选择"}
             </p>
             <div className="prose prose-sm mt-2 max-w-none text-slate-800">
@@ -238,4 +240,3 @@ export function SkillsPanel({ token }: SkillsPanelProps) {
     </div>
   );
 }
-

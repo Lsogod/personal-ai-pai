@@ -8,7 +8,7 @@ from app.graph.state import GraphState
 from app.services.llm import get_llm
 
 
-VALID_INTENTS = {"skill_manager", "finance", "secretary", "writer", "unknown"}
+VALID_INTENTS = {"skill_manager", "finance", "secretary", "writer", "guide", "unknown"}
 
 
 def _extract_json_object(text: str) -> dict:
@@ -29,10 +29,11 @@ async def _classify_intent_with_llm(content: str) -> str:
     system = SystemMessage(
         content=(
             "你是消息路由器。请将用户消息分类到一个意图，且只输出 JSON。"
-            "可选 intent 仅限: skill_manager, finance, secretary, writer, unknown。"
+            "可选 intent 仅限: skill_manager, finance, secretary, writer, guide, unknown。"
             "当用户在管理技能（新增/创建/更新/发布/停用/列出技能）时，intent=skill_manager。"
             "当用户记账、消费统计、小票识别、账单增删改查时，intent=finance。"
-            "当用户提醒、日程、定时任务时，intent=secretary。"
+            "当用户提醒、日程、定时任务、日历查询时，intent=secretary。"
+            "当用户在询问怎么用、教程、帮助、命令说明、功能介绍时，intent=guide。"
             "写作/翻译/润色/普通问答时，intent=writer。"
             "若不确定，intent=unknown。"
         )
@@ -67,22 +68,18 @@ def route_intent(state: GraphState) -> str:
         return "onboarding"
 
     routed = str(state.get("intent") or "").strip().lower()
-    if routed in {"skill_manager", "finance", "secretary", "writer"}:
+    if routed in {"skill_manager", "finance", "secretary", "writer", "guide"}:
         return routed
 
     content = (message.content or "").lower()
-    if "/skill" in content or "新增技能" in content or "创建技能" in content:
+    # Command fallback when LLM route fails.
+    if content.startswith("/help"):
+        return "guide"
+    if content.startswith("/skill"):
         return "skill_manager"
-    if (
-        message.image_urls
-        or "记账" in content
-        or "消费" in content
-        or "账单" in content
-        or "/ledger" in content
-    ):
+    if message.image_urls or content.startswith("/ledger"):
         return "finance"
-    if "提醒" in content or "日程" in content or "schedule" in content:
+    if content.startswith("/calendar"):
         return "secretary"
-    if "翻译" in content or "润色" in content or "写" in content:
-        return "writer"
+    # Default route fallback.
     return "writer"

@@ -10,6 +10,7 @@ from app.graph.nodes.finance import finance_node
 from app.graph.nodes.secretary import secretary_node
 from app.graph.nodes.writer import writer_node
 from app.graph.nodes.skill_manager import skill_manager_node
+from app.graph.nodes.guide import guide_node
 
 _graph = None
 _graph_lock = asyncio.Lock()
@@ -26,6 +27,7 @@ def _build_graph(checkpointer):
     graph.add_node("secretary", secretary_node)
     graph.add_node("writer", writer_node)
     graph.add_node("skill_manager", skill_manager_node)
+    graph.add_node("guide", guide_node)
 
     graph.set_entry_point("router")
 
@@ -38,6 +40,7 @@ def _build_graph(checkpointer):
             "secretary": "secretary",
             "writer": "writer",
             "skill_manager": "skill_manager",
+            "guide": "guide",
         },
     )
 
@@ -46,6 +49,7 @@ def _build_graph(checkpointer):
     graph.add_edge("secretary", END)
     graph.add_edge("writer", END)
     graph.add_edge("skill_manager", END)
+    graph.add_edge("guide", END)
 
     return graph.compile(checkpointer=checkpointer)
 

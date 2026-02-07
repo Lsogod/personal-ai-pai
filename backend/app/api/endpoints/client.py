@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
@@ -13,7 +13,14 @@ from app.db.session import get_session, AsyncSessionLocal
 from app.models.user import User, SetupStage
 from app.models.message import Message
 from app.models.ledger import Ledger
+from app.models.schedule import Schedule
 from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse
+from app.schemas.calendar import (
+    CalendarDayResponse,
+    CalendarLedgerItem,
+    CalendarResponse,
+    CalendarScheduleItem,
+)
 from app.schemas.chat import ChatSendRequest, ChatSendResponse, ProfileResponse
 from app.schemas.conversation import ConversationCreateRequest, ConversationResponse
 from app.schemas.ledger import LedgerDeleteResponse, LedgerItemResponse, LedgerUpdateRequest
@@ -31,6 +38,7 @@ from app.core.security import (
     verify_password,
 )
 from app.services.audit import log_event
+from app.services.binding import ensure_identity, list_identities
 from app.services.message_handler import handle_message
 from app.services.conversations import (
     create_new_conversation,
@@ -41,9 +49,10 @@ from app.services.conversations import (
 from app.services.skills import (
     create_or_update_skill_draft,
     disable_skill,
+    get_builtin_skill,
     get_skill,
     get_skill_version_content,
-    list_user_skills,
+    list_skills_with_source,
     publish_skill,
     render_skill_from_request,
 )
@@ -51,6 +60,18 @@ from app.tools.finance import delete_ledger, query_stats, update_ledger
 
 
 router = APIRouter(prefix="/api")
+
+
+def _parse_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text)
+    except Exception:
+        return None
 
 
 @router.post("/auth/register", response_model=TokenResponse)
@@ -68,6 +89,8 @@ async def register(payload: RegisterRequest, session: AsyncSession = Depends(get
         hashed_password=hash_password(payload.password),
     )
     session.add(user)
+    await session.flush()
+    await ensure_identity(session, user.id, "web", payload.email)
     await session.commit()
     await session.refresh(user)
 
@@ -103,6 +126,15 @@ async def profile(
         email=user.email,
         setup_stage=user.setup_stage,
     )
+
+
+@router.get("/user/identities")
+async def user_identities(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    rows = await list_identities(session, user.id)
+    return rows
 
 
 @router.get("/chat/history")
@@ -315,6 +347,104 @@ async def ledger_stats(
     return await query_stats(session, user_id=user.id, days=days)
 
 
+@router.get("/calendar", response_model=CalendarResponse)
+async def calendar_events(
+    start_date: str | None = Query(default=None, description="YYYY-MM-DD"),
+    end_date: str | None = Query(default=None, description="YYYY-MM-DD, exclusive"),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    today = datetime.utcnow().date()
+    default_start = today.replace(day=1)
+    if default_start.month == 12:
+        default_end = date(default_start.year + 1, 1, 1)
+    else:
+        default_end = date(default_start.year, default_start.month + 1, 1)
+
+    start = _parse_date(start_date) or default_start
+    end = _parse_date(end_date) or default_end
+    if end <= start:
+        raise HTTPException(status_code=400, detail="end_date must be greater than start_date")
+    if (end - start).days > 120:
+        raise HTTPException(status_code=400, detail="date range too large, max 120 days")
+
+    start_at = datetime.combine(start, datetime.min.time())
+    end_at = datetime.combine(end, datetime.min.time())
+
+    ledger_result = await session.execute(
+        select(Ledger)
+        .where(
+            Ledger.user_id == user.id,
+            Ledger.transaction_date >= start_at,
+            Ledger.transaction_date < end_at,
+        )
+        .order_by(Ledger.transaction_date.asc(), Ledger.id.asc())
+    )
+    schedule_result = await session.execute(
+        select(Schedule)
+        .where(
+            Schedule.user_id == user.id,
+            Schedule.trigger_time >= start_at,
+            Schedule.trigger_time < end_at,
+        )
+        .order_by(Schedule.trigger_time.asc(), Schedule.id.asc())
+    )
+
+    day_map: dict[str, dict] = {}
+    cursor = start
+    while cursor < end:
+        key = cursor.isoformat()
+        day_map[key] = {
+            "date": key,
+            "ledger_total": 0.0,
+            "ledger_count": 0,
+            "schedule_count": 0,
+            "ledgers": [],
+            "schedules": [],
+        }
+        cursor += timedelta(days=1)
+
+    for row in ledger_result.scalars().all():
+        key = row.transaction_date.date().isoformat()
+        if key not in day_map:
+            continue
+        day = day_map[key]
+        day["ledger_total"] += float(row.amount)
+        day["ledger_count"] += 1
+        day["ledgers"].append(
+            CalendarLedgerItem(
+                id=row.id,
+                amount=float(row.amount),
+                currency=row.currency,
+                category=row.category,
+                item=row.item,
+                transaction_date=row.transaction_date.isoformat(),
+            )
+        )
+
+    for row in schedule_result.scalars().all():
+        key = row.trigger_time.date().isoformat()
+        if key not in day_map:
+            continue
+        day = day_map[key]
+        day["schedule_count"] += 1
+        day["schedules"].append(
+            CalendarScheduleItem(
+                id=row.id,
+                content=row.content,
+                trigger_time=row.trigger_time.isoformat(),
+                status=row.status,
+            )
+        )
+
+    days = [CalendarDayResponse(**day_map[key]) for key in sorted(day_map.keys())]
+    return CalendarResponse(
+        start_date=start.isoformat(),
+        end_date=end.isoformat(),
+        days=days,
+    )
+
+
 @router.get("/ledgers", response_model=List[LedgerItemResponse])
 async def ledger_list(
     limit: int = Query(default=30, ge=1, le=200),
@@ -393,16 +523,33 @@ async def skills_list(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    rows = await list_user_skills(session, user.id)
+    rows = await list_skills_with_source(session, user.id)
     return [SkillItemResponse(**item) for item in rows]
 
 
 @router.get("/skills/{slug}", response_model=SkillDetailResponse)
 async def skills_detail(
     slug: str,
+    source: str = Query(default="user"),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
+    source_key = (source or "user").strip().lower()
+    if source_key == "builtin":
+        doc = get_builtin_skill(slug)
+        if not doc:
+            raise HTTPException(status_code=404, detail="skill not found")
+        return SkillDetailResponse(
+            slug=doc.slug,
+            name=doc.name,
+            description=doc.description,
+            status="BUILTIN",
+            active_version=1,
+            source="builtin",
+            read_only=True,
+            content_md=doc.content,
+        )
+
     skill = await get_skill(session, user.id, slug)
     if not skill:
         raise HTTPException(status_code=404, detail="skill not found")
@@ -413,6 +560,8 @@ async def skills_detail(
         description=skill.description,
         status=skill.status,
         active_version=skill.active_version,
+        source="user",
+        read_only=False,
         content_md=content_md,
     )
 
@@ -480,6 +629,8 @@ async def skills_publish(
         description=skill.description,
         status=skill.status,
         active_version=skill.active_version,
+        source="user",
+        read_only=False,
     )
 
 
@@ -505,4 +656,6 @@ async def skills_disable(
         description=skill.description,
         status=skill.status,
         active_version=skill.active_version,
+        source="user",
+        read_only=False,
     )

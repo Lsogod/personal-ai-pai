@@ -31,6 +31,7 @@ class User(SQLModel, table=True):
     email: Optional[str] = Field(default=None, index=True)
     hashed_password: Optional[str] = Field(default=None)
     active_conversation_id: Optional[int] = Field(default=None, index=True)
+    binding_stage: int = Field(default=0, index=True)
 
     nickname: str = Field(default="主人")
     ai_name: str = Field(default="PAI")

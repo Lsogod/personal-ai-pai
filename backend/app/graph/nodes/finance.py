@@ -21,9 +21,6 @@ from app.tools.vision import analyze_receipt
 
 AMOUNT_PATTERN = re.compile(r"(\d+(?:\.\d{1,2})?)")
 LEDGER_ID_PATTERN = re.compile(r"(?:账单\s*#?\s*|#)(\d+)")
-CORRECTION_HINT_PATTERN = re.compile(r"(错了|更正|改成|改为|修正|记错|不是|应该是)")
-QUERY_HINT_PATTERN = re.compile(r"(统计|总额|消费|账单概览|花了多少|本月)")
-DELETE_HINT_PATTERN = re.compile(r"(删除|删掉|去掉|移除)")
 
 CATEGORY_MAP = {
     "餐饮": "餐饮",
@@ -124,7 +121,7 @@ async def _understand_finance_message(content: str) -> dict:
         content=(
             "你是记账意图解析器。只输出 JSON。"
             "字段: intent, ledger_id, amount, item, category, confidence。"
-            "intent 仅可为 insert, correct_latest, correct_by_id, delete_latest, delete_by_id, query, list。"
+            "intent 仅可为 insert, correct_latest, correct_by_id, delete_latest, delete_by_id, query, list, unknown。"
             "若用户在纠正上一笔（例如“错了...”“改成...”），intent=correct_latest。"
             "若用户在纠正指定账单（例如“把账单#12改成28元”），intent=correct_by_id，并给出 ledger_id。"
             "若用户在删除最近一笔，intent=delete_latest。"
@@ -132,6 +129,7 @@ async def _understand_finance_message(content: str) -> dict:
             "若用户在新增一笔支出，intent=insert。"
             "若用户在问统计数据，intent=query。"
             "若用户在要账单列表，intent=list。"
+            "无法确定时 intent=unknown。"
             "amount 为数字；item 为简洁摘要，必须去掉“错了/改成”等词。"
             "category 不确定填“其他”。"
         )
@@ -293,6 +291,18 @@ async def finance_node(state: GraphState) -> GraphState:
         parsed = {}
 
     intent = str(parsed.get("intent") or "").strip().lower()
+    allowed_intents = {
+        "insert",
+        "correct_latest",
+        "correct_by_id",
+        "delete_latest",
+        "delete_by_id",
+        "query",
+        "list",
+        "unknown",
+    }
+    if intent not in allowed_intents:
+        intent = "unknown"
 
     ledger_id = parsed.get("ledger_id")
     try:
@@ -318,25 +328,13 @@ async def finance_node(state: GraphState) -> GraphState:
     if category == "其他":
         category = _normalize_category(content)
 
-    if not intent:
-        if "账单列表" in content or "列出账单" in content or "最近账单" in content:
-            intent = "list"
-        elif DELETE_HINT_PATTERN.search(content) and ledger_id is not None:
-            intent = "delete_by_id"
-        elif DELETE_HINT_PATTERN.search(content):
-            intent = "delete_latest"
-        elif QUERY_HINT_PATTERN.search(content):
-            intent = "query"
-        elif ledger_id is not None and CORRECTION_HINT_PATTERN.search(content):
-            intent = "correct_by_id"
-        elif CORRECTION_HINT_PATTERN.search(content):
-            intent = "correct_latest"
-        else:
-            intent = "insert"
-    elif ledger_id is not None and CORRECTION_HINT_PATTERN.search(content) and intent in {"insert", "correct_latest", "query"}:
-        intent = "correct_by_id"
-    elif ledger_id is not None and DELETE_HINT_PATTERN.search(content) and intent in {"insert", "delete_latest", "query"}:
-        intent = "delete_by_id"
+    if intent == "unknown":
+        return {
+            **state,
+            "responses": [
+                "我没完全理解你的账单意图。可直接说：`记一笔 午饭30`、`删除账单#12`、`把账单#12改成28元`、`列出最近账单`。"
+            ],
+        }
 
     if intent == "list":
         rows = await list_recent_ledgers(session, user_id, limit=10)

@@ -15,6 +15,8 @@ class SkillItemResponse(BaseModel):
     description: str
     status: str
     active_version: int
+    source: str = "user"
+    read_only: bool = False
 
 
 class SkillDraftResponse(BaseModel):
@@ -30,5 +32,6 @@ class SkillDetailResponse(BaseModel):
     description: str
     status: str
     active_version: int
+    source: str = "user"
+    read_only: bool = False
     content_md: str | None = None
-

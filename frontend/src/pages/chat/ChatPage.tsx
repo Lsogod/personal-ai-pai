@@ -10,6 +10,7 @@ import { LedgerStatsCard } from "../../components/chat/LedgerStatsCard";
 import { LedgerListCard } from "../../components/chat/LedgerListCard";
 import { ProfileCard } from "../../components/chat/ProfileCard";
 import { SkillsPanel } from "../../components/skills/SkillsPanel";
+import { CalendarPanel } from "../../components/chat/CalendarPanel";
 
 interface Profile {
   uuid: string;
@@ -32,7 +33,7 @@ export function ChatPage() {
   const { token, setToken } = useAuthStore();
   const queryClient = useQueryClient();
   const [streamingReply, setStreamingReply] = useState("");
-  const [activeView, setActiveView] = useState<"chat" | "skills">("chat");
+  const [activeView, setActiveView] = useState<"chat" | "skills" | "calendar">("chat");
 
   const { data: profile } = useQuery<Profile>({
     queryKey: ["profile"],
@@ -114,6 +115,12 @@ export function ChatPage() {
               >
                 技能
               </Button>
+              <Button
+                variant={activeView === "calendar" ? "default" : "ghost"}
+                onClick={() => setActiveView("calendar")}
+              >
+                日历
+              </Button>
               <Button variant="ghost" onClick={() => queryClient.invalidateQueries()}>
                 刷新
               </Button>
@@ -141,9 +148,13 @@ export function ChatPage() {
               <ProfileCard profile={profile} />
             </aside>
           </main>
-        ) : (
+        ) : activeView === "skills" ? (
           <main className="mt-4 flex-1">
             <SkillsPanel token={token} />
+          </main>
+        ) : (
+          <main className="mt-4 flex-1">
+            <CalendarPanel token={token} />
           </main>
         )}
       </div>

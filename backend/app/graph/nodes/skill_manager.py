@@ -7,9 +7,10 @@ from app.services.runtime_context import get_session
 from app.services.skills import (
     create_or_update_skill_draft,
     disable_skill,
+    get_builtin_skill,
     get_skill,
     get_skill_version_content,
-    list_user_skills,
+    list_skills_with_source,
     parse_skill_intent,
     publish_skill,
     render_skill_from_request,
@@ -18,6 +19,16 @@ from app.services.skills import (
 
 def _extract_slug(value: str) -> str:
     return (value or "").strip().lower().replace(" ", "-")
+
+
+def _parse_source_and_slug(value: str) -> tuple[str, str]:
+    raw = (value or "").strip()
+    if ":" in raw:
+        source, slug = raw.split(":", 1)
+        source_key = source.strip().lower()
+        if source_key in {"builtin", "user"}:
+            return source_key, _extract_slug(slug)
+    return "user", _extract_slug(raw)
 
 
 async def skill_manager_node(state: GraphState) -> GraphState:
@@ -35,16 +46,17 @@ async def skill_manager_node(state: GraphState) -> GraphState:
     request = str(intent.get("request") or content).strip()
 
     if action in {"list"}:
-        rows = await list_user_skills(session, user.id)
+        rows = await list_skills_with_source(session, user.id)
         if not rows:
             return {
                 **state,
                 "responses": ["你还没有动态技能。可发送：`/skill create 翻译专家` 来创建。"],
             }
-        lines = ["你的技能列表："]
+        lines = ["技能列表（含内置与用户）："]
         for row in rows:
+            source = "内置" if row.get("source") == "builtin" else "用户"
             lines.append(
-                f"- `{row['slug']}` | {row['name']} | {row['status']} | v{row['active_version']}"
+                f"- `[{source}] {row['source']}:{row['slug']}` | {row['name']} | {row['status']} | v{row['active_version']}"
             )
         return {**state, "responses": ["\n".join(lines)]}
 
@@ -81,32 +93,53 @@ async def skill_manager_node(state: GraphState) -> GraphState:
         return {**state, "responses": [f"已停用技能 `{slug}`。"]}
 
     if action in {"show"}:
-        slug = _extract_slug(target)
+        source, slug = _parse_source_and_slug(target)
         if not slug:
-            return {**state, "responses": ["请指定要查看的技能，例如：`/skill show translator`"]}
-        skill = await get_skill(session, user.id, slug)
-        if not skill:
-            return {**state, "responses": [f"未找到技能 `{slug}`。"]}
-        content_md = await get_skill_version_content(session, skill)
-        preview = (content_md or "").strip()
+            return {
+                **state,
+                "responses": ["请指定要查看的技能，例如：`/skill show builtin:translator` 或 `/skill show user:my-skill`。"],
+            }
+
+        if source == "builtin":
+            doc = get_builtin_skill(slug)
+            if not doc:
+                return {**state, "responses": [f"未找到内置技能 `{slug}`。"]}
+            preview = (doc.content or "").strip()
+            status = "BUILTIN"
+        else:
+            skill = await get_skill(session, user.id, slug)
+            if not skill:
+                doc = get_builtin_skill(slug)
+                if doc:
+                    preview = (doc.content or "").strip()
+                    status = "BUILTIN"
+                    source = "builtin"
+                else:
+                    return {**state, "responses": [f"未找到技能 `{slug}`。"]}
+            else:
+                content_md = await get_skill_version_content(session, skill)
+                preview = (content_md or "").strip()
+                status = str(skill.status)
         if len(preview) > 1200:
             preview = preview[:1200] + "\n...\n(已截断)"
         return {
             **state,
             "responses": [
-                f"技能 `{slug}` | {skill.status} | v{skill.active_version}\n\n{preview}"
+                f"技能 `{source}:{slug}` | {status}\n\n{preview}"
             ],
         }
 
     if action in {"create", "update"}:
         existing_content = None
         if action == "update":
-            slug = _extract_slug(target or skill_name)
+            source, slug = _parse_source_and_slug(target or skill_name)
             if not slug:
                 return {
                     **state,
                     "responses": ["请指定要更新的技能，例如：`/skill update translator 新增术语保留规则`"],
                 }
+            if source == "builtin":
+                return {**state, "responses": ["内置技能不可直接更新，请先 `/skill create <新技能名>` 复制后再改。"]}
             existing = await get_skill(session, user.id, slug)
             if not existing:
                 return {**state, "responses": [f"未找到技能 `{slug}`。"]}
