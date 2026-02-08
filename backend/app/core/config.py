@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = True
     allow_memory_checkpointer_fallback: bool = False
 
+    mcp_fetch_enabled: bool = True
+    mcp_fetch_url: str = "https://mcp.api-inference.modelscope.net/e358f42d048348/mcp"
+    mcp_fetch_timeout_sec: int = 30
+    mcp_fetch_default_max_length: int = 5000
+
     admin_token: str = ""
     dedup_ttl_seconds: int = 86400
 

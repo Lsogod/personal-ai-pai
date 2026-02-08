@@ -31,12 +31,14 @@ from app.schemas.chat import ChatSendRequest, ChatSendResponse, ProfileResponse
 from app.schemas.conversation import ConversationCreateRequest, ConversationResponse
 from app.schemas.conversation import ConversationDeleteResponse, ConversationUpdateRequest
 from app.schemas.ledger import LedgerDeleteResponse, LedgerItemResponse, LedgerUpdateRequest
+from app.schemas.mcp import MCPFetchRequest, MCPFetchResponse, MCPToolItem
 from app.schemas.skill import (
     SkillDetailResponse,
     SkillDraftRequest,
     SkillDraftResponse,
     SkillItemResponse,
 )
+from app.core.config import get_settings
 from app.core.security import (
     create_access_token,
     decode_token,
@@ -52,6 +54,7 @@ from app.services.binding import (
     list_identities,
 )
 from app.services.message_handler import handle_message
+from app.services.mcp_fetch import MCPFetchError, get_mcp_fetch_client
 from app.services.conversations import (
     create_new_conversation,
     delete_conversation,
@@ -125,6 +128,54 @@ async def login(payload: LoginRequest, session: AsyncSession = Depends(get_sessi
         raise HTTPException(status_code=401, detail="invalid credentials")
     token = create_access_token(user.id)
     return TokenResponse(access_token=token)
+
+
+@router.get("/mcp/tools", response_model=List[MCPToolItem])
+async def mcp_tools(
+    user: User = Depends(get_current_user),
+):
+    _ = user
+    settings = get_settings()
+    if not settings.mcp_fetch_enabled:
+        raise HTTPException(status_code=400, detail="mcp fetch disabled")
+    try:
+        tools = await get_mcp_fetch_client().list_tools()
+    except MCPFetchError as exc:
+        raise HTTPException(status_code=502, detail=f"mcp tools failed: {exc}") from exc
+
+    rows: list[MCPToolItem] = []
+    for item in tools:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            MCPToolItem(
+                name=str(item.get("name") or "").strip() or "unknown",
+                description=str(item.get("description") or "").strip() or "no description",
+            )
+        )
+    return rows
+
+
+@router.post("/mcp/fetch", response_model=MCPFetchResponse)
+async def mcp_fetch(
+    payload: MCPFetchRequest,
+    user: User = Depends(get_current_user),
+):
+    _ = user
+    settings = get_settings()
+    if not settings.mcp_fetch_enabled:
+        raise HTTPException(status_code=400, detail="mcp fetch disabled")
+
+    try:
+        content = await get_mcp_fetch_client().fetch(
+            url=payload.url,
+            max_length=payload.max_length,
+            start_index=payload.start_index,
+            raw=payload.raw,
+        )
+    except MCPFetchError as exc:
+        raise HTTPException(status_code=502, detail=f"mcp fetch failed: {exc}") from exc
+    return MCPFetchResponse(content=content)
 
 
 @router.get("/user/profile", response_model=ProfileResponse)

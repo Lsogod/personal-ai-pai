@@ -12,6 +12,9 @@ from app.services.sender import UnifiedSender
 _session_ctx: ContextVar[Optional[AsyncSession]] = ContextVar("pai_session_ctx", default=None)
 _scheduler_ctx: ContextVar[Optional[SchedulerService]] = ContextVar("pai_scheduler_ctx", default=None)
 _sender_ctx: ContextVar[Optional[UnifiedSender]] = ContextVar("pai_sender_ctx", default=None)
+_tool_user_id_ctx: ContextVar[Optional[int]] = ContextVar("pai_tool_user_id_ctx", default=None)
+_tool_platform_ctx: ContextVar[Optional[str]] = ContextVar("pai_tool_platform_ctx", default=None)
+_tool_conversation_id_ctx: ContextVar[Optional[int]] = ContextVar("pai_tool_conversation_id_ctx", default=None)
 
 
 def set_session(session: AsyncSession):
@@ -57,3 +60,39 @@ def get_sender() -> UnifiedSender:
     if sender is None:
         raise RuntimeError("sender context not set")
     return sender
+
+
+def set_tool_user_id(user_id: int | None):
+    return _tool_user_id_ctx.set(user_id)
+
+
+def reset_tool_user_id(token) -> None:
+    _tool_user_id_ctx.reset(token)
+
+
+def get_tool_user_id() -> int | None:
+    return _tool_user_id_ctx.get()
+
+
+def set_tool_platform(platform: str | None):
+    return _tool_platform_ctx.set(platform)
+
+
+def reset_tool_platform(token) -> None:
+    _tool_platform_ctx.reset(token)
+
+
+def get_tool_platform() -> str | None:
+    return _tool_platform_ctx.get()
+
+
+def set_tool_conversation_id(conversation_id: int | None):
+    return _tool_conversation_id_ctx.set(conversation_id)
+
+
+def reset_tool_conversation_id(token) -> None:
+    _tool_conversation_id_ctx.reset(token)
+
+
+def get_tool_conversation_id() -> int | None:
+    return _tool_conversation_id_ctx.get()

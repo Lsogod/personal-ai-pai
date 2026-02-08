@@ -38,6 +38,12 @@ from app.services.runtime_context import (
     reset_scheduler,
     set_sender,
     reset_sender,
+    set_tool_user_id,
+    reset_tool_user_id,
+    set_tool_platform,
+    reset_tool_platform,
+    set_tool_conversation_id,
+    reset_tool_conversation_id,
 )
 
 
@@ -340,6 +346,9 @@ async def handle_message(
             session_token = set_session(session)
             scheduler_token = set_scheduler(_scheduler)
             sender_token = set_sender(_sender)
+            tool_user_token = set_tool_user_id(user_id)
+            tool_platform_token = set_tool_platform(platform)
+            tool_conv_token = set_tool_conversation_id(conversation.id)
             try:
                 try:
                     result = await graph.ainvoke(
@@ -351,6 +360,9 @@ async def handle_message(
                     logger.exception("graph invoke failed: platform=%s user_id=%s", platform, user_id)
                     responses = ["我处理这条消息时失败了。请重试，或先用文字描述金额/分类/事项。"]
             finally:
+                reset_tool_conversation_id(tool_conv_token)
+                reset_tool_platform(tool_platform_token)
+                reset_tool_user_id(tool_user_token)
                 reset_sender(sender_token)
                 reset_scheduler(scheduler_token)
                 reset_session(session_token)
