@@ -25,7 +25,7 @@ def _json_or_empty(text: str) -> dict[str, Any]:
 class MCPFetchClient:
     def __init__(self) -> None:
         settings = get_settings()
-        self.url = settings.mcp_fetch_url
+        self.url = (settings.mcp_fetch_url or "").strip()
         self.timeout = float(settings.mcp_fetch_timeout_sec)
         self.default_max_length = int(settings.mcp_fetch_default_max_length)
         self._http_headers = {
@@ -41,6 +41,8 @@ class MCPFetchClient:
         request_id: int | None = None,
         session_id: str | None = None,
     ) -> tuple[dict[str, Any], httpx.Headers]:
+        if not self.url:
+            raise MCPFetchError("MCP_FETCH_URL is empty")
         payload: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
         if params is not None:
             payload["params"] = params

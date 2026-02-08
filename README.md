@@ -298,10 +298,11 @@ GEWECHAT_TOKEN=your_token
 ### System MCP (Fetch)
 ```env
 MCP_FETCH_ENABLED=true
-MCP_FETCH_URL=https://mcp.api-inference.modelscope.net/e358f42d048348/mcp
+MCP_FETCH_URL=your_mcp_server_url
 MCP_FETCH_TIMEOUT_SEC=30
 MCP_FETCH_DEFAULT_MAX_LENGTH=5000
 ```
+说明：`MCP_FETCH_URL` 必须在 `.env` 中显式配置，代码中不再内置真实地址。
 
 对话中可直接使用：
 - 自然语言：`帮我抓取并总结这个网页 https://example.com`
@@ -343,7 +344,7 @@ npm run dev
 | `DB_PASSWORD` | ✅ | - | PostgreSQL 密码 |
 | `JWT_SECRET` | ✅ | `change_me` | JWT 签名密钥 |
 | `MCP_FETCH_ENABLED` | - | `true` | 是否启用系统级 MCP Fetch |
-| `MCP_FETCH_URL` | - | modelscope mcp url | MCP Fetch 服务地址 |
+| `MCP_FETCH_URL` | 条件必填 | - | MCP Fetch 服务地址（`MCP_FETCH_ENABLED=true` 时必填） |
 | `MCP_FETCH_TIMEOUT_SEC` | - | `30` | MCP 请求超时秒数 |
 | `MCP_FETCH_DEFAULT_MAX_LENGTH` | - | `5000` | 默认抓取字符上限 |
 | `ADMIN_TOKEN` | - | - | 管理 API 令牌 |
