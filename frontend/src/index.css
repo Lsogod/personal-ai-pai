@@ -156,6 +156,44 @@ body {
   color: rgb(var(--color-text-secondary));
 }
 
+.markdown-chat .markdown-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+
+.markdown-chat table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 560px;
+  background: rgb(var(--color-bg-card));
+  border: 1px solid rgb(var(--color-border));
+  border-radius: 0.6rem;
+  overflow: hidden;
+}
+
+.markdown-chat thead {
+  background: rgb(var(--color-bg-hover));
+}
+
+.markdown-chat th,
+.markdown-chat td {
+  border: 1px solid rgb(var(--color-border));
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-chat th {
+  font-weight: 700;
+}
+
+.markdown-chat hr {
+  border: none;
+  border-top: 1px solid rgb(var(--color-border));
+  margin: 0.8em 0;
+}
+
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }

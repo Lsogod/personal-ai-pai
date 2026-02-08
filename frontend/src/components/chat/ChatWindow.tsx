@@ -1,8 +1,9 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
 
-import { Button } from "../ui/button";
-import { Send, Image, Bot, ArrowUpCircle } from "../ui/icons";
+import { Image, Bot, ArrowUpCircle, X, Copy, Check } from "../ui/icons";
 
 export interface ChatMessage {
   role: string;
@@ -24,6 +25,87 @@ interface ChatWindowProps {
   profile?: Profile;
 }
 
+interface SelectedImage {
+  id: string;
+  name: string;
+  dataUrl: string;
+}
+
+const MAX_IMAGES = 6;
+
+function normalizeMarkdown(content: string) {
+  const raw = (content || "").replace(/\r\n/g, "\n");
+  return raw.replace(/<br\s*\/?>/gi, "\n");
+}
+
+function nodeToString(node: ReactNode): string {
+  if (node === null || node === undefined || typeof node === "boolean") {
+    return "";
+  }
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+  if (Array.isArray(node)) {
+    return node.map((item) => nodeToString(item)).join("");
+  }
+  if (typeof node === "object" && "props" in node) {
+    return nodeToString((node as { props?: { children?: ReactNode } }).props?.children);
+  }
+  return "";
+}
+
+async function copyText(text: string) {
+  if (!text) return;
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textarea);
+}
+
+function MarkdownPre({
+  className,
+  children,
+}: {
+  className?: string;
+  children?: ReactNode;
+}) {
+  const [copied, setCopied] = useState(false);
+  const codeText = nodeToString(children).replace(/\n$/, "");
+
+  async function handleCopy() {
+    try {
+      await copyText(codeText);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div className="relative group">
+      <button
+        type="button"
+        onClick={handleCopy}
+        className="absolute right-2 top-2 z-10 inline-flex items-center gap-1 rounded-md border border-border bg-surface-card px-2 py-1 text-[11px] text-content-secondary hover:text-content hover:bg-surface-hover transition-colors"
+      >
+        {copied ? <Check size={12} /> : <Copy size={12} />}
+        {copied ? "已复制" : "复制"}
+      </button>
+      <pre className={`${className || ""} pt-9`}>{children}</pre>
+    </div>
+  );
+}
+
 function formatTime(iso: string) {
   const date = new Date(iso);
   return `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
@@ -31,10 +113,12 @@ function formatTime(iso: string) {
 
 export function ChatWindow({ history, streamingReply, pending, onSend, profile }: ChatWindowProps) {
   const [content, setContent] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [showImageInput, setShowImageInput] = useState(false);
+  const [images, setImages] = useState<SelectedImage[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dropAreaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -53,23 +137,86 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
     return () => cancelAnimationFrame(frame);
   }, [streamingReply]);
 
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    const next = Math.max(44, Math.min(el.scrollHeight, 180));
+    el.style.height = `${next}px`;
+  }, [content]);
+
+  async function fileToDataUrl(file: File): Promise<string> {
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("file_read_error"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function attachImageFile(file: File) {
+    if (!file.type.startsWith("image/")) return;
+    const dataUrl = await fileToDataUrl(file).catch(() => "");
+    if (!dataUrl) return;
+    setImages((prev) => {
+      if (prev.length >= MAX_IMAGES) return prev;
+      return [
+        ...prev,
+        {
+          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          name: file.name || "上传图片",
+          dataUrl,
+        },
+      ];
+    });
+  }
+
   async function handleSubmit(event?: FormEvent) {
     event?.preventDefault();
     const trimmed = content.trim();
-    const images = imageUrl.trim() ? [imageUrl.trim()] : [];
-    if (!trimmed && images.length === 0) return;
+    const imageUrls = images.map((item) => item.dataUrl);
+    if (!trimmed && imageUrls.length === 0) return;
 
-    // Clear input immediately for responsive UX; restore if request fails.
     setContent("");
-    setImageUrl("");
-    setShowImageInput(false);
+    setImages([]);
+    setIsDragOver(false);
 
     try {
-      await onSend(trimmed, images);
+      await onSend(trimmed, imageUrls);
     } catch {
       setContent(trimmed);
-      setImageUrl(images[0] || "");
-      setShowImageInput(images.length > 0);
+      setImages(
+        imageUrls.map((dataUrl, idx) => ({
+          id: `restore-${idx}-${Date.now()}`,
+          name: `上传图片${idx + 1}`,
+          dataUrl,
+        }))
+      );
+    }
+  }
+
+  function handlePickImage() {
+    if (pending) return;
+    fileInputRef.current?.click();
+  }
+
+  function handleClearImages() {
+    setImages([]);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+
+  function handleRemoveImage(id: string) {
+    setImages((prev) => prev.filter((item) => item.id !== id));
+  }
+
+  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
+    for (const file of files) {
+      // eslint-disable-next-line no-await-in-loop
+      await attachImageFile(file);
     }
   }
 
@@ -77,6 +224,48 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
+    }
+  }
+
+  async function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const items = Array.from(e.clipboardData?.items || []).filter(
+      (item) => item.kind === "file" && item.type.startsWith("image/")
+    );
+    if (items.length === 0) return;
+    e.preventDefault();
+    for (const item of items) {
+      const file = item.getAsFile();
+      if (!file) continue;
+      // eslint-disable-next-line no-await-in-loop
+      await attachImageFile(file);
+    }
+  }
+
+  function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
+    const hasImage = Array.from(e.dataTransfer?.items || []).some(
+      (item) => item.kind === "file" && item.type.startsWith("image/")
+    );
+    if (!hasImage) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    setIsDragOver(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent<HTMLDivElement>) {
+    if (!dropAreaRef.current) return;
+    const nextTarget = e.relatedTarget as Node | null;
+    if (nextTarget && dropAreaRef.current.contains(nextTarget)) return;
+    setIsDragOver(false);
+  }
+
+  async function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragOver(false);
+    const files = Array.from(e.dataTransfer?.files || []).filter((item) => item.type.startsWith("image/"));
+    if (files.length === 0) return;
+    for (const file of files) {
+      // eslint-disable-next-line no-await-in-loop
+      await attachImageFile(file);
     }
   }
 
@@ -91,7 +280,6 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
 
   return (
     <div className="flex flex-col h-full rounded-2xl border border-border bg-surface-card overflow-hidden">
-      {/* Messages area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 lg:p-6">
         {isEmpty ? (
           <div className="flex flex-col items-center justify-center h-full text-center py-20">
@@ -144,8 +332,35 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
                   }`}
                 >
                   {msg.role === "assistant" ? (
-                    <div className="prose prose-sm max-w-none">
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    <div className="prose prose-sm max-w-none markdown-chat">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm, remarkBreaks]}
+                        components={{
+                          a: ({ ...props }) => (
+                            <a {...props} target="_blank" rel="noreferrer noopener" />
+                          ),
+                          pre: ({ className, children }) => (
+                            <MarkdownPre className={className}>{children}</MarkdownPre>
+                          ),
+                          code: ({ inline, className, children, ...props }) => {
+                            if (inline) {
+                              return (
+                                <code {...props} className={className}>
+                                  {children}
+                                </code>
+                              );
+                            }
+                            return <code {...props} className={className}>{children}</code>;
+                          },
+                          table: ({ children }) => (
+                            <div className="markdown-table-wrap">
+                              <table>{children}</table>
+                            </div>
+                          ),
+                        }}
+                      >
+                        {normalizeMarkdown(msg.content)}
+                      </ReactMarkdown>
                     </div>
                   ) : (
                     <p className="whitespace-pre-wrap">{msg.content}</p>
@@ -183,51 +398,85 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
         )}
       </div>
 
-      {/* Input area */}
       <div className="shrink-0 border-t border-border p-4">
         <div className="max-w-3xl mx-auto">
-          {showImageInput && (
-            <div className="mb-2 animate-fade-in">
-              <input
-                type="text"
-                placeholder="粘贴图片 URL（用于小票识别）"
-                value={imageUrl}
-                onChange={(e) => setImageUrl(e.target.value)}
-                disabled={pending}
-                className="w-full rounded-xl border border-border bg-surface-input px-3 py-2 text-sm text-content placeholder:text-content-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-              />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleFileChange}
+            className="hidden"
+          />
+          {images.length > 0 && (
+            <div className="mb-2 animate-fade-in rounded-xl border border-border bg-surface-input px-3 py-2">
+              <div className="mb-2 text-[11px] text-content-tertiary">已选择 {images.length} 张图片</div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {images.map((item) => (
+                  <div key={item.id} className="relative h-14 w-14 shrink-0">
+                    <img
+                      src={item.dataUrl}
+                      alt={item.name}
+                      className="h-14 w-14 rounded-lg object-cover border border-border"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveImage(item.id)}
+                      className="absolute -right-1 -top-1 rounded-full bg-surface p-0.5 text-content-tertiary hover:text-content border border-border"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={handleClearImages}
+                  className="h-14 shrink-0 rounded-lg border border-border px-2 text-[11px] text-content-tertiary hover:text-content hover:bg-surface-hover"
+                >
+                  清空
+                </button>
+              </div>
             </div>
           )}
-          <form onSubmit={handleSubmit} className="flex items-end gap-2">
-            <button
-              type="button"
-              onClick={() => setShowImageInput(!showImageInput)}
-              className={`shrink-0 p-2.5 rounded-xl transition-colors ${
-                showImageInput
-                  ? "text-accent bg-surface-hover"
-                  : "text-content-tertiary hover:text-content-secondary hover:bg-surface-hover"
+          <form onSubmit={handleSubmit}>
+            <div
+              ref={dropAreaRef}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={`relative rounded-2xl border transition-colors ${
+                isDragOver ? "border-accent bg-accent-subtle/40" : "border-border bg-surface-input"
               }`}
             >
-              <Image size={20} />
-            </button>
-            <div className="flex-1 relative">
+              <button
+                type="button"
+                onClick={handlePickImage}
+                className={`absolute left-2 inset-y-0 my-auto z-10 flex h-9 w-9 items-center justify-center rounded-xl transition-colors ${
+                  images.length > 0
+                    ? "text-accent bg-surface-hover"
+                    : "text-content-tertiary hover:text-content-secondary hover:bg-surface-hover"
+                }`}
+              >
+                <Image size={20} />
+              </button>
               <textarea
                 ref={inputRef}
                 placeholder="输入消息..."
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
                 onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
                 disabled={pending}
                 rows={1}
-                className="w-full resize-none rounded-2xl border border-border bg-surface-input pl-4 pr-12 py-3 text-sm text-content placeholder:text-content-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 max-h-32"
-                style={{ minHeight: "44px" }}
+                className="w-full resize-none rounded-2xl border-0 bg-transparent pl-14 pr-14 py-3 text-sm text-content placeholder:text-content-tertiary focus-visible:outline-none focus-visible:ring-0"
+                style={{ minHeight: "44px", maxHeight: "180px" }}
               />
               <button
                 type="submit"
-                disabled={pending || (!content.trim() && !imageUrl.trim())}
-                className="absolute right-2 bottom-2 p-1.5 rounded-xl text-accent hover:bg-accent-subtle disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                disabled={pending || (!content.trim() && images.length === 0)}
+                className="absolute right-2 inset-y-0 my-auto z-10 flex h-10 w-10 items-center justify-center rounded-xl text-accent hover:bg-accent-subtle disabled:opacity-30 disabled:hover:bg-transparent transition-all"
               >
-                <ArrowUpCircle size={24} />
+                <ArrowUpCircle size={22} />
               </button>
             </div>
           </form>

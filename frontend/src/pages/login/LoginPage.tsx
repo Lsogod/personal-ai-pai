@@ -8,6 +8,15 @@ import { useAuthStore } from "../../store/auth";
 import { useThemeStore } from "../../store/theme";
 import { Bot, Sun, Moon, Sparkles } from "../../components/ui/icons";
 
+function validateAuthForm(email: string, password: string) {
+  const trimmedEmail = email.trim();
+  if (!trimmedEmail) return "请输入邮箱地址。";
+  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailPattern.test(trimmedEmail)) return "请输入有效的邮箱地址。";
+  if (!password.trim()) return "请输入密码。";
+  return null;
+}
+
 export function LoginPage() {
   const { setToken } = useAuthStore();
   const { theme, toggleTheme } = useThemeStore();
@@ -18,10 +27,14 @@ export function LoginPage() {
 
   const mutation = useMutation({
     mutationFn: async () => {
+      const validationError = validateAuthForm(email, password);
+      if (validationError) {
+        throw new Error(validationError);
+      }
       const path = mode === "login" ? "/api/auth/login" : "/api/auth/register";
       const data = await apiRequest(path, {
         method: "POST",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: email.trim(), password }),
       });
       return data.access_token as string;
     },
@@ -60,7 +73,10 @@ export function LoginPage() {
           {/* Mode Toggle */}
           <div className="flex rounded-xl bg-surface-secondary p-1 gap-1">
             <button
-              onClick={() => setMode("login")}
+              onClick={() => {
+                setMode("login");
+                setError(null);
+              }}
               className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                 mode === "login"
                   ? "bg-surface-card text-content shadow-subtle"
@@ -70,7 +86,10 @@ export function LoginPage() {
               登录
             </button>
             <button
-              onClick={() => setMode("register")}
+              onClick={() => {
+                setMode("register");
+                setError(null);
+              }}
               className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                 mode === "register"
                   ? "bg-surface-card text-content shadow-subtle"
@@ -85,14 +104,20 @@ export function LoginPage() {
             <Input
               placeholder="邮箱"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (error) setError(null);
+              }}
               onKeyDown={(e) => e.key === "Enter" && mutation.mutate()}
             />
             <Input
               placeholder="密码"
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (error) setError(null);
+              }}
               onKeyDown={(e) => e.key === "Enter" && mutation.mutate()}
             />
           </div>

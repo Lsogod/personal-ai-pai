@@ -11,18 +11,6 @@ from app.services.llm import get_llm
 
 
 VALID_INTENTS = {"skill_manager", "finance", "secretary", "writer", "guide", "unknown"}
-CONTEXT_RECALL_TOKENS = (
-    "之前我",
-    "我刚才",
-    "我之前",
-    "上一句",
-    "上一条",
-    "前面我",
-    "上文",
-    "我问了什么",
-    "我们刚才聊",
-    "还记得我",
-)
 
 
 def _extract_json_object(text: str) -> dict:
@@ -84,9 +72,6 @@ async def router_node(state: GraphState) -> GraphState:
     message = state["message"]
     content = (message.content or "").strip()
     if not content and not message.image_urls:
-        return {**state, "intent": "writer"}
-    lowered = content.lower()
-    if any(token in lowered for token in CONTEXT_RECALL_TOKENS):
         return {**state, "intent": "writer"}
     has_pending = False
     if user_id > 0 and conversation_id > 0:

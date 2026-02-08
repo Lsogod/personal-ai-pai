@@ -1,11 +1,16 @@
 import json
 import re
-from datetime import datetime
+from datetime import date, datetime, timedelta
+from typing import Any
+from zoneinfo import ZoneInfo
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from sqlalchemy import select
 
+from app.core.config import get_settings
 from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
+from app.models.ledger import Ledger
 from app.models.user import User
 from app.services.llm import get_llm
 from app.services.runtime_context import get_session
@@ -25,12 +30,11 @@ from app.tools.ledger_text2sql import try_execute_ledger_text2sql
 from app.tools.vision import analyze_receipt
 
 
-AMOUNT_PATTERN = re.compile(r"(\d+(?:\.\d{1,2})?)")
-LEDGER_ID_PATTERN = re.compile(r"(?:账单\s*#?\s*|#)(\d+)")
+DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
+TECHNICAL_LEAK_PATTERN = re.compile(r"(json|payload|字段|数组|schema|schedules|ledgers)", re.IGNORECASE)
 PENDING_INDEX_PATTERN = re.compile(r"(?:第\s*([1-9]\d*)\s*(?:个|笔|项)|选\s*([1-9]\d*)|#([1-9]\d*))")
 PENDING_CN_INDEX_PATTERN = re.compile(r"第\s*([一二三四五六七八九十两])\s*(?:个|笔|项)")
 PENDING_BATCH_SELECT_PATTERN = re.compile(r"选\s*([1-9]\d*(?:\s*[,，、和及]\s*[1-9]\d*)+)")
-CANCEL_PENDING_TOKENS = ("取消", "算了", "不要了", "放弃", "不记了")
 CN_NUM_MAP = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 
 CATEGORY_MAP = {
@@ -54,59 +58,13 @@ CATEGORY_MAP = {
     "医疗": "医疗",
     "看病": "医疗",
 }
+MAX_IMAGES = 6
 
 
 def _fmt_dt(dt: datetime | None) -> str:
     if not dt:
         return ""
     return dt.strftime("%Y-%m-%d %H:%M")
-
-
-def _extract_amount(text: str) -> float | None:
-    source = text or ""
-    candidates: list[float] = []
-    for match in AMOUNT_PATTERN.finditer(source):
-        token = match.group(1)
-        start = match.start(1)
-        end = match.end(1)
-        prev_char = source[start - 1] if start > 0 else ""
-        next_char = source[end] if end < len(source) else ""
-        # Avoid treating ordinal selectors like "第2个/第1项" as money amounts.
-        if prev_char == "第" and next_char in {"个", "笔", "项"}:
-            continue
-        try:
-            value = float(token)
-        except Exception:
-            continue
-        candidates.append(value)
-    if not candidates:
-        return None
-    return candidates[-1]
-
-
-def _extract_correction_amount(text: str) -> float | None:
-    patterns = [
-        r"(?:改成|改为|更正为|应该是|不是)\s*(\d+(?:\.\d{1,2})?)",
-        r"(\d+(?:\.\d{1,2})?)\s*(?:元|块)",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text or "")
-        if match:
-            try:
-                return float(match.group(1))
-            except Exception:
-                continue
-    return _extract_amount(text)
-
-
-def _extract_ledger_id(text: str) -> int | None:
-    match = LEDGER_ID_PATTERN.search(text or "")
-    if not match:
-        return None
-    try:
-        return int(match.group(1))
-    except Exception:
-        return None
 
 
 def _normalize_category(text: str | None) -> str:
@@ -130,6 +88,32 @@ def _parse_json_object(content: str) -> dict:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def _sanitize_llm_text(text: str) -> str:
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    lines: list[str] = []
+    prev = ""
+    for row in raw.splitlines():
+        line = row.rstrip()
+        norm = re.sub(r"\s+", " ", line).strip()
+        if not norm:
+            if lines and lines[-1] != "":
+                lines.append("")
+            continue
+        if norm == prev:
+            continue
+        if TECHNICAL_LEAK_PATTERN.search(norm):
+            continue
+        if "当前数据为准" in norm and "此前对话" in norm:
+            continue
+        lines.append(line)
+        prev = norm
+    while lines and lines[-1] == "":
+        lines.pop()
+    return "\n".join(lines).strip()
 
 
 def _clean_item(item: str) -> str:
@@ -232,17 +216,6 @@ def _extract_pending_indices(content: str, max_len: int) -> list[int]:
     return indices
 
 
-def _resolve_pending_amount(content: str, candidates: list[float]) -> float | None:
-    indices = _extract_pending_indices(content, len(candidates))
-    if indices:
-        total = sum(candidates[idx - 1] for idx in indices)
-        return round(total, 2)
-    amount = _extract_amount(content)
-    if amount is not None and amount > 0:
-        return amount
-    return None
-
-
 def _pick_amount_from_indexes(raw_indexes: object, candidates: list[float]) -> float | None:
     if not isinstance(raw_indexes, list):
         return None
@@ -259,6 +232,20 @@ def _pick_amount_from_indexes(raw_indexes: object, candidates: list[float]) -> f
     if not picked:
         return None
     return round(sum(candidates[idx - 1] for idx in picked), 2)
+
+
+def _extract_plain_amount(text: str) -> float | None:
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    match = re.fullmatch(r"(\d+(?:\.\d{1,2})?)", raw)
+    if not match:
+        return None
+    try:
+        value = float(match.group(1))
+    except Exception:
+        return None
+    return value if value > 0 else None
 
 
 async def _understand_pending_selection(
@@ -294,19 +281,6 @@ async def _understand_pending_selection(
     return _parse_json_object(str(response.content))
 
 
-def _extract_pending_category(content: str) -> str | None:
-    source = (content or "").strip()
-    if not source:
-        return None
-    for key, value in CATEGORY_MAP.items():
-        if key in source:
-            return value
-    explicit = re.search(r"(?:分类|类别)\s*[:：]?\s*([^\s，,。.!！?？]{1,10})", source)
-    if explicit:
-        return _normalize_category(explicit.group(1))
-    return None
-
-
 def _render_pending_candidates(candidates: list[float]) -> str:
     lines = ["我识别到多个支付金额："]
     for idx, value in enumerate(candidates, start=1):
@@ -318,12 +292,49 @@ def _render_pending_candidates(candidates: list[float]) -> str:
     return "\n".join(lines)
 
 
+def _parse_vision_result(result: dict) -> dict:
+    image_type = str(result.get("image_type") or "other").strip().lower()
+    try:
+        confidence = float(result.get("confidence") or 0.0)
+    except Exception:
+        confidence = 0.0
+    amount_raw = result.get("amount")
+    try:
+        amount = float(amount_raw) if amount_raw is not None else None
+    except Exception:
+        amount = None
+    raw_candidates = result.get("amount_candidates")
+    candidate_values: list[float] = []
+    if isinstance(raw_candidates, list):
+        for item in raw_candidates:
+            try:
+                candidate_values.append(float(item))
+            except Exception:
+                continue
+    if amount is not None:
+        candidate_values = [amount] + candidate_values
+    candidate_values = _unique_positive_amounts(candidate_values)[:5]
+    threshold = 0.8 if image_type == "receipt" else 0.65
+    category = _normalize_category(str(result.get("category") or "其他"))
+    item = str(result.get("item") or result.get("merchant") or "消费")
+    return {
+        "image_type": image_type,
+        "confidence": confidence,
+        "amount": amount,
+        "candidate_values": candidate_values,
+        "threshold": threshold,
+        "category": category,
+        "item": item,
+        "merchant": str(result.get("merchant") or ""),
+    }
+
+
 async def _understand_finance_message(content: str, conversation_context: str) -> dict:
     llm = get_llm()
     system = SystemMessage(
         content=(
             "你是记账意图解析器。只输出 JSON。"
-            "字段: intent, ledger_id, amount, item, category, confidence。"
+            "字段: intent, ledger_id, amount, item, category, query_scope, query_date, confidence。"
             "intent 仅可为 insert, correct_latest, correct_by_id, delete_latest, delete_by_id, query, list, unknown。"
             "若用户在纠正上一笔（例如“错了...”“改成...”），intent=correct_latest。"
             "若用户在纠正指定账单（例如“把账单#12改成28元”），intent=correct_by_id，并给出 ledger_id。"
@@ -335,6 +346,11 @@ async def _understand_finance_message(content: str, conversation_context: str) -
             "无法确定时 intent=unknown。"
             "amount 为数字；item 为简洁摘要，必须去掉“错了/改成”等词。"
             "category 不确定填“其他”。"
+            "query_scope 仅可为 today/week/month/date/recent/all/yesterday/day_before_yesterday/last_week。"
+            "当 query_scope=date 时，query_date 输出 YYYY-MM-DD。"
+            "当用户说“我今天的账单/本周花了多少”等查询，必须输出 query_scope。"
+            "当用户说昨天/前天时，优先用 query_scope=yesterday/day_before_yesterday；"
+            "当用户说上周时，用 query_scope=last_week。"
         )
     )
     human = HumanMessage(
@@ -345,6 +361,163 @@ async def _understand_finance_message(content: str, conversation_context: str) -
     )
     response = await llm.ainvoke([system, human])
     return _parse_json_object(str(response.content))
+
+
+def _to_utc_naive(local_dt: datetime, tz_name: str) -> datetime:
+    local = local_dt.replace(tzinfo=ZoneInfo(tz_name))
+    return local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+
+def _format_window_label(name: str, start_local_date: date, end_local_date_exclusive: date) -> str:
+    if end_local_date_exclusive == start_local_date + timedelta(days=1):
+        return f"{name}（{start_local_date.isoformat()}）"
+    end_local_date = end_local_date_exclusive - timedelta(days=1)
+    return f"{name}（{start_local_date.isoformat()} ~ {end_local_date.isoformat()}）"
+
+
+def _resolve_ledger_window_from_fields(scope: str, query_date: str | None) -> tuple[datetime, datetime, str] | None:
+    tz_name = get_settings().timezone
+    today_local = datetime.now(ZoneInfo(tz_name)).date()
+    key = (scope or "").strip().lower()
+
+    if key == "yesterday":
+        target = today_local - timedelta(days=1)
+        start_local = datetime.combine(target, datetime.min.time())
+        end_local = start_local + timedelta(days=1)
+        label = _format_window_label("昨天", target, target + timedelta(days=1))
+        return _to_utc_naive(start_local, tz_name), _to_utc_naive(end_local, tz_name), label
+    if key == "day_before_yesterday":
+        target = today_local - timedelta(days=2)
+        start_local = datetime.combine(target, datetime.min.time())
+        end_local = start_local + timedelta(days=1)
+        label = _format_window_label("前天", target, target + timedelta(days=1))
+        return _to_utc_naive(start_local, tz_name), _to_utc_naive(end_local, tz_name), label
+    if key == "today":
+        start_local = datetime.combine(today_local, datetime.min.time())
+        end_local = start_local + timedelta(days=1)
+        label = _format_window_label("今天", today_local, today_local + timedelta(days=1))
+        return _to_utc_naive(start_local, tz_name), _to_utc_naive(end_local, tz_name), label
+    if key == "last_week":
+        week_start = today_local - timedelta(days=today_local.weekday() + 7)
+        week_end = week_start + timedelta(days=7)
+        start_local = datetime.combine(week_start, datetime.min.time())
+        end_local = datetime.combine(week_end, datetime.min.time())
+        label = _format_window_label("上周", week_start, week_end)
+        return _to_utc_naive(start_local, tz_name), _to_utc_naive(end_local, tz_name), label
+    if key == "week":
+        week_start = today_local - timedelta(days=today_local.weekday())
+        start_local = datetime.combine(week_start, datetime.min.time())
+        end_local = start_local + timedelta(days=7)
+        label = _format_window_label("本周", week_start, week_start + timedelta(days=7))
+        return _to_utc_naive(start_local, tz_name), _to_utc_naive(end_local, tz_name), label
+    if key == "month":
+        month_start = today_local.replace(day=1)
+        if month_start.month == 12:
+            next_month = date(month_start.year + 1, 1, 1)
+        else:
+            next_month = date(month_start.year, month_start.month + 1, 1)
+        start_local = datetime.combine(month_start, datetime.min.time())
+        end_local = datetime.combine(next_month, datetime.min.time())
+        label = _format_window_label("本月", month_start, next_month)
+        return _to_utc_naive(start_local, tz_name), _to_utc_naive(end_local, tz_name), label
+    if key == "date" and query_date:
+        try:
+            target = date.fromisoformat(query_date.strip())
+        except Exception:
+            return None
+        start_local = datetime.combine(target, datetime.min.time())
+        end_local = start_local + timedelta(days=1)
+        label = _format_window_label(target.isoformat(), target, target + timedelta(days=1))
+        return _to_utc_naive(start_local, tz_name), _to_utc_naive(end_local, tz_name), label
+    return None
+
+
+async def _query_ledger_rows(
+    session,
+    user_id: int,
+    *,
+    start_at: datetime | None,
+    end_at: datetime | None,
+    category: str | None,
+    limit: int,
+) -> list[Ledger]:
+    stmt = select(Ledger).where(Ledger.user_id == user_id)
+    if start_at is not None and end_at is not None:
+        stmt = stmt.where(Ledger.transaction_date >= start_at, Ledger.transaction_date < end_at)
+    if category:
+        stmt = stmt.where(Ledger.category == category)
+    stmt = stmt.order_by(Ledger.transaction_date.desc(), Ledger.id.desc()).limit(limit)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+def _build_ledger_payload(rows: list[Ledger]) -> dict[str, Any]:
+    return {
+        "ledgers": [
+            {
+                "id": row.id,
+                "datetime": _fmt_dt(row.transaction_date),
+                "amount": round(float(row.amount), 2),
+                "currency": row.currency,
+                "category": row.category,
+                "item": row.item,
+            }
+            for row in rows[:100]
+        ]
+    }
+
+
+async def _answer_ledger_with_llm(
+    *,
+    content: str,
+    conversation_context: str,
+    label: str,
+    category: str | None,
+    rows: list[Ledger],
+) -> str:
+    llm = get_llm()
+    payload = _build_ledger_payload(rows)
+    system = SystemMessage(
+        content=(
+            "你是账单查询答复助手。你只能根据提供的账单数据回答，禁止编造。"
+            "按用户问题有针对性回答，不要固定模板。"
+            "若用户问今天/本周/本月或某个日期，按对应范围说明。"
+            "若用户问分类，请按分类回答。"
+            "若没有记录，明确说明没有。"
+            "涉及明细时要包含时间。"
+            "默认给出简洁自然的中文回答，不要输出技术说明。"
+            "不要提到 JSON、数组、字段、数据源、会话上下文，也不要做“当前数据为准”的提示。"
+            "不要重复句子或段落。"
+        )
+    )
+    human = HumanMessage(
+        content=(
+            f"查询范围: {label}\n"
+            f"分类筛选: {category or '无'}\n\n"
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"用户问题:\n{content}\n\n"
+            f"数据(JSON):\n{json.dumps(payload, ensure_ascii=False)}"
+        )
+    )
+    response = await llm.ainvoke([system, human])
+    return _sanitize_llm_text(str(response.content or ""))
+
+
+def _render_ledger_fallback(rows: list[Ledger], label: str, category: str | None) -> str:
+    title = f"{label}账单" if label else "账单"
+    if category:
+        title += f"（{category}）"
+    lines = [f"{title}："]
+    if not rows:
+        lines.append("暂无匹配账单记录。")
+        return "\n".join(lines)
+    for row in rows[:12]:
+        lines.append(
+            f"#{row.id} | {_fmt_dt(row.transaction_date)} | {row.amount:.2f} {row.currency} | {row.category} | {row.item}"
+        )
+    if len(rows) > 12:
+        lines.append(f"... 其余 {len(rows) - 12} 条")
+    return "\n".join(lines)
 
 
 async def _handle_ledger_command(
@@ -492,12 +665,9 @@ async def finance_node(state: GraphState) -> GraphState:
                 llm_category = _normalize_category(llm_category_raw)
             llm_item = _clean_item(str(parsed.get("item") or ""))
 
-            # Rule fallback when LLM is uncertain or fails.
-            if amount is None and any(token in content for token in CANCEL_PENDING_TOKENS):
-                await clear_pending_ledger(user_id=user_id, conversation_id=conversation_id)
-                return {**state, "responses": ["已取消这张图片的记账。"]}
             if amount is None:
-                amount = _resolve_pending_amount(content, candidates)
+                # Minimal deterministic fallback: only accept a plain numeric reply.
+                amount = _extract_plain_amount(content)
 
             if amount is None:
                 if candidates:
@@ -507,11 +677,8 @@ async def finance_node(state: GraphState) -> GraphState:
                     "responses": ["请直接回复要记账的金额和分类，例如：`28 餐饮 午饭`。"],
                 }
 
-            parsed_category = _extract_pending_category(content)
-            category = llm_category or parsed_category or _normalize_category(str(pending.get("category") or "其他"))
-            item = llm_item or _clean_item(content)
-            if item and parsed_category and item.startswith(parsed_category):
-                item = item[len(parsed_category) :].strip(" ，,。")
+            category = llm_category or _normalize_category(str(pending.get("category") or "其他"))
+            item = llm_item
             if not item:
                 item = str(pending.get("item") or pending.get("merchant") or "消费")
             if len(item) > 40:
@@ -536,42 +703,79 @@ async def finance_node(state: GraphState) -> GraphState:
             }
 
     if message.image_urls:
-        result = await analyze_receipt(message.image_urls[0])
-        image_type = str(result.get("image_type") or "other").strip().lower()
-        try:
-            confidence = float(result.get("confidence") or 0.0)
-        except Exception:
-            confidence = 0.0
-        amount_raw = result.get("amount")
-        try:
-            amount = float(amount_raw) if amount_raw is not None else None
-        except Exception:
-            amount = None
+        image_inputs = [item for item in message.image_urls if isinstance(item, str) and item.strip()][:MAX_IMAGES]
+        if len(image_inputs) > 1:
+            parsed_images: list[dict] = []
+            for idx, image_ref in enumerate(image_inputs, start=1):
+                result = await analyze_receipt(image_ref)
+                parsed = _parse_vision_result(result)
+                parsed_images.append({**parsed, "index": idx, "image_url": image_ref})
 
-        raw_candidates = result.get("amount_candidates")
-        candidate_values: list[float] = []
-        if isinstance(raw_candidates, list):
-            for item in raw_candidates:
-                try:
-                    candidate_values.append(float(item))
-                except Exception:
-                    continue
-        if amount is not None:
-            candidate_values = [amount] + candidate_values
-        candidate_values = _unique_positive_amounts(candidate_values)[:5]
+            created_rows: list[tuple[dict, object]] = []
+            unresolved_rows: list[dict] = []
+            for parsed in parsed_images:
+                amount = parsed.get("amount")
+                confidence = float(parsed.get("confidence") or 0.0)
+                threshold = float(parsed.get("threshold") or 1.0)
+                if amount is not None and float(amount) > 0 and confidence >= threshold:
+                    ledger = await insert_ledger(
+                        session,
+                        user_id=user_id,
+                        amount=float(amount),
+                        category=str(parsed.get("category") or "其他"),
+                        item=str(parsed.get("item") or "消费"),
+                        transaction_date=datetime.utcnow(),
+                        image_url=str(parsed.get("image_url") or ""),
+                        platform=user_platform,
+                    )
+                    created_rows.append((parsed, ledger))
+                else:
+                    unresolved_rows.append(parsed)
 
-        threshold = 0.8 if image_type == "receipt" else 0.65
+            lines: list[str] = []
+            if created_rows:
+                lines.append(f"已解析 {len(image_inputs)} 张图片，并自动记账 {len(created_rows)} 笔：")
+                for parsed, ledger in created_rows[:6]:
+                    source_hint = "（支付截图识别）" if parsed.get("image_type") == "payment_screenshot" else ""
+                    lines.append(
+                        f"- 图{parsed.get('index')} {source_hint}：#{ledger.id} {ledger.item} {ledger.amount:.2f} {ledger.currency}，分类 {ledger.category}，时间 {_fmt_dt(ledger.transaction_date)}"
+                    )
+                if len(created_rows) > 6:
+                    lines.append(f"- ... 其余 {len(created_rows) - 6} 笔")
+
+            if unresolved_rows:
+                lines.append(f"{len(unresolved_rows)} 张图片仍需确认金额：")
+                for parsed in unresolved_rows[:4]:
+                    candidates = list(parsed.get("candidate_values") or [])[:3]
+                    if candidates:
+                        values_text = "、".join([f"{value:.2f}" for value in candidates])
+                        lines.append(f"- 图{parsed.get('index')} 候选金额：{values_text} 元")
+                    else:
+                        lines.append(f"- 图{parsed.get('index')} 未识别到有效金额")
+                lines.append("可逐张重发更清晰图片，或直接告诉我金额与分类。")
+
+            if lines:
+                return {**state, "responses": ["\n".join(lines)]}
+
+        result = await analyze_receipt(image_inputs[0] if image_inputs else message.image_urls[0])
+        parsed_single = _parse_vision_result(result)
+        image_type = str(parsed_single.get("image_type") or "other")
+        confidence = float(parsed_single.get("confidence") or 0.0)
+        amount = parsed_single.get("amount")
+        candidate_values = list(parsed_single.get("candidate_values") or [])
+        threshold = float(parsed_single.get("threshold") or 1.0)
+
         if len(candidate_values) > 1 and conversation_id > 0:
             await set_pending_ledger(
                 user_id=user_id,
                 conversation_id=conversation_id,
                 payload={
-                    "image_url": message.image_urls[0],
+                    "image_url": image_inputs[0] if image_inputs else message.image_urls[0],
                     "image_type": image_type,
                     "amount_candidates": candidate_values,
-                    "category": _normalize_category(str(result.get("category") or "其他")),
-                    "item": str(result.get("item") or result.get("merchant") or "消费"),
-                    "merchant": str(result.get("merchant") or ""),
+                    "category": str(parsed_single.get("category") or "其他"),
+                    "item": str(parsed_single.get("item") or "消费"),
+                    "merchant": str(parsed_single.get("merchant") or ""),
                     "confidence": confidence,
                 },
             )
@@ -580,17 +784,17 @@ async def finance_node(state: GraphState) -> GraphState:
                 "responses": [_render_pending_candidates(candidate_values)],
             }
 
-        if amount is not None and amount > 0 and confidence >= threshold:
+        if amount is not None and float(amount) > 0 and confidence >= threshold:
             if conversation_id > 0:
                 await clear_pending_ledger(user_id=user_id, conversation_id=conversation_id)
             ledger = await insert_ledger(
                 session,
                 user_id=user_id,
-                amount=amount,
-                category=_normalize_category(str(result.get("category", "其他"))),
-                item=str(result.get("item", result.get("merchant", "消费"))),
+                amount=float(amount),
+                category=str(parsed_single.get("category") or "其他"),
+                item=str(parsed_single.get("item") or "消费"),
                 transaction_date=datetime.utcnow(),
-                image_url=message.image_urls[0],
+                image_url=image_inputs[0] if image_inputs else message.image_urls[0],
                 platform=user_platform,
             )
             source_hint = "（支付截图识别）" if image_type == "payment_screenshot" else ""
@@ -608,12 +812,12 @@ async def finance_node(state: GraphState) -> GraphState:
                     user_id=user_id,
                     conversation_id=conversation_id,
                     payload={
-                        "image_url": message.image_urls[0],
+                        "image_url": image_inputs[0] if image_inputs else message.image_urls[0],
                         "image_type": image_type,
                         "amount_candidates": candidate_values,
-                        "category": _normalize_category(str(result.get("category") or "其他")),
-                        "item": str(result.get("item") or result.get("merchant") or "消费"),
-                        "merchant": str(result.get("merchant") or ""),
+                        "category": str(parsed_single.get("category") or "其他"),
+                        "item": str(parsed_single.get("item") or "消费"),
+                        "merchant": str(parsed_single.get("merchant") or ""),
                         "confidence": confidence,
                     },
                 )
@@ -650,21 +854,58 @@ async def finance_node(state: GraphState) -> GraphState:
     if intent not in allowed_intents:
         intent = "unknown"
 
+    async def answer_ledger_query() -> str:
+        scope = str(parsed.get("query_scope") or "").strip().lower()
+        query_date = str(parsed.get("query_date") or "").strip() or None
+        llm_window = _resolve_ledger_window_from_fields(scope, query_date)
+        category_hint = _normalize_category(str(parsed.get("category") or ""))
+        if category_hint == "其他":
+            category_hint = None
+        if llm_window:
+            start_at, end_at, label = llm_window
+            rows = await _query_ledger_rows(
+                session,
+                user_id,
+                start_at=start_at,
+                end_at=end_at,
+                category=category_hint,
+                limit=80,
+            )
+        else:
+            label = "最近"
+            rows = await _query_ledger_rows(
+                session,
+                user_id,
+                start_at=None,
+                end_at=None,
+                category=category_hint,
+                limit=20,
+            )
+        try:
+            llm_text = await _answer_ledger_with_llm(
+                content=content,
+                conversation_context=context_text,
+                label=label,
+                category=category_hint,
+                rows=rows,
+            )
+            if llm_text:
+                return llm_text
+        except Exception:
+            pass
+        return _render_ledger_fallback(rows, label, category_hint)
+
     ledger_id = parsed.get("ledger_id")
     try:
         ledger_id = int(ledger_id) if ledger_id is not None else None
     except Exception:
         ledger_id = None
-    if ledger_id is None:
-        ledger_id = _extract_ledger_id(content)
 
     amount = parsed.get("amount")
     try:
         amount = float(amount) if amount is not None else None
     except Exception:
         amount = None
-    if amount is None:
-        amount = _extract_correction_amount(content) if ledger_id is not None else _extract_amount(content)
 
     item = _clean_item(str(parsed.get("item") or ""))
     if not item:
@@ -705,19 +946,12 @@ async def finance_node(state: GraphState) -> GraphState:
         }
 
     if intent == "list":
-        rows = await list_recent_ledgers(session, user_id, limit=10)
-        if not rows:
-            return {**state, "responses": ["暂无账单记录。"]}
-        lines = ["最近账单："]
-        for row in rows:
-            lines.append(
-                f"#{row.id} | {_fmt_dt(row.transaction_date)} | {row.amount:.2f} {row.currency} | {row.category} | {row.item}"
-            )
-        lines.append("要修改指定账单可说：`把账单#12改成28元 分类餐饮`。删除可说：`删除账单#12`。")
-        return {**state, "responses": ["\n".join(lines)]}
+        reply = await answer_ledger_query()
+        return {**state, "responses": [reply]}
 
     if intent == "query":
-        return {**state, "responses": ["你可以在右侧账单概览查看统计，或说“本月花了多少”。"]}
+        reply = await answer_ledger_query()
+        return {**state, "responses": [reply]}
 
     if intent == "delete_by_id":
         if ledger_id is None:

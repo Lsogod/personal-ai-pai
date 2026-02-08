@@ -24,4 +24,6 @@ export {
   Sparkles,
   Search,
   LayoutGrid,
+  Copy,
+  Check,
 } from "lucide-react";

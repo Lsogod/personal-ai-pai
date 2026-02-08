@@ -1,5 +1,70 @@
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
+type ValidationDetailItem = {
+  loc?: Array<string | number>;
+  msg?: string;
+  type?: string;
+};
+
+function translateField(field: string) {
+  if (field === "email") return "邮箱";
+  if (field === "password") return "密码";
+  return field || "参数";
+}
+
+function translateDetailMessage(raw: string) {
+  const text = (raw || "").toLowerCase();
+  if (text.includes("value is not a valid email address")) return "请输入有效的邮箱地址。";
+  if (text.includes("field required")) return "该字段不能为空。";
+  if (text.includes("email already exists")) return "该邮箱已注册，请直接登录。";
+  if (text.includes("invalid credentials")) return "邮箱或密码错误。";
+  if (text.includes("invalid bind code format")) return "绑定码格式不正确。";
+  return raw || "请求参数有误。";
+}
+
+function fallbackMessageByStatus(status: number) {
+  if (status === 400) return "请求参数有误，请检查后重试。";
+  if (status === 401) return "登录已失效或凭证错误，请重新登录。";
+  if (status === 403) return "当前操作无权限。";
+  if (status === 404) return "请求的资源不存在。";
+  if (status === 409) return "数据冲突，请刷新后重试。";
+  if (status === 422) return "输入格式不正确，请检查后重试。";
+  if (status === 429) return "请求过于频繁，请稍后再试。";
+  if (status >= 500) return "服务器暂时不可用，请稍后重试。";
+  return `请求失败（${status}）`;
+}
+
+function normalizeBackendError(payload: unknown, status: number) {
+  if (payload && typeof payload === "object") {
+    const detail = (payload as { detail?: unknown }).detail;
+    if (typeof detail === "string" && detail.trim()) {
+      return translateDetailMessage(detail.trim());
+    }
+    if (Array.isArray(detail)) {
+      const lines = detail
+        .map((item) => {
+          const row = item as ValidationDetailItem;
+          const loc = Array.isArray(row.loc) ? row.loc.map(String) : [];
+          const field = translateField(loc[loc.length - 1] || "");
+          const msg = translateDetailMessage(row.msg || "");
+          return `${field}：${msg}`;
+        })
+        .filter(Boolean);
+      const unique = Array.from(new Set(lines));
+      if (unique.length > 0) return unique.join("；");
+    }
+  }
+  if (typeof payload === "string" && payload.trim()) {
+    try {
+      const parsed = JSON.parse(payload);
+      return normalizeBackendError(parsed, status);
+    } catch {
+      return payload.trim();
+    }
+  }
+  return fallbackMessageByStatus(status);
+}
+
 export interface SkillItem {
   slug: string;
   name: string;
@@ -114,14 +179,25 @@ export async function apiRequest(
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers
+    });
+  } catch {
+    throw new Error("网络连接失败，请检查网络后重试。");
+  }
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `请求失败: ${res.status}`);
+    const contentType = res.headers.get("content-type") || "";
+    let payload: unknown = null;
+    if (contentType.includes("application/json")) {
+      payload = await res.json().catch(() => null);
+    } else {
+      payload = await res.text().catch(() => null);
+    }
+    throw new Error(normalizeBackendError(payload, res.status));
   }
   return res.json();
 }
@@ -139,14 +215,25 @@ export async function streamSsePost(
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload)
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    });
+  } catch {
+    throw new Error("网络连接失败，请检查网络后重试。");
+  }
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `请求失败: ${res.status}`);
+    const contentType = res.headers.get("content-type") || "";
+    let body: unknown = null;
+    if (contentType.includes("application/json")) {
+      body = await res.json().catch(() => null);
+    } else {
+      body = await res.text().catch(() => null);
+    }
+    throw new Error(normalizeBackendError(body, res.status));
   }
   if (!res.body) {
     return;

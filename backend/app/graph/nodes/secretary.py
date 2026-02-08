@@ -1,6 +1,7 @@
 import json
 import re
 from datetime import date, datetime, timedelta
+from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -18,66 +19,53 @@ from app.services.runtime_context import get_session, get_scheduler
 from app.models.user import User
 
 
-MINUTES_PATTERN = re.compile(r"(\d+)\s*分钟后")
-HOURS_PATTERN = re.compile(r"(\d+)\s*小时后")
-DAY_OFFSET_PATTERN = re.compile(r"(今天|明天|后天)")
-HOUR_MIN_PATTERN = re.compile(r"(\d{1,2})\s*点(?:\s*(\d{1,2})\s*分)?")
-HALF_PATTERN = re.compile(r"(\d{1,2})\s*点半")
 CALENDAR_CMD_PATTERN = re.compile(r"^/calendar(?:\s+(.+))?$", re.IGNORECASE)
-CALENDAR_HINT_PATTERN = re.compile(r"(日历|日程|行程|安排)")
 DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
-TIME_QUERY_PATTERN = re.compile(
-    r"(现在|此刻|当前).*(几点|时间|日期|几号|星期)|^(几点|时间|日期|今天几号|今天星期几)$"
-)
-CONTEXT_RECALL_TOKENS = (
-    "之前我",
-    "我刚才",
-    "我之前",
-    "上一句",
-    "上一条",
-    "前面我",
-    "上文",
-    "我问了什么",
-    "我们刚才聊",
-    "还记得我",
-)
+TECHNICAL_LEAK_PATTERN = re.compile(r"(json|payload|字段|数组|schema|schedules|ledgers)", re.IGNORECASE)
+SCHEDULE_STATUS_MAP = {
+    "all": "all",
+    "全部": "all",
+    "所有": "all",
+    "pending": "pending",
+    "todo": "pending",
+    "未完成": "pending",
+    "待办": "pending",
+    "待执行": "pending",
+    "未执行": "pending",
+    "executed": "executed",
+    "completed": "executed",
+    "done": "executed",
+    "已完成": "executed",
+    "完成": "executed",
+    "已执行": "executed",
+    "cancelled": "cancelled",
+    "canceled": "cancelled",
+    "已取消": "cancelled",
+    "取消": "cancelled",
+}
+SCHEDULE_STATUS_DB = {
+    "all": None,
+    "pending": "PENDING",
+    "executed": "EXECUTED",
+    "cancelled": "CANCELLED",
+}
 
 
-def _parse_relative_time(text: str) -> datetime | None:
-    now_local = datetime.now()
-    if match := MINUTES_PATTERN.search(text):
-        return now_local + timedelta(minutes=int(match.group(1)))
-    if match := HOURS_PATTERN.search(text):
-        return now_local + timedelta(hours=int(match.group(1)))
-    day_offset = None
-    if match := DAY_OFFSET_PATTERN.search(text):
-        token = match.group(1)
-        if token == "今天":
-            day_offset = 0
-        elif token == "明天":
-            day_offset = 1
-        elif token == "后天":
-            day_offset = 2
-    hour = None
-    minute = 0
-    if half := HALF_PATTERN.search(text):
-        hour = int(half.group(1))
-        minute = 30
-    elif hm := HOUR_MIN_PATTERN.search(text):
-        hour = int(hm.group(1))
-        minute = int(hm.group(2)) if hm.group(2) else 0
-    if hour is not None and day_offset is not None:
-        if any(token in text for token in ("下午", "晚上", "晚间", "傍晚")) and hour < 12:
-            hour += 12
-        target_date = (now_local + timedelta(days=day_offset)).date()
-        return datetime(
-            year=target_date.year,
-            month=target_date.month,
-            day=target_date.day,
-            hour=hour,
-            minute=minute,
-        )
-    return None
+def _local_today() -> date:
+    tz_name = get_settings().timezone
+    return datetime.now(ZoneInfo(tz_name)).date()
+
+
+def _to_utc_naive(local_dt: datetime) -> datetime:
+    tz_name = get_settings().timezone
+    return local_dt.replace(tzinfo=ZoneInfo(tz_name)).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+
+def _format_window_label(name: str, start_date: date, end_date_exclusive: date) -> str:
+    if end_date_exclusive == start_date + timedelta(days=1):
+        return f"{name}（{start_date.isoformat()}）"
+    end_date = end_date_exclusive - timedelta(days=1)
+    return f"{name}（{start_date.isoformat()} ~ {end_date.isoformat()}）"
 
 
 def _resolve_calendar_window(text: str) -> tuple[datetime, datetime, str] | None:
@@ -85,22 +73,34 @@ def _resolve_calendar_window(text: str) -> tuple[datetime, datetime, str] | None
     match = CALENDAR_CMD_PATTERN.match(content)
     target = (match.group(1).strip().lower() if match and match.group(1) else content)
 
-    today = datetime.utcnow().date()
+    today = _local_today()
+    if target in {"yesterday", "昨天"}:
+        start = today - timedelta(days=1)
+        end = start + timedelta(days=1)
+        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), _format_window_label("昨天", start, end)
+    if target in {"前天"}:
+        start = today - timedelta(days=2)
+        end = start + timedelta(days=1)
+        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), _format_window_label("前天", start, end)
     if target in {"", "today", "今日", "今天"}:
         start = today
         end = today + timedelta(days=1)
-        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), "今天"
+        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), _format_window_label("今天", start, end)
     if target in {"week", "本周", "这周"}:
         start = today - timedelta(days=today.weekday())
         end = start + timedelta(days=7)
-        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), "本周"
+        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), _format_window_label("本周", start, end)
+    if target in {"last week", "上周"}:
+        start = today - timedelta(days=today.weekday() + 7)
+        end = start + timedelta(days=7)
+        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), _format_window_label("上周", start, end)
     if target in {"month", "本月", "这个月"}:
         start = today.replace(day=1)
         if start.month == 12:
             end = date(start.year + 1, 1, 1)
         else:
             end = date(start.year, start.month + 1, 1)
-        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), "本月"
+        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), _format_window_label("本月", start, end)
 
     raw_text = (text or "").strip()
     date_match = DATE_PATTERN.search(raw_text)
@@ -108,7 +108,7 @@ def _resolve_calendar_window(text: str) -> tuple[datetime, datetime, str] | None
         try:
             start = date.fromisoformat(date_match.group(0))
             end = start + timedelta(days=1)
-            return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), start.isoformat()
+            return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), _format_window_label(start.isoformat(), start, end)
         except Exception:
             return None
     return None
@@ -125,6 +125,30 @@ def _parse_json_object(content: str) -> dict:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def _sanitize_llm_text(text: str) -> str:
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    lines: list[str] = []
+    prev = ""
+    for row in raw.splitlines():
+        line = row.rstrip()
+        norm = re.sub(r"\s+", " ", line).strip()
+        if not norm:
+            if lines and lines[-1] != "":
+                lines.append("")
+            continue
+        if norm == prev:
+            continue
+        if TECHNICAL_LEAK_PATTERN.search(norm):
+            continue
+        lines.append(line)
+        prev = norm
+    while lines and lines[-1] == "":
+        lines.pop()
+    return "\n".join(lines).strip()
 
 
 def _parse_run_at_local(value: str | None, timezone: str) -> datetime | None:
@@ -152,13 +176,19 @@ async def _understand_secretary_message(content: str, conversation_context: str)
     system = SystemMessage(
         content=(
             "你是提醒与日历意图解析器。只输出 JSON。"
-            "字段: intent, confidence, run_at_local, reminder_content, calendar_scope, calendar_date。"
-            "intent 仅可为 reminder, calendar, unknown。"
+            "字段: intent, confidence, run_at_local, reminder_content, calendar_scope, calendar_date, schedule_status_filter。"
+            "intent 仅可为 reminder, calendar, time_query, context_recall, unknown。"
             "如果用户是提醒请求（例如‘明天中午12点提醒我开会’），intent=reminder，"
             "run_at_local 必须输出 YYYY-MM-DD HH:MM（基于用户时区）。"
             "reminder_content 要提炼提醒事项本体，去掉时间描述。"
-            "如果用户是查看日历/日程，intent=calendar，calendar_scope 用 today/week/month/date。"
+            "如果用户是查看日历/日程，intent=calendar，calendar_scope 用 today/week/month/date/yesterday/day_before_yesterday/last_week。"
             "当 scope=date 时输出 calendar_date=YYYY-MM-DD。"
+            "当用户说昨天/前天时，优先用 calendar_scope=yesterday/day_before_yesterday；"
+            "当用户说上周时，用 calendar_scope=last_week。"
+            "如果用户在问现在几点/今天几号/星期几，intent=time_query。"
+            "如果用户在问之前聊了什么/刚才问了什么，intent=context_recall。"
+            "schedule_status_filter 仅可为 all/pending/executed/cancelled。"
+            "当用户询问已完成/未完成/已取消时必须提取该字段；若未提及则 all。"
             f"用户时区: {tz}。当前本地时间: {now_local}。"
         )
     )
@@ -196,40 +226,71 @@ def _resolve_calendar_window_from_fields(
     scope: str,
     calendar_date: str | None,
 ) -> tuple[datetime, datetime, str] | None:
-    today = datetime.now().date()
+    today = _local_today()
     scope_key = (scope or "").strip().lower()
+    if scope_key == "yesterday":
+        start = today - timedelta(days=1)
+        end = start + timedelta(days=1)
+        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), _format_window_label("昨天", start, end)
+    if scope_key == "day_before_yesterday":
+        start = today - timedelta(days=2)
+        end = start + timedelta(days=1)
+        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), _format_window_label("前天", start, end)
     if scope_key in {"today", "day"}:
         start = today
         end = today + timedelta(days=1)
-        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), "今天"
+        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), _format_window_label("今天", start, end)
+    if scope_key == "last_week":
+        start = today - timedelta(days=today.weekday() + 7)
+        end = start + timedelta(days=7)
+        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), _format_window_label("上周", start, end)
     if scope_key == "week":
         start = today - timedelta(days=today.weekday())
         end = start + timedelta(days=7)
-        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), "本周"
+        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), _format_window_label("本周", start, end)
     if scope_key == "month":
         start = today.replace(day=1)
         if start.month == 12:
             end = date(start.year + 1, 1, 1)
         else:
             end = date(start.year, start.month + 1, 1)
-        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), "本月"
+        return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), _format_window_label("本月", start, end)
     if scope_key == "date" and calendar_date:
         try:
             start = date.fromisoformat(calendar_date.strip())
             end = start + timedelta(days=1)
-            return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), start.isoformat()
+            return datetime.combine(start, datetime.min.time()), datetime.combine(end, datetime.min.time()), _format_window_label(start.isoformat(), start, end)
         except Exception:
             return None
     return None
 
 
-async def _render_calendar_text(session, user_id: int, start_at: datetime, end_at: datetime, label: str) -> str:
+def _normalize_schedule_status_filter(value: str | None) -> str:
+    key = (value or "").strip().lower()
+    return SCHEDULE_STATUS_MAP.get(key, "all")
+
+
+def _resolve_schedule_status_filter(parsed: dict) -> str:
+    return _normalize_schedule_status_filter(str(parsed.get("schedule_status_filter") or "all"))
+
+
+def _fmt_dt(value: datetime | None, pattern: str = "%m-%d %H:%M") -> str:
+    if not value:
+        return "-"
+    if value.tzinfo is not None:
+        value = value.astimezone(ZoneInfo(get_settings().timezone))
+    return value.strftime(pattern)
+
+
+async def _query_calendar_rows(session, user_id: int, start_at: datetime, end_at: datetime) -> tuple[list[Ledger], list[Schedule]]:
+    ledger_start = _to_utc_naive(start_at)
+    ledger_end = _to_utc_naive(end_at)
     ledgers_result = await session.execute(
         select(Ledger)
         .where(
             Ledger.user_id == user_id,
-            Ledger.transaction_date >= start_at,
-            Ledger.transaction_date < end_at,
+            Ledger.transaction_date >= ledger_start,
+            Ledger.transaction_date < ledger_end,
         )
         .order_by(Ledger.transaction_date.asc(), Ledger.id.asc())
     )
@@ -242,36 +303,141 @@ async def _render_calendar_text(session, user_id: int, start_at: datetime, end_a
         )
         .order_by(Schedule.trigger_time.asc(), Schedule.id.asc())
     )
-    ledgers = list(ledgers_result.scalars().all())
-    schedules = list(schedules_result.scalars().all())
+    return list(ledgers_result.scalars().all()), list(schedules_result.scalars().all())
 
+
+def _filter_schedules_by_status(schedules: list[Schedule], status_filter: str) -> list[Schedule]:
+    target = SCHEDULE_STATUS_DB.get(status_filter, None)
+    if not target:
+        return schedules
+    return [item for item in schedules if str(item.status or "").upper() == target]
+
+
+def _build_calendar_payload(ledgers: list[Ledger], schedules: list[Schedule]) -> dict[str, Any]:
+    return {
+        "ledgers": [
+            {
+                "id": item.id,
+                "datetime": _fmt_dt(item.transaction_date, "%Y-%m-%d %H:%M"),
+                "amount": round(float(item.amount), 2),
+                "currency": item.currency,
+                "category": item.category,
+                "item": item.item,
+            }
+            for item in ledgers[:50]
+        ],
+        "schedules": [
+            {
+                "id": item.id,
+                "datetime": _fmt_dt(item.trigger_time, "%Y-%m-%d %H:%M"),
+                "content": item.content,
+                "status": str(item.status or "").upper(),
+            }
+            for item in schedules[:50]
+        ],
+    }
+
+
+async def _answer_calendar_with_llm(
+    content: str,
+    conversation_context: str,
+    label: str,
+    schedule_status_filter: str,
+    ledgers: list[Ledger],
+    schedules: list[Schedule],
+) -> str:
+    llm = get_llm()
+    payload = _build_calendar_payload(ledgers, schedules)
+    system = SystemMessage(
+        content=(
+            "你是日历与日程答复助手。你只能基于给定数据回答，不得编造。"
+            "回答时要贴合用户问题，不要固定模板。"
+            "如果用户问已完成/未完成/已取消，请按 status 进行筛选或分组。"
+            "status 定义: PENDING=未完成, EXECUTED=已完成, CANCELLED=已取消。"
+            "涉及明细时请给出时间。"
+            "若数据为空，明确说没有相关记录。"
+            "默认给出简洁自然的中文回答，不要输出技术说明。"
+            "不要提到 JSON、数组、字段、数据源、会话上下文。"
+            "除非用户明确要求按状态统计，否则不要枚举各状态计数。"
+            "不要重复句子或段落。"
+        )
+    )
+    human = HumanMessage(
+        content=(
+            f"查询范围: {label}\n"
+            f"状态筛选: {schedule_status_filter}\n\n"
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"用户问题:\n{content}\n\n"
+            f"数据(JSON):\n{json.dumps(payload, ensure_ascii=False)}"
+        )
+    )
+    response = await llm.ainvoke([system, human])
+    return _sanitize_llm_text(str(response.content or ""))
+
+
+def _render_calendar_text(ledgers: list[Ledger], schedules: list[Schedule], label: str, schedule_status_filter: str) -> str:
+    filtered_schedules = _filter_schedules_by_status(schedules, schedule_status_filter)
+    filter_title = {
+        "all": "全部状态",
+        "pending": "未完成",
+        "executed": "已完成",
+        "cancelled": "已取消",
+    }.get(schedule_status_filter, "全部状态")
     lines = [f"{label}日历："]
     lines.append(f"- 账单 {len(ledgers)} 笔")
-    lines.append(f"- 日程 {len(schedules)} 条")
+    lines.append(f"- 日程 {len(filtered_schedules)} 条（{filter_title}）")
 
     if ledgers:
         lines.append("账单：")
         for row in ledgers[:8]:
             lines.append(
-                f"- {row.transaction_date.strftime('%m-%d %H:%M')} #{row.id} {row.item} {row.amount:.2f} {row.currency} ({row.category})"
+                f"- {_fmt_dt(row.transaction_date)} #{row.id} {row.item} {row.amount:.2f} {row.currency} ({row.category})"
             )
         if len(ledgers) > 8:
             lines.append(f"- ... 其余 {len(ledgers) - 8} 笔")
 
-    if schedules:
+    if filtered_schedules:
         lines.append("日程：")
-        for row in schedules[:8]:
+        for row in filtered_schedules[:8]:
             lines.append(
-                f"- {row.trigger_time.strftime('%m-%d %H:%M')} #{row.id} {row.content} [{row.status}]"
+                f"- {_fmt_dt(row.trigger_time)} #{row.id} {row.content} [{row.status}]"
             )
-        if len(schedules) > 8:
-            lines.append(f"- ... 其余 {len(schedules) - 8} 条")
+        if len(filtered_schedules) > 8:
+            lines.append(f"- ... 其余 {len(filtered_schedules) - 8} 条")
 
-    if not ledgers and not schedules:
+    if not ledgers and not filtered_schedules:
         lines.append("这段时间没有账单和日程。")
 
     lines.append("可用：`/calendar today`、`/calendar week`、`/calendar month`、`/calendar 2026-02-07`")
     return "\n".join(lines)
+
+
+async def _answer_calendar(
+    session,
+    user_id: int,
+    content: str,
+    conversation_context: str,
+    start_at: datetime,
+    end_at: datetime,
+    label: str,
+    schedule_status_filter: str,
+) -> str:
+    ledgers, schedules = await _query_calendar_rows(session, user_id, start_at, end_at)
+    filtered_schedules = _filter_schedules_by_status(schedules, schedule_status_filter)
+    try:
+        llm_text = await _answer_calendar_with_llm(
+            content=content,
+            conversation_context=conversation_context,
+            label=label,
+            schedule_status_filter=schedule_status_filter,
+            ledgers=ledgers,
+            schedules=filtered_schedules,
+        )
+        if llm_text:
+            return llm_text
+    except Exception:
+        pass
+    return _render_calendar_text(ledgers, schedules, label, schedule_status_filter)
 
 
 async def secretary_node(state: GraphState) -> GraphState:
@@ -283,16 +449,6 @@ async def secretary_node(state: GraphState) -> GraphState:
         return {**state, "responses": ["未找到用户信息。"]}
     content = (message.content or "").strip()
     context_text = render_conversation_context(state)
-    lowered = content.lower()
-    if any(token in lowered for token in CONTEXT_RECALL_TOKENS):
-        try:
-            recall_text = await _answer_context_recall(content, context_text)
-            return {**state, "responses": [recall_text]}
-        except Exception:
-            return {
-                **state,
-                "responses": ["我能读取当前会话上下文，但这次回忆失败了，请重试一次。"],
-            }
 
     parsed: dict = {}
     try:
@@ -302,6 +458,29 @@ async def secretary_node(state: GraphState) -> GraphState:
 
     intent = str(parsed.get("intent") or "").strip().lower()
     confidence = float(parsed.get("confidence") or 0.0)
+    schedule_status_filter = _resolve_schedule_status_filter(parsed)
+
+    if intent == "context_recall" and confidence >= 0.55:
+        try:
+            recall_text = await _answer_context_recall(content, context_text)
+            return {**state, "responses": [recall_text]}
+        except Exception:
+            return {
+                **state,
+                "responses": ["我能读取当前会话上下文，但这次回忆失败了，请重试一次。"],
+            }
+
+    if intent == "time_query" and confidence >= 0.55:
+        settings = get_settings()
+        now_local = datetime.now(ZoneInfo(settings.timezone))
+        weekday_map = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+        weekday_text = weekday_map[now_local.weekday()]
+        return {
+            **state,
+            "responses": [
+                f"现在时间：{now_local.strftime('%Y-%m-%d %H:%M')}（{weekday_text}，时区 {settings.timezone}）。"
+            ],
+        }
 
     if intent == "calendar" and confidence >= 0.55:
         scope = str(parsed.get("calendar_scope") or "").strip().lower()
@@ -309,7 +488,16 @@ async def secretary_node(state: GraphState) -> GraphState:
         llm_window = _resolve_calendar_window_from_fields(scope, calendar_date)
         if llm_window:
             start_at, end_at, label = llm_window
-            response = await _render_calendar_text(session, user.id, start_at, end_at, label)
+            response = await _answer_calendar(
+                session=session,
+                user_id=user.id,
+                content=content,
+                conversation_context=context_text,
+                start_at=start_at,
+                end_at=end_at,
+                label=label,
+                schedule_status_filter=schedule_status_filter,
+            )
             return {**state, "responses": [response]}
 
     if intent == "reminder" and confidence >= 0.55:
@@ -347,20 +535,7 @@ async def secretary_node(state: GraphState) -> GraphState:
                 "responses": [f"好的，提醒已设置：{trigger_time.strftime('%Y-%m-%d %H:%M')}。"],
             }
 
-    # Non-reminder factual query handled here to avoid poor reminder fallback UX.
-    if TIME_QUERY_PATTERN.search(content):
-        settings = get_settings()
-        now_local = datetime.now(ZoneInfo(settings.timezone))
-        weekday_map = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-        weekday_text = weekday_map[now_local.weekday()]
-        return {
-            **state,
-            "responses": [
-                f"现在时间：{now_local.strftime('%Y-%m-%d %H:%M')}（{weekday_text}，时区 {settings.timezone}）。"
-            ],
-        }
-
-    # Deterministic command fallback when LLM is uncertain.
+    # Deterministic command fallback.
     calendar_window = _resolve_calendar_window(content)
     if CALENDAR_CMD_PATTERN.match(content.strip()):
         if not calendar_window:
@@ -369,52 +544,27 @@ async def secretary_node(state: GraphState) -> GraphState:
                 "responses": ["日历命令格式：`/calendar today|week|month|YYYY-MM-DD`。"],
             }
         start_at, end_at, label = calendar_window
-        response = await _render_calendar_text(session, user.id, start_at, end_at, label)
+        response = await _answer_calendar(
+            session=session,
+            user_id=user.id,
+            content=content,
+            conversation_context=context_text,
+            start_at=start_at,
+            end_at=end_at,
+            label=label,
+            schedule_status_filter=schedule_status_filter,
+        )
         return {**state, "responses": [response]}
 
-    # Non-command fallback when LLM is uncertain.
-    if CALENDAR_HINT_PATTERN.search(content):
-        fallback_window = _resolve_calendar_window(content)
-        if fallback_window:
-            start_at, end_at, label = fallback_window
-            response = await _render_calendar_text(session, user.id, start_at, end_at, label)
-            return {**state, "responses": [response]}
-
-    trigger_time = _parse_relative_time(content)
-    if not trigger_time:
+    if intent == "reminder":
         return {
             **state,
-            "responses": [
-                "我这边主要负责提醒和日历。可直接说：`明天中午12点提醒我开会`，或 `看下本周日程和账单`。"
-            ],
+            "responses": ["我收到了提醒需求，但时间还不够明确。请给我具体时间，例如：`明天中午12点提醒我开会`。"],
         }
 
-    job_id = str(uuid4())
-    reminder_content = content
-
-    schedule = Schedule(
-        user_id=user.id,
-        job_id=job_id,
-        content=reminder_content,
-        trigger_time=trigger_time,
-    )
-    session.add(schedule)
-    await session.commit()
-    await session.refresh(schedule)
-
-    scheduler.add_job(job_id, trigger_time, send_reminder_job, schedule.id)
-
-    try:
-        from app.services.audit import log_event
-
-        await log_event(
-            session,
-            action="schedule_created",
-            platform=user.platform,
-            user_id=user.id,
-            detail={"content": reminder_content, "trigger_time": trigger_time.isoformat()},
-        )
-    except Exception:
-        pass
-
-    return {**state, "responses": ["好的，提醒已设置。"]}
+    return {
+        **state,
+        "responses": [
+            "我这边主要负责提醒和日历。可直接说：`明天中午12点提醒我开会`，或 `看下本周日程和账单`。"
+        ],
+    }

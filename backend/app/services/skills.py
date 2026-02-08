@@ -340,25 +340,13 @@ async def parse_skill_intent(
     conversation_context: str = "",
 ) -> dict:
     text = (message_content or "").strip()
-    if text.startswith("/skill"):
-        parts = text.split(maxsplit=2)
-        action = parts[1].lower() if len(parts) > 1 else "help"
-        remainder = parts[2].strip() if len(parts) > 2 else ""
-        if action in {"update"}:
-            update_parts = remainder.split(maxsplit=1)
-            return {
-                "action": action,
-                "target": update_parts[0] if update_parts else "",
-                "request": update_parts[1] if len(update_parts) > 1 else "",
-            }
-        return {"action": action, "target": remainder, "request": remainder}
-
     llm = get_llm()
     system = SystemMessage(
         content=(
             "你是意图解析器。将用户关于技能管理的消息解析为 JSON。"
             "action 仅可为: create, update, publish, disable, list, show, help。"
-            "返回字段: action, skill_name, skill_slug, request。"
+            "返回字段: action, skill_name, skill_slug, target, request。"
+            "必须同时支持自然语言和命令式输入（例如 `/skill publish demo`）。"
             "只输出 JSON。"
         )
     )
@@ -368,13 +356,31 @@ async def parse_skill_intent(
             f"用户输入:\n{text}"
         )
     )
+    allowed_actions = {"create", "update", "publish", "disable", "list", "show", "help"}
     try:
         response = await llm.ainvoke([system, human])
         data = _extract_json_object(str(response.content))
-        if data.get("action"):
+        action = str(data.get("action") or "").strip().lower()
+        if action in allowed_actions:
             return data
     except Exception:
         pass
+
+    # Deterministic command fallback.
+    if text.startswith("/skill"):
+        parts = text.split(maxsplit=2)
+        action = parts[1].lower() if len(parts) > 1 else "help"
+        remainder = parts[2].strip() if len(parts) > 2 else ""
+        if action not in allowed_actions:
+            return {"action": "help", "request": remainder or text}
+        if action == "update":
+            update_parts = remainder.split(maxsplit=1)
+            return {
+                "action": action,
+                "target": update_parts[0] if update_parts else "",
+                "request": update_parts[1] if len(update_parts) > 1 else "",
+            }
+        return {"action": action, "target": remainder, "request": remainder}
 
     return {"action": "help", "request": text}
 

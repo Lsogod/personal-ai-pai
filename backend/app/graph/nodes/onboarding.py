@@ -160,30 +160,13 @@ async def onboarding_node(state: GraphState) -> GraphState:
         }
 
     if user.setup_stage == SetupStage.NEW and int(user.binding_stage or 0) == 1:
-        answer = (message.content or "").strip().lower()
+        answer = (message.content or "").strip()
         decision = await _understand_binding_answer(answer, context_text)
-        yes_tokens = ("有", "有的", "有账号", "yes", "y")
-        no_tokens = ("没有", "没", "无", "no", "n")
-        continue_tokens = ("继续", "continue", "go on", "next")
         if decision in {"no_account", "continue"}:
             user.binding_stage = 2
             session.add(user)
             await session.commit()
         elif decision == "has_account":
-            user.binding_stage = 2
-            session.add(user)
-            await session.commit()
-            return {
-                **state,
-                "responses": [
-                    "好的。你可以先在已有账号所在客户端发送 `/bind new` 获取6位绑定码，再回到这里发送 `/bind <code>`。完成后回复“继续”。"
-                ],
-            }
-        elif any(token in answer for token in no_tokens) or any(token in answer for token in continue_tokens):
-            user.binding_stage = 2
-            session.add(user)
-            await session.commit()
-        elif any(token in answer for token in yes_tokens):
             user.binding_stage = 2
             session.add(user)
             await session.commit()
