@@ -21,7 +21,31 @@ from app.models.user import User
 
 CALENDAR_CMD_PATTERN = re.compile(r"^/calendar(?:\s+(.+))?$", re.IGNORECASE)
 DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
+RELATIVE_SECONDS_PATTERN = re.compile(r"(\d+)\s*秒(?:钟)?后")
+RELATIVE_MINUTES_PATTERN = re.compile(r"(\d+)\s*分(?:钟)?后")
+RELATIVE_HOURS_PATTERN = re.compile(r"(\d+)\s*小?时后")
 TECHNICAL_LEAK_PATTERN = re.compile(r"(json|payload|字段|数组|schema|schedules|ledgers)", re.IGNORECASE)
+REMINDER_CONTENT_CLEAN_PATTERNS = (
+    re.compile(r"^\s*(请|请你|麻烦|帮我|帮忙|记得|到时候|之后|然后|再)\s*"),
+    re.compile(r"^\s*(今天|明天|后天|今晚|今早|明早|中午|下午|晚上|早上|夜里|凌晨)\s*"),
+    re.compile(r"^\s*\d+\s*秒(?:钟)?后\s*"),
+    re.compile(r"^\s*\d+\s*分(?:钟)?后\s*"),
+    re.compile(r"^\s*\d+\s*小?时后\s*"),
+    re.compile(r"^\s*\d{1,2}\s*点(?:\s*\d{1,2}\s*分?)?\s*"),
+    re.compile(r"^\s*(提醒(?:一下)?我?|叫我|通知我)\s*"),
+    re.compile(r"^\s*(去|要|把)\s*"),
+)
+REMINDER_PLACEHOLDER_WORDS = {
+    "我",
+    "一下",
+    "一下子",
+    "提醒",
+    "事项",
+    "这个",
+    "这件事",
+    "那个",
+    "它",
+}
 SCHEDULE_STATUS_MAP = {
     "all": "all",
     "全部": "all",
@@ -155,17 +179,176 @@ def _parse_run_at_local(value: str | None, timezone: str) -> datetime | None:
     raw = (value or "").strip()
     if not raw:
         return None
-    patterns = ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S")
+    normalized = raw.replace("T", " ").replace("/", "-")
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    patterns = (
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S.%f",
+    )
     for pattern in patterns:
         try:
-            dt = datetime.strptime(raw, pattern)
+            dt = datetime.strptime(normalized, pattern)
             local_tz = ZoneInfo(timezone)
             # Keep naive local datetime to match scheduler DateTrigger timezone handling.
             _ = dt.replace(tzinfo=local_tz)
             return dt
         except Exception:
             continue
+    try:
+        dt = datetime.fromisoformat(normalized)
+        local_tz = ZoneInfo(timezone)
+        if dt.tzinfo is not None:
+            return dt.astimezone(local_tz).replace(tzinfo=None)
+        _ = dt.replace(tzinfo=local_tz)
+        return dt
+    except Exception:
+        return None
+
+
+def _parse_relative_reminder_local(content: str, timezone: str) -> datetime | None:
+    text = (content or "").strip()
+    if not text:
+        return None
+    now_local = datetime.now(ZoneInfo(timezone)).replace(tzinfo=None)
+    if match := RELATIVE_SECONDS_PATTERN.search(text):
+        seconds = int(match.group(1))
+        if seconds <= 0:
+            return None
+        # Keep second precision when user explicitly asks for seconds.
+        return (now_local + timedelta(seconds=seconds)).replace(microsecond=0)
+    if match := RELATIVE_MINUTES_PATTERN.search(text):
+        minutes = int(match.group(1))
+        if minutes <= 0:
+            return None
+        # Relative minute reminders are also second-precision by requirement.
+        return (now_local + timedelta(minutes=minutes)).replace(microsecond=0)
+    if match := RELATIVE_HOURS_PATTERN.search(text):
+        hours = int(match.group(1))
+        if hours <= 0:
+            return None
+        return (now_local + timedelta(hours=hours)).replace(second=0, microsecond=0)
     return None
+
+
+def _relative_precision_mode(content: str) -> str:
+    text = (content or "").strip()
+    if not text:
+        return "none"
+    if RELATIVE_SECONDS_PATTERN.search(text) or RELATIVE_MINUTES_PATTERN.search(text):
+        return "second"
+    if RELATIVE_HOURS_PATTERN.search(text):
+        return "minute"
+    return "none"
+
+
+def _format_reminder_time(dt: datetime) -> str:
+    if dt.second != 0:
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    return dt.strftime("%Y-%m-%d %H:%M")
+
+
+def _clean_reminder_content(text: str) -> str:
+    cleaned = (text or "").strip().strip("`\"' ")
+    if not cleaned:
+        return ""
+
+    changed = True
+    while changed and cleaned:
+        changed = False
+        for pattern in REMINDER_CONTENT_CLEAN_PATTERNS:
+            updated = pattern.sub("", cleaned, count=1).strip()
+            if updated != cleaned:
+                cleaned = updated
+                changed = True
+
+    cleaned = cleaned.strip(" ：:，,。.!！？?;；")
+    return cleaned
+
+
+def _is_placeholder_reminder_content(text: str) -> bool:
+    normalized = re.sub(r"\s+", "", (text or "").strip().lower())
+    if not normalized:
+        return True
+    if normalized in REMINDER_PLACEHOLDER_WORDS:
+        return True
+    if len(normalized) <= 1:
+        return True
+    return False
+
+
+def _resolve_reminder_content(llm_value: str, user_content: str) -> str:
+    candidates = (
+        _clean_reminder_content(llm_value),
+        _clean_reminder_content(user_content),
+    )
+    for candidate in candidates:
+        if candidate and not _is_placeholder_reminder_content(candidate):
+            return candidate
+    return "待办提醒"
+
+
+async def _understand_reminder_fallback(content: str, conversation_context: str) -> dict:
+    settings = get_settings()
+    tz = settings.timezone
+    now_local = datetime.now(ZoneInfo(tz)).strftime("%Y-%m-%d %H:%M")
+    llm = get_llm()
+    system = SystemMessage(
+        content=(
+            "你是提醒专用解析器。只输出 JSON。"
+            "字段: is_reminder, confidence, run_at_local, reminder_content。"
+            "is_reminder 只可为 true/false。"
+            "如果用户表达了提醒诉求（例如“1分钟后提醒我测试”“明早9点提醒我开会”），is_reminder=true。"
+            "run_at_local 必须换算为用户时区时间，格式 YYYY-MM-DD HH:MM[:SS]。"
+            "若用户明确到秒（如“30秒后”），必须保留秒；否则秒填 00。"
+            "reminder_content 提炼提醒事项本体。"
+            f"用户时区: {tz}。当前本地时间: {now_local}。"
+        )
+    )
+    human = HumanMessage(
+        content=(
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"用户输入:\n{content}"
+        )
+    )
+    response = await llm.ainvoke([system, human])
+    return _parse_json_object(str(response.content))
+
+
+async def _create_reminder(
+    *,
+    session,
+    scheduler,
+    user: User,
+    reminder_content: str,
+    trigger_time: datetime,
+) -> str:
+    job_id = str(uuid4())
+    schedule = Schedule(
+        user_id=user.id,
+        job_id=job_id,
+        content=reminder_content,
+        trigger_time=trigger_time,
+    )
+    session.add(schedule)
+    await session.commit()
+    await session.refresh(schedule)
+    scheduler.add_job(job_id, trigger_time, send_reminder_job, schedule.id)
+
+    try:
+        from app.services.audit import log_event
+
+        await log_event(
+            session,
+            action="schedule_created",
+            platform=user.platform,
+            user_id=user.id,
+            detail={"content": reminder_content, "trigger_time": trigger_time.isoformat(), "via": "llm"},
+        )
+    except Exception:
+        pass
+    return f"好的，提醒已设置：{_format_reminder_time(trigger_time)}。"
 
 
 async def _understand_secretary_message(content: str, conversation_context: str) -> dict:
@@ -179,7 +362,8 @@ async def _understand_secretary_message(content: str, conversation_context: str)
             "字段: intent, confidence, run_at_local, reminder_content, calendar_scope, calendar_date, schedule_status_filter。"
             "intent 仅可为 reminder, calendar, time_query, context_recall, unknown。"
             "如果用户是提醒请求（例如‘明天中午12点提醒我开会’），intent=reminder，"
-            "run_at_local 必须输出 YYYY-MM-DD HH:MM（基于用户时区）。"
+            "run_at_local 必须输出用户时区时间，格式 YYYY-MM-DD HH:MM[:SS]。"
+            "若用户明确到秒（如“30秒后”），必须保留秒；否则秒填 00。"
             "reminder_content 要提炼提醒事项本体，去掉时间描述。"
             "如果用户是查看日历/日程，intent=calendar，calendar_scope 用 today/week/month/date/yesterday/day_before_yesterday/last_week。"
             "当 scope=date 时输出 calendar_date=YYYY-MM-DD。"
@@ -500,40 +684,52 @@ async def secretary_node(state: GraphState) -> GraphState:
             )
             return {**state, "responses": [response]}
 
-    if intent == "reminder" and confidence >= 0.55:
-        settings = get_settings()
-        trigger_time = _parse_run_at_local(str(parsed.get("run_at_local") or ""), settings.timezone)
-        if trigger_time and trigger_time > datetime.now() + timedelta(seconds=5):
-            reminder_content = str(parsed.get("reminder_content") or "").strip() or content
-            job_id = str(uuid4())
-            schedule = Schedule(
-                user_id=user.id,
-                job_id=job_id,
-                content=reminder_content,
+    settings = get_settings()
+    reminder_candidate = parsed
+    reminder_intent = intent == "reminder"
+    reminder_confidence = confidence
+    if intent == "unknown":
+        try:
+            reminder_candidate = await _understand_reminder_fallback(content, context_text)
+            reminder_intent = bool(reminder_candidate.get("is_reminder"))
+            reminder_confidence = float(reminder_candidate.get("confidence") or 0.0)
+        except Exception:
+            reminder_intent = False
+
+    relative_trigger = _parse_relative_reminder_local(content, settings.timezone)
+    relative_mode = _relative_precision_mode(content)
+    if not reminder_intent and relative_trigger is not None and "提醒" in content:
+        reminder_intent = True
+        reminder_confidence = max(reminder_confidence, 0.5)
+        reminder_candidate = {
+            "run_at_local": relative_trigger.strftime("%Y-%m-%d %H:%M:%S"),
+            "reminder_content": "",
+        }
+
+    if reminder_intent and reminder_confidence >= 0.35:
+        trigger_time = _parse_run_at_local(str(reminder_candidate.get("run_at_local") or ""), settings.timezone)
+        if relative_mode == "second" and relative_trigger is not None:
+            # For "X秒后/X分钟后", always use second-precision relative scheduling.
+            trigger_time = relative_trigger
+        elif trigger_time is None:
+            trigger_time = relative_trigger
+        elif relative_mode in {"minute", "none"}:
+            # Absolute/bigger-time reminders keep minute precision.
+            trigger_time = trigger_time.replace(second=0, microsecond=0)
+        now_local = datetime.now(ZoneInfo(settings.timezone)).replace(tzinfo=None)
+        if trigger_time and trigger_time > now_local + timedelta(seconds=1):
+            reminder_content = _resolve_reminder_content(
+                str(reminder_candidate.get("reminder_content") or ""),
+                content,
+            )
+            text = await _create_reminder(
+                session=session,
+                scheduler=scheduler,
+                user=user,
+                reminder_content=reminder_content,
                 trigger_time=trigger_time,
             )
-            session.add(schedule)
-            await session.commit()
-            await session.refresh(schedule)
-            scheduler.add_job(job_id, trigger_time, send_reminder_job, schedule.id)
-
-            try:
-                from app.services.audit import log_event
-
-                await log_event(
-                    session,
-                    action="schedule_created",
-                    platform=user.platform,
-                    user_id=user.id,
-                    detail={"content": reminder_content, "trigger_time": trigger_time.isoformat(), "via": "llm"},
-                )
-            except Exception:
-                pass
-
-            return {
-                **state,
-                "responses": [f"好的，提醒已设置：{trigger_time.strftime('%Y-%m-%d %H:%M')}。"],
-            }
+            return {**state, "responses": [text]}
 
     # Deterministic command fallback.
     calendar_window = _resolve_calendar_window(content)
@@ -556,7 +752,7 @@ async def secretary_node(state: GraphState) -> GraphState:
         )
         return {**state, "responses": [response]}
 
-    if intent == "reminder":
+    if reminder_intent:
         return {
             **state,
             "responses": ["我收到了提醒需求，但时间还不够明确。请给我具体时间，例如：`明天中午12点提醒我开会`。"],

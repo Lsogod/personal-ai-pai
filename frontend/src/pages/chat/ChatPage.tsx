@@ -7,6 +7,7 @@ import { useThemeStore } from "../../store/theme";
 import { ChatWindow, type ChatMessage } from "../../components/chat/ChatWindow";
 import { ConversationSidebar } from "../../components/chat/ConversationSidebar";
 import { ProfileCard } from "../../components/chat/ProfileCard";
+import { NotificationToasts, type ToastItem } from "../../components/ui/NotificationToasts";
 import { RightInfoPanel } from "./RightInfoPanel";
 import {
   Menu,
@@ -33,6 +34,7 @@ interface LedgerStats {
 }
 
 const emptyStats: LedgerStats = { total: 0, count: 0 };
+const TOAST_LIMIT = 4;
 
 export function ChatPage() {
   const { token, setToken } = useAuthStore();
@@ -41,8 +43,66 @@ export function ChatPage() {
   const [streamingReply, setStreamingReply] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
   const streamBufferRef = useRef("");
   const streamFlushTimerRef = useRef<number | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  function playReminderSound() {
+    const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtx) return;
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new AudioCtx();
+    }
+    const ctx = audioCtxRef.current;
+
+    const play = () => {
+      const master = ctx.createGain();
+      master.gain.value = 0.08;
+      master.connect(ctx.destination);
+      const start = ctx.currentTime + 0.01;
+
+      const tone = (freq: number, delay: number, duration: number) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, start + delay);
+        gain.gain.setValueAtTime(0.0001, start + delay);
+        gain.gain.linearRampToValueAtTime(1, start + delay + 0.012);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + delay + duration);
+        osc.connect(gain);
+        gain.connect(master);
+        osc.start(start + delay);
+        osc.stop(start + delay + duration + 0.03);
+      };
+
+      tone(880, 0, 0.16);
+      tone(1318.5, 0.2, 0.24);
+    };
+
+    if (ctx.state === "suspended") {
+      ctx.resume().then(play).catch(() => {
+        // Browser autoplay policy can block sound before user interaction.
+      });
+      return;
+    }
+    play();
+  }
+
+  function removeToast(id: string) {
+    setToasts((prev) => prev.filter((item) => item.id !== id));
+  }
+
+  function pushReminderToast(content: string, createdAt: string) {
+    const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const toast: ToastItem = {
+      id,
+      title: "日程提醒",
+      content,
+      createdAt,
+    };
+    setToasts((prev) => [toast, ...prev].slice(0, TOAST_LIMIT));
+  }
 
   const { data: profile } = useQuery<Profile>({
     queryKey: ["profile"],
@@ -84,15 +144,19 @@ export function ChatPage() {
       try {
         const payload = JSON.parse(event.data || "{}");
         if (payload?.type === "reminder" && payload?.content) {
+          const content = String(payload.content);
+          const createdAt = String(payload.created_at || new Date().toISOString());
           const reminderMessage: ChatMessage = {
             role: "assistant",
-            content: String(payload.content),
-            created_at: String(payload.created_at || new Date().toISOString()),
+            content,
+            created_at: createdAt,
           };
           queryClient.setQueryData<ChatMessage[]>(["history"], (prev) => [
             ...(prev || []),
             reminderMessage,
           ]);
+          pushReminderToast(content, createdAt);
+          playReminderSound();
           void refreshSideData();
         }
         if (payload?.type === "message" && payload?.content) {
@@ -107,6 +171,15 @@ export function ChatPage() {
       ws.close();
     };
   }, [token, queryClient]);
+
+  useEffect(() => {
+    return () => {
+      if (audioCtxRef.current) {
+        void audioCtxRef.current.close().catch(() => {});
+        audioCtxRef.current = null;
+      }
+    };
+  }, []);
 
   const sendMutation = useMutation<
     void,
@@ -188,6 +261,7 @@ export function ChatPage() {
 
   return (
     <div className="flex h-screen bg-surface overflow-hidden text-content">
+      <NotificationToasts items={toasts} onDismiss={removeToast} />
       {/* Mobile overlay */}
       {mobileMenuOpen && (
         <div

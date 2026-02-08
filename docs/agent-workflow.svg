@@ -78,22 +78,25 @@
   <!-- ═══════ Layer 2: Router Node ═══════ -->
   <rect x="300" y="162" width="360" height="82" rx="14" fill="#1e1e2e" stroke="url(#green)" stroke-width="2" filter="url(#shadow)"/>
   <text x="480" y="190" text-anchor="middle" fill="#34d399" font-size="14" font-weight="700">🔀 Router · 意图路由器</text>
-  <text x="480" y="208" text-anchor="middle" fill="#94a3b8" font-size="10">router_node()  →  LLM 意图分类  →  route_intent()</text>
-  <text x="480" y="224" text-anchor="middle" fill="#64748b" font-size="9">上下文增强: has_image · has_pending_ledger · conversation_id</text>
+  <text x="480" y="208" text-anchor="middle" fill="#94a3b8" font-size="10">router_node() 意图分类  →  route_intent() 条件路由</text>
+  <text x="480" y="224" text-anchor="middle" fill="#64748b" font-size="9">上下文增强: conversation_context · has_image · has_pending_ledger</text>
 
   <circle cx="480" cy="190" r="2.5" fill="#34d399" class="pulse-node"/>
 
   <!-- Router 判断逻辑面板 -->
-  <rect x="710" y="135" width="220" height="140" rx="12" fill="#1e1e2e" stroke="#34d39950" stroke-width="1" filter="url(#shadow)"/>
-  <text x="820" y="150" text-anchor="middle" fill="#34d399" font-size="10" font-weight="600">🧠 路由三级判断</text>
-  <line x1="725" y1="157" x2="915" y2="157" stroke="#34d39930" stroke-width="1"/>
-  <text x="725" y="173" fill="#fbbf24" font-size="9" font-weight="600">① 优先规则</text>
-  <text x="735" y="186" fill="#94a3b8" font-size="8.5">setup_stage &lt; 3 → onboarding</text>
-  <text x="735" y="198" fill="#94a3b8" font-size="8.5">空消息 → writer 兜底</text>
-  <text x="725" y="213" fill="#fbbf24" font-size="9" font-weight="600">② LLM 分类</text>
-  <text x="735" y="226" fill="#94a3b8" font-size="8.5">_classify_intent_with_llm()</text>
-  <text x="725" y="241" fill="#fbbf24" font-size="9" font-weight="600">③ 规则兜底</text>
-  <text x="735" y="254" fill="#94a3b8" font-size="8.5">/help /skill /ledger /calendar</text>
+  <rect x="710" y="120" width="228" height="162" rx="12" fill="#1e1e2e" stroke="#34d39950" stroke-width="1" filter="url(#shadow)"/>
+  <text x="824" y="140" text-anchor="middle" fill="#34d399" font-size="10" font-weight="600">🧠 路由分层决策</text>
+  <line x1="725" y1="147" x2="923" y2="147" stroke="#34d39930" stroke-width="1"/>
+  <text x="725" y="162" fill="#fbbf24" font-size="9" font-weight="600">① 前置拦截 (router_node)</text>
+  <text x="735" y="174" fill="#94a3b8" font-size="8.5">setup_stage &lt; 3 → 跳过(由②处理)</text>
+  <text x="735" y="186" fill="#94a3b8" font-size="8.5">空消息且无图 → writer</text>
+  <text x="725" y="200" fill="#fbbf24" font-size="9" font-weight="600">② LLM 意图分类</text>
+  <text x="735" y="212" fill="#94a3b8" font-size="8.5">_classify_intent_with_llm()</text>
+  <text x="735" y="224" fill="#94a3b8" font-size="8.5">+context · +image · +pending</text>
+  <text x="735" y="236" fill="#94a3b8" font-size="8.5">unknown → image/pending→finance</text>
+  <text x="725" y="250" fill="#fbbf24" font-size="9" font-weight="600">③ 命令兜底 (route_intent)</text>
+  <text x="735" y="262" fill="#94a3b8" font-size="8.5">setup&lt;3→onboarding</text>
+  <text x="735" y="274" fill="#94a3b8" font-size="8.5">/help /skill /ledger /calendar</text>
 
   <line x1="660" y1="200" x2="706" y2="200" stroke="#34d39940" stroke-width="1" class="flow-line"/>
 

@@ -61,6 +61,7 @@
 - **Redis 持久化 Checkpointer** — 对话状态持久存储
 - **消息去重** — 防止 Webhook 重复投递
 - **JWT 认证** — Web 端安全登录/注册
+- **WebSocket 实时推送** — 跨平台消息同步 & 定时提醒通知
 - **管理 API** — 后台查看用户、账单、日程、审计日志
 - **Docker Compose 一键部署** — 含 PostgreSQL、Redis、前后端及平台网关
 
@@ -111,11 +112,14 @@ pai/
 │   │   ├── graph/              # LangGraph 工作流
 │   │   │   ├── workflow.py     # 图构建 & Checkpointer
 │   │   │   ├── state.py        # 状态定义
+│   │   │   ├── context.py      # 会话上下文渲染
 │   │   │   └── nodes/          # 各意图处理节点
 │   │   ├── models/             # SQLModel 数据模型
 │   │   ├── schemas/            # Pydantic 请求/响应模型
 │   │   ├── services/           # 业务逻辑层
 │   │   │   ├── platforms/      # 各平台发送适配器
+│   │   │   ├── realtime.py     # WebSocket 实时通知推送
+│   │   │   ├── ledger_pending.py # Redis 待确认账单管理
 │   │   │   ├── scheduler.py    # APScheduler 定时任务
 │   │   │   └── llm.py          # LLM 客户端封装
 │   │   └── tools/              # LangChain 工具 (记账/OCR)
@@ -131,7 +135,8 @@ pai/
 │       └── lib/                # API 客户端 & 工具函数
 ├── docker-compose.yml          # 服务编排
 └── docs/
-    └── architecture.svg        # 系统架构图
+    ├── architecture.svg        # 系统架构图
+    └── agent-workflow.svg      # 智能体决策流程图
 ```
 
 ---
@@ -154,6 +159,7 @@ pai/
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/conversations` | 获取会话列表 |
+| GET | `/api/conversations/current` | 获取当前活跃会话 |
 | POST | `/api/conversations` | 创建新会话 |
 | POST | `/api/conversations/:id/switch` | 切换活跃会话 |
 | PATCH | `/api/conversations/:id` | 重命名会话 |
@@ -188,6 +194,12 @@ pai/
 | GET | `/api/user/identities` | 获取已绑定身份 |
 | POST | `/api/user/bind-code` | 生成绑定码 |
 | POST | `/api/user/bind-consume` | 使用绑定码绑定 |
+
+### WebSocket
+| 协议 | 路径 | 说明 |
+|------|------|------|
+| WS | `/api/chat/ws?token=JWT` | WebSocket 实时双向对话 |
+| WS | `/api/notifications/ws?token=JWT` | 实时通知推送（提醒、跨平台消息） |
 
 ### Webhook 入口
 | 方法 | 路径 | 说明 |

@@ -74,7 +74,7 @@
   <!-- Platform label -->
   <rect x="700" y="88" width="200" height="44" rx="12" fill="#818cf810" stroke="#818cf830" stroke-width="1"/>
   <text x="800" y="107" text-anchor="middle" fill="#818cf8" font-size="10" font-weight="600">多平台接入层</text>
-  <text x="800" y="122" text-anchor="middle" fill="#64748b" font-size="9">Webhook / Polling / SSE</text>
+  <text x="800" y="122" text-anchor="middle" fill="#64748b" font-size="9">Webhook / Polling / SSE / WebSocket</text>
 
   <!-- Flow lines: platforms → backend -->
   <line x1="110" y1="132" x2="320" y2="178" stroke="#818cf860" stroke-width="1" class="flow-line"/>
@@ -86,7 +86,7 @@
   <!-- ═══════ Layer 2: FastAPI Backend ═══════ -->
   <rect x="240" y="168" width="480" height="56" rx="14" fill="#1e1e2e" stroke="url(#accent)" stroke-width="2" filter="url(#shadow)"/>
   <text x="480" y="193" text-anchor="middle" fill="#e2e8f0" font-size="14" font-weight="700">⚡ FastAPI 后端</text>
-  <text x="480" y="212" text-anchor="middle" fill="#94a3b8" font-size="10">认证 · 路由 · 消息处理 · SSE 流式输出 · 管理 API</text>
+  <text x="480" y="212" text-anchor="middle" fill="#94a3b8" font-size="10">认证 · 路由 · 消息处理 · SSE 流式输出 · WebSocket 实时推送 · 管理 API</text>
 
   <!-- Flow: backend → LangGraph -->
   <line x1="480" y1="224" x2="480" y2="265" stroke="#34d39960" stroke-width="1.5" class="flow-line"/>
@@ -165,7 +165,7 @@
   <!-- ═══════ Layer 5: Frontend ═══════ -->
   <rect x="80" y="556" width="800" height="56" rx="14" fill="#1e1e2e" stroke="url(#accent)" stroke-width="1.5" filter="url(#shadow)"/>
   <text x="480" y="581" text-anchor="middle" fill="#e2e8f0" font-size="13" font-weight="700">🎨 React + Vite + TypeScript + Tailwind CSS</text>
-  <text x="480" y="600" text-anchor="middle" fill="#94a3b8" font-size="10">深色/浅色主题 · 响应式布局 · SSE 流式对话 · 日历 · 技能工作台 · 账单管理</text>
+  <text x="480" y="600" text-anchor="middle" fill="#94a3b8" font-size="10">深色/浅色主题 · 响应式布局 · SSE 流式对话 · WebSocket 通知 · 日历 · 技能工作台 · 账单管理</text>
 
   <!-- Line from backend to frontend -->
   <line x1="480" y1="524" x2="480" y2="556" stroke="#818cf850" stroke-width="1" class="flow-line"/>
