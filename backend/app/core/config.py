@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     gewechat_base_url: str = "http://gewechat:2531"
     gewechat_app_id: str = ""
     gewechat_token: str = ""
+    miniapp_app_id: str = ""
+    miniapp_app_secret: str = ""
+    miniapp_subscribe_template_id: str = ""
+    miniapp_page_path: str = "pages/chat/index"
+    miniapp_lang: str = "zh_CN"
+    miniapp_subscribe_content_key: str = "thing1"
+    miniapp_subscribe_time_key: str = "time2"
 
     scheduler_enabled: bool = True
     allow_memory_checkpointer_fallback: bool = False

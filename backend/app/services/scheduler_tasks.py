@@ -1,19 +1,20 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
+from app.core.config import get_settings
 from app.models.conversation import Conversation
 from app.models.message import Message
-from app.models.identity import UserIdentity
 from app.db.session import AsyncSessionLocal
 from app.models.schedule import Schedule
 from app.models.user import User
 from app.services.conversations import apply_assistant_message_updates
-from app.services.realtime import get_notification_hub
+from app.services.reminder_dispatcher import dispatch_reminder
 from app.services.sender import UnifiedSender
+from app.services.scheduler import get_scheduler
 
 
 async def send_reminder_job(schedule_id: int) -> None:
@@ -27,42 +28,11 @@ async def send_reminder_job(schedule_id: int) -> None:
 
         text = f"提醒：{schedule.content}"
         sender = UnifiedSender()
-        result = await session.execute(
-            select(UserIdentity).where(UserIdentity.user_id == user.id)
-        )
-        identities = list(result.scalars().all())
-
-        targets: list[tuple[str, str]] = []
-        seen: set[tuple[str, str]] = set()
-        for identity in identities:
-            key = ((identity.platform or "").strip(), (identity.platform_id or "").strip())
-            if not key[0] or not key[1]:
-                continue
-            if key in seen:
-                continue
-            seen.add(key)
-            targets.append(key)
-        primary_key = ((user.platform or "").strip(), (user.platform_id or "").strip())
-        if primary_key[0] and primary_key[1] and primary_key not in seen:
-            targets.append(primary_key)
-
-        tasks = [
-            sender.send_text(platform, platform_id, text)
-            for platform, platform_id in targets
-            if platform != "web"
-        ]
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-
-        await get_notification_hub().send_to_user(
-            user.id,
-            {
-                "type": "reminder",
-                "content": text,
-                "schedule_id": schedule.id,
-                "trigger_time": schedule.trigger_time.isoformat(),
-                "created_at": datetime.utcnow().isoformat(),
-            },
+        ok, success_count, total_count = await dispatch_reminder(
+            session=session,
+            sender=sender,
+            user=user,
+            schedule=schedule,
         )
 
         conversation_id = user.active_conversation_id
@@ -92,6 +62,40 @@ async def send_reminder_job(schedule_id: int) -> None:
                 )
             )
 
-        schedule.status = "EXECUTED"
+        schedule.status = "EXECUTED" if ok else "FAILED"
+        try:
+            from app.services.audit import log_event
+
+            await log_event(
+                session,
+                action="reminder_dispatched",
+                platform=user.platform,
+                user_id=user.id,
+                detail={
+                    "schedule_id": schedule.id,
+                    "content": schedule.content,
+                    "status": schedule.status,
+                    "success_count": success_count,
+                    "target_count": total_count,
+                },
+            )
+        except Exception:
+            pass
         session.add(schedule)
         await session.commit()
+
+
+async def restore_pending_reminder_jobs() -> None:
+    scheduler = get_scheduler()
+    settings = get_settings()
+    now = datetime.now(ZoneInfo(settings.timezone)).replace(tzinfo=None)
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Schedule).where(Schedule.status == "PENDING")
+        )
+        pending = list(result.scalars().all())
+        for row in pending:
+            run_at = row.trigger_time
+            if run_at <= now:
+                run_at = now
+            scheduler.add_job(row.job_id, run_at, send_reminder_job, row.id)

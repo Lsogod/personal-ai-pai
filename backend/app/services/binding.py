@@ -16,6 +16,7 @@ from app.models.message import Message
 from app.models.conversation import Conversation
 from app.models.skill import Skill
 from app.models.audit import AuditLog
+from app.models.reminder_delivery import ReminderDelivery
 
 
 def _generate_code() -> str:
@@ -179,6 +180,9 @@ async def merge_users(
     )
     await session.execute(
         update(AuditLog).where(AuditLog.user_id == source_user_id).values(user_id=target_user_id)
+    )
+    await session.execute(
+        update(ReminderDelivery).where(ReminderDelivery.user_id == source_user_id).values(user_id=target_user_id)
     )
     await session.execute(
         update(UserIdentity)

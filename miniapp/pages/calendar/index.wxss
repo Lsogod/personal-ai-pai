@@ -1,0 +1,89 @@
+.calendar-page {
+  min-height: 100vh;
+  padding: 16rpx;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14rpx 18rpx;
+}
+
+.nav {
+  width: 132rpx;
+  height: 66rpx;
+  border-radius: 14rpx;
+  line-height: 66rpx;
+  font-size: 24rpx;
+}
+
+.month {
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+.days {
+  padding: 8rpx;
+  max-height: 520rpx;
+  overflow: hidden;
+}
+
+.day-row {
+  border-radius: 14rpx;
+  padding: 16rpx;
+  margin: 8rpx 0;
+  background: #f4f6fa;
+}
+
+.day-row.active {
+  background: #e9edf5;
+}
+
+.date {
+  font-size: 26rpx;
+  font-weight: 600;
+}
+
+.summary {
+  margin-top: 8rpx;
+  display: flex;
+  gap: 16rpx;
+  color: #6b7280;
+  font-size: 22rpx;
+}
+
+.detail {
+  padding: 20rpx;
+}
+
+.title {
+  font-size: 30rpx;
+  font-weight: 700;
+  margin-bottom: 12rpx;
+}
+
+.section {
+  margin-top: 16rpx;
+}
+
+.section-title {
+  font-size: 26rpx;
+  font-weight: 600;
+  margin-bottom: 8rpx;
+}
+
+.item-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 20rpx;
+  background: #f7f8fb;
+  border-radius: 12rpx;
+  padding: 12rpx;
+  margin-top: 8rpx;
+  font-size: 24rpx;
+}

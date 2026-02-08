@@ -1,0 +1,46 @@
+<view class="calendar-page">
+  <view class="toolbar card">
+    <button class="btn-secondary nav" bindtap="onPrevMonth">上月</button>
+    <text class="month">{{monthLabel}}</text>
+    <button class="btn-secondary nav" bindtap="onNextMonth">下月</button>
+  </view>
+
+  <view class="days card">
+    <view
+      wx:for="{{days}}"
+      wx:key="date"
+      class="day-row {{item.date === activeDate ? 'active' : ''}}"
+      data-date="{{item.date}}"
+      bindtap="onPickDay"
+    >
+      <view class="date">{{item.date}}</view>
+      <view class="summary">
+        <text>支出 ¥{{item.ledger_total}}</text>
+        <text>账单 {{item.ledger_count}}</text>
+        <text>日程 {{item.schedule_count}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="detail card" wx:if="{{activeDay}}">
+    <view class="title">{{activeDay.date}} 详情</view>
+
+    <view class="section">
+      <view class="section-title">账单</view>
+      <view wx:if="{{activeDay.ledgers.length === 0}}" class="text-muted">无账单</view>
+      <view wx:for="{{activeDay.ledgers}}" wx:key="id" class="item-row">
+        <text>{{item.transaction_date.slice(11,16)}} {{item.item}}</text>
+        <text>¥{{item.amount}} {{item.category}}</text>
+      </view>
+    </view>
+
+    <view class="section">
+      <view class="section-title">日程</view>
+      <view wx:if="{{activeDay.schedules.length === 0}}" class="text-muted">无日程</view>
+      <view wx:for="{{activeDay.schedules}}" wx:key="id" class="item-row">
+        <text>{{item.trigger_time.slice(11,16)}} {{item.content}}</text>
+        <text>{{item.status}}</text>
+      </view>
+    </view>
+  </view>
+</view>

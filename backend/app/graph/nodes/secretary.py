@@ -66,12 +66,16 @@ SCHEDULE_STATUS_MAP = {
     "canceled": "cancelled",
     "已取消": "cancelled",
     "取消": "cancelled",
+    "failed": "failed",
+    "失败": "failed",
+    "未送达": "failed",
 }
 SCHEDULE_STATUS_DB = {
     "all": None,
     "pending": "PENDING",
     "executed": "EXECUTED",
     "cancelled": "CANCELLED",
+    "failed": "FAILED",
 }
 
 
@@ -372,7 +376,7 @@ async def _understand_secretary_message(content: str, conversation_context: str)
             "如果用户在问现在几点/今天几号/星期几，intent=time_query。"
             "如果用户在问之前聊了什么/刚才问了什么，intent=context_recall。"
             "schedule_status_filter 仅可为 all/pending/executed/cancelled。"
-            "当用户询问已完成/未完成/已取消时必须提取该字段；若未提及则 all。"
+            "当用户询问已完成/未完成/已取消/失败时必须提取该字段；若未提及则 all。"
             f"用户时区: {tz}。当前本地时间: {now_local}。"
         )
     )
@@ -538,6 +542,7 @@ async def _answer_calendar_with_llm(
             "回答时要贴合用户问题，不要固定模板。"
             "如果用户问已完成/未完成/已取消，请按 status 进行筛选或分组。"
             "status 定义: PENDING=未完成, EXECUTED=已完成, CANCELLED=已取消。"
+            "FAILED=推送失败。"
             "涉及明细时请给出时间。"
             "若数据为空，明确说没有相关记录。"
             "默认给出简洁自然的中文回答，不要输出技术说明。"
@@ -566,6 +571,7 @@ def _render_calendar_text(ledgers: list[Ledger], schedules: list[Schedule], labe
         "pending": "未完成",
         "executed": "已完成",
         "cancelled": "已取消",
+        "failed": "失败",
     }.get(schedule_status_filter, "全部状态")
     lines = [f"{label}日历："]
     lines.append(f"- 账单 {len(ledgers)} 笔")

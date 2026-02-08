@@ -1,0 +1,38 @@
+page {
+  background: #f6f7fb;
+  color: #111827;
+  font-size: 28rpx;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: 24rpx;
+  box-shadow: 0 8rpx 24rpx rgba(15, 23, 42, 0.06);
+}
+
+.btn-primary {
+  background: #111827;
+  color: #ffffff;
+  border: none;
+}
+
+.btn-secondary {
+  background: #eef0f4;
+  color: #111827;
+  border: none;
+}
+
+.text-muted {
+  color: #8a919e;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999rpx;
+  padding: 8rpx 20rpx;
+  font-size: 22rpx;
+  background: #eef0f4;
+  color: #111827;
+}

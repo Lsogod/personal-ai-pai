@@ -10,6 +10,7 @@ import asyncio
 
 from app.services.scheduler import get_scheduler
 from app.services.telegram_polling import telegram_polling_loop
+from app.services.scheduler_tasks import restore_pending_reminder_jobs
 from app.graph.workflow import close_graph
 
 
@@ -35,6 +36,7 @@ _background_tasks: list[asyncio.Task] = []
 async def _startup() -> None:
     await init_db()
     get_scheduler().start()
+    await restore_pending_reminder_jobs()
     if settings.telegram_polling_enabled:
         _background_tasks.append(asyncio.create_task(telegram_polling_loop()))
 
