@@ -87,7 +87,7 @@ async def router_node(state: GraphState) -> GraphState:
         runtime_tools = ", ".join(
             [
                 f"{str(item.get('source') or '')}:{str(item.get('name') or '')}"
-                for item in await list_runtime_tool_metas()
+                for item in await list_runtime_tool_metas(user_id=user_id if user_id > 0 else None)
             ]
         )
     except Exception:

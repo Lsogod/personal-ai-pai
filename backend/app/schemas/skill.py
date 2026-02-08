@@ -9,6 +9,12 @@ class SkillDraftRequest(BaseModel):
     skill_slug: str | None = None
 
 
+class SkillRawDraftRequest(BaseModel):
+    content_md: str = Field(min_length=1, max_length=20000)
+    skill_name: str | None = None
+    skill_slug: str | None = None
+
+
 class SkillItemResponse(BaseModel):
     slug: str
     name: str

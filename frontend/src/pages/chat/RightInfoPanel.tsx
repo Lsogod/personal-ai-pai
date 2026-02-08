@@ -1,23 +1,25 @@
 import { useState } from "react";
-import { Zap, Calendar, Wallet, Link2 } from "../../components/ui/icons";
+import { Zap, Calendar, Wallet, Link2, Settings } from "../../components/ui/icons";
 import { SkillsPanel } from "../../components/skills/SkillsPanel";
 import { CalendarPanel } from "../../components/chat/CalendarPanel";
 import { LedgerStatsCard } from "../../components/chat/LedgerStatsCard";
 import { LedgerListCard } from "../../components/chat/LedgerListCard";
 import { BindingCard } from "../../components/chat/BindingCard";
+import { CustomizationPanel } from "../../components/chat/CustomizationPanel";
 
 interface RightInfoPanelProps {
   token: string | null;
   stats: any;
 }
 
-type TabKey = "ledger" | "calendar" | "skills" | "binding";
+type TabKey = "ledger" | "calendar" | "skills" | "binding" | "customization";
 
 const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "ledger", label: "账单", icon: Wallet },
   { key: "calendar", label: "日程", icon: Calendar },
   { key: "skills", label: "技能", icon: Zap },
   { key: "binding", label: "绑定", icon: Link2 },
+  { key: "customization", label: "定制", icon: Settings },
 ];
 
 export function RightInfoPanel({ token, stats }: RightInfoPanelProps) {
@@ -68,6 +70,8 @@ export function RightInfoPanel({ token, stats }: RightInfoPanelProps) {
             <BindingCard token={token} />
           </div>
         )}
+
+        {activeTab === "customization" && <CustomizationPanel token={token} />}
       </div>
     </div>
   );

@@ -65,7 +65,7 @@ async def guide_node(state: GraphState) -> GraphState:
 
     skills = await list_skills_with_source(session, user.id)
     skill_context = _build_skill_context(skills)
-    tool_context = _build_tool_context(await list_runtime_tool_metas())
+    tool_context = _build_tool_context(await list_runtime_tool_metas(user_id=user.id))
     guide_doc = _load_guide_doc()
     context_text = render_conversation_context(state)
 

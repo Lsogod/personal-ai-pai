@@ -257,7 +257,19 @@ def _build_writer_tools(
     user_id: int | None,
     platform: str,
     conversation_id: int | None,
+    allowed_builtin_tools: set[str] | None = None,
+    allowed_mcp_tools: set[str] | None = None,
 ) -> list:
+    def _builtin_enabled(name: str) -> bool:
+        if not allowed_builtin_tools:
+            return True
+        return name in allowed_builtin_tools
+
+    def _mcp_enabled(name: str) -> bool:
+        if not allowed_mcp_tools:
+            return True
+        return name in allowed_mcp_tools
+
     @tool("now_time")
     async def now_time_tool(timezone: str = "Asia/Shanghai") -> str:
         """Get current local time by timezone name, for example: Asia/Shanghai."""
@@ -362,6 +374,19 @@ def _build_writer_tools(
         name = (tool_name or "").strip()
         if not name:
             text = "调用失败：缺少 tool_name。"
+            await _audit_tool_call(
+                user_id=user_id,
+                platform=platform,
+                conversation_id=conversation_id,
+                tool_name="mcp_call_tool",
+                arguments=audit_args,
+                ok=False,
+                latency_ms=int((time.perf_counter() - start) * 1000),
+                error=text,
+            )
+            return text
+        if not _mcp_enabled(name):
+            text = f"该工具已被禁用：{name}"
             await _audit_tool_call(
                 user_id=user_id,
                 platform=platform,
@@ -485,12 +510,16 @@ def _build_writer_tools(
             )
             return err
 
-    return [
-        now_time_tool,
-        mcp_list_tools_tool,
-        mcp_call_tool_tool,
-        fetch_url_tool,
-    ]
+    tools: list = []
+    if _builtin_enabled("now_time"):
+        tools.append(now_time_tool)
+    if _builtin_enabled("mcp_list_tools"):
+        tools.append(mcp_list_tools_tool)
+    if _builtin_enabled("mcp_call_tool"):
+        tools.append(mcp_call_tool_tool)
+    if _builtin_enabled("fetch_url"):
+        tools.append(fetch_url_tool)
+    return tools
 
 
 def _extract_ai_text_from_messages(messages: list[Any]) -> str:
@@ -582,14 +611,21 @@ async def _run_tool_agent(
     context_text: str,
     skills: str,
     runtime_tools: str,
+    allowed_builtin_tools: set[str] | None = None,
+    allowed_mcp_tools: set[str] | None = None,
 ) -> tuple[str, int]:
+    tools = _build_writer_tools(
+        user_id=user.id,
+        platform=platform,
+        conversation_id=conversation_id,
+        allowed_builtin_tools=allowed_builtin_tools,
+        allowed_mcp_tools=allowed_mcp_tools,
+    )
+    if not tools:
+        return "", 0
     agent = create_react_agent(
         model=get_llm(),
-        tools=_build_writer_tools(
-            user_id=user.id,
-            platform=platform,
-            conversation_id=conversation_id,
-        ),
+        tools=tools,
         name=f"writer_tool_agent_{user.id}_{conversation_id or 0}",
     )
     system_prompt = (
@@ -645,11 +681,19 @@ async def _handle_command_fallback(
     content: str,
     context_text: str,
     skills: str,
+    allowed_builtin_tools: set[str] | None = None,
 ) -> str | None:
     settings = get_settings()
     lower = content.lower()
 
+    def _enabled(name: str) -> bool:
+        if not allowed_builtin_tools:
+            return True
+        return name in allowed_builtin_tools
+
     if lower.startswith("/mcp list"):
+        if not _enabled("mcp_list_tools"):
+            return "当前账号未启用该工具：mcp_list_tools。"
         if not settings.mcp_fetch_enabled:
             return "系统级 MCP 未启用。"
         try:
@@ -659,6 +703,8 @@ async def _handle_command_fallback(
             return f"MCP 工具列表获取失败：{exc}"
 
     if lower.startswith("/fetch"):
+        if not _enabled("fetch_url"):
+            return "当前账号未启用该工具：fetch_url。"
         if not settings.mcp_fetch_enabled:
             return "系统级 MCP 未启用。"
         url = _extract_first_url(content)
@@ -678,6 +724,8 @@ async def _handle_command_fallback(
             return f"网页抓取失败：{exc}"
 
     if lower.startswith("/weather"):
+        if not _enabled("fetch_url"):
+            return "当前账号未启用该工具：fetch_url。"
         if not settings.mcp_fetch_enabled:
             return "系统级 MCP 未启用。"
         location = content[8:].strip() or "武汉"
@@ -765,10 +813,26 @@ async def writer_node(state: GraphState) -> GraphState:
         query=content,
     )
     try:
-        runtime_tool_rows = await list_runtime_tool_metas()
-        runtime_tools = _format_runtime_tool_catalog(runtime_tool_rows)
+        runtime_tool_rows = await list_runtime_tool_metas(
+            user_id=user.id,
+            include_disabled=True,
+        )
+        enabled_tool_rows = [row for row in runtime_tool_rows if bool(row.get("enabled"))]
+        runtime_tools = _format_runtime_tool_catalog(enabled_tool_rows)
     except Exception:
+        runtime_tool_rows = []
+        enabled_tool_rows = []
         runtime_tools = "无可用工具。"
+    allowed_builtin_tools = {
+        str(row.get("name") or "").strip()
+        for row in enabled_tool_rows
+        if str(row.get("source") or "").strip() == "builtin"
+    }
+    allowed_mcp_tools = {
+        str(row.get("name") or "").strip()
+        for row in enabled_tool_rows
+        if str(row.get("source") or "").strip() == "mcp"
+    }
 
     # Deterministic command fallback.
     cmd = await _handle_command_fallback(
@@ -776,6 +840,7 @@ async def writer_node(state: GraphState) -> GraphState:
         content=content,
         context_text=context_text,
         skills=skills,
+        allowed_builtin_tools=allowed_builtin_tools,
     )
     if cmd is not None:
         return {**state, "responses": [cmd]}
@@ -811,6 +876,8 @@ async def writer_node(state: GraphState) -> GraphState:
                 context_text=context_text,
                 skills=skills,
                 runtime_tools=runtime_tools,
+                allowed_builtin_tools=allowed_builtin_tools,
+                allowed_mcp_tools=allowed_mcp_tools,
             )
             if tool_answer and (tool_count > 0 or not tool_required):
                 return {**state, "responses": [tool_answer]}
@@ -819,6 +886,11 @@ async def writer_node(state: GraphState) -> GraphState:
 
     # Rule fallback after LLM intent classification.
     if kind == "weather":
+        if "fetch_url" not in allowed_builtin_tools:
+            return {
+                **state,
+                "responses": ["当前账号未启用天气抓取工具。请在定制设置中启用 `fetch_url`。"],
+            }
         weather_text = await _weather_fallback_fetch_and_answer(
             user=user,
             platform=platform,

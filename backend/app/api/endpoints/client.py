@@ -30,6 +30,13 @@ from app.schemas.calendar import (
 from app.schemas.chat import ChatSendRequest, ChatSendResponse, ProfileResponse
 from app.schemas.conversation import ConversationCreateRequest, ConversationResponse
 from app.schemas.conversation import ConversationDeleteResponse, ConversationUpdateRequest
+from app.schemas.customization import (
+    SkillPolicyItem,
+    SkillPolicyUpdateRequest,
+    ToolPolicyItem,
+    ToolPolicyUpdateRequest,
+    UserCustomizationResponse,
+)
 from app.schemas.ledger import LedgerDeleteResponse, LedgerItemResponse, LedgerUpdateRequest
 from app.schemas.mcp import MCPFetchRequest, MCPFetchResponse, MCPToolItem
 from app.schemas.skill import (
@@ -53,6 +60,13 @@ from app.services.binding import (
     ensure_identity,
     list_identities,
 )
+from app.services.customization import (
+    get_user_skill_policy_map,
+    merge_skill_catalog_with_policy,
+    normalize_skill_source,
+    upsert_user_skill_policy,
+    upsert_user_tool_policy,
+)
 from app.services.message_handler import handle_message
 from app.services.mcp_fetch import MCPFetchError, get_mcp_fetch_client
 from app.services.conversations import (
@@ -73,6 +87,7 @@ from app.services.skills import (
     publish_skill,
     render_skill_from_request,
 )
+from app.services.tool_registry import list_runtime_tool_metas
 from app.tools.finance import delete_ledger, query_stats, update_ledger
 from app.services.realtime import get_notification_hub
 
@@ -851,3 +866,86 @@ async def skills_disable(
         source="user",
         read_only=False,
     )
+
+
+async def _build_user_customization_response(
+    *,
+    session: AsyncSession,
+    user: User,
+) -> UserCustomizationResponse:
+    tools = await list_runtime_tool_metas(user_id=user.id, include_disabled=True)
+    tool_rows = [
+        ToolPolicyItem(
+            source=str(item.get("source") or ""),
+            name=str(item.get("name") or ""),
+            description=str(item.get("description") or ""),
+            enabled=bool(item.get("enabled")),
+        )
+        for item in tools
+    ]
+
+    skills = await list_skills_with_source(session, user.id)
+    policy_map = await get_user_skill_policy_map(session, user.id)
+    merged_skills = merge_skill_catalog_with_policy(
+        catalog=[
+            {
+                "source": normalize_skill_source(str(item.get("source") or "")),
+                "slug": str(item.get("slug") or ""),
+                "name": str(item.get("name") or ""),
+                "description": str(item.get("description") or ""),
+            }
+            for item in skills
+        ],
+        policy_map=policy_map,
+    )
+    skill_rows = [
+        SkillPolicyItem(
+            source=str(item.get("source") or ""),
+            slug=str(item.get("slug") or ""),
+            name=str(item.get("name") or ""),
+            description=str(item.get("description") or ""),
+            enabled=bool(item.get("enabled")),
+        )
+        for item in merged_skills
+    ]
+    return UserCustomizationResponse(user_id=user.id, tools=tool_rows, skills=skill_rows)
+
+
+@router.get("/customization", response_model=UserCustomizationResponse)
+async def customization_get(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    return await _build_user_customization_response(session=session, user=user)
+
+
+@router.post("/customization/tool-policy", response_model=UserCustomizationResponse)
+async def customization_update_tool_policy(
+    payload: ToolPolicyUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    await upsert_user_tool_policy(
+        session,
+        user_id=user.id,
+        source=payload.source,
+        tool_name=payload.name,
+        enabled=payload.enabled,
+    )
+    return await _build_user_customization_response(session=session, user=user)
+
+
+@router.post("/customization/skill-policy", response_model=UserCustomizationResponse)
+async def customization_update_skill_policy(
+    payload: SkillPolicyUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    await upsert_user_skill_policy(
+        session,
+        user_id=user.id,
+        source=payload.source,
+        skill_slug=payload.slug,
+        enabled=payload.enabled,
+    )
+    return await _build_user_customization_response(session=session, user=user)

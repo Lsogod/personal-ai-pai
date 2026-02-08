@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.skill import Skill, SkillStatus, SkillVersion
+from app.services.customization import get_user_skill_policy_map, make_skill_key
 from app.services.llm import get_llm
 
 
@@ -414,6 +415,15 @@ async def load_skills(
                 content=content,
             )
         )
+
+    # Apply user-level skill policy (enabled/disabled).
+    policy_map = await get_user_skill_policy_map(session, user_id)
+    if policy_map:
+        docs = [
+            doc
+            for doc in docs
+            if bool(policy_map.get(make_skill_key(doc.source, doc.slug), True))
+        ]
 
     if not docs:
         return ""

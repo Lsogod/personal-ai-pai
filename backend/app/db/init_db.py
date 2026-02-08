@@ -11,6 +11,7 @@ from app.models.audit import AuditLog
 from app.models.message import Message
 from app.models.conversation import Conversation
 from app.models.skill import Skill, SkillVersion
+from app.models.customization import UserToolPolicy, UserSkillPolicy
 
 
 async def init_db() -> None:

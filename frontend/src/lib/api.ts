@@ -92,6 +92,12 @@ export interface SkillDraftResponse {
   content_md: string;
 }
 
+export interface SkillRawDraftPayload {
+  content_md: string;
+  skill_name?: string;
+  skill_slug?: string;
+}
+
 export interface ConversationItem {
   id: number;
   title: string;
@@ -166,6 +172,38 @@ export interface BindCodeConsumeResponse {
   access_token?: string | null;
 }
 
+export interface ToolPolicyItem {
+  source: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+}
+
+export interface SkillPolicyItem {
+  source: string;
+  slug: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+}
+
+export interface UserCustomization {
+  user_id: number;
+  tools: ToolPolicyItem[];
+  skills: SkillPolicyItem[];
+}
+
+export interface AdminUser {
+  id: number;
+  uuid: string;
+  nickname: string;
+  ai_name: string;
+  platform: string;
+  platform_id: string;
+  email?: string | null;
+  setup_stage: number;
+}
+
 export async function apiRequest(
   path: string,
   options: RequestInit = {},
@@ -177,6 +215,42 @@ export async function apiRequest(
   };
   if (token) {
     headers.Authorization = `Bearer ${token}`;
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers
+    });
+  } catch {
+    throw new Error("网络连接失败，请检查网络后重试。");
+  }
+
+  if (!res.ok) {
+    const contentType = res.headers.get("content-type") || "";
+    let payload: unknown = null;
+    if (contentType.includes("application/json")) {
+      payload = await res.json().catch(() => null);
+    } else {
+      payload = await res.text().catch(() => null);
+    }
+    throw new Error(normalizeBackendError(payload, res.status));
+  }
+  return res.json();
+}
+
+export async function adminRequest(
+  path: string,
+  options: RequestInit = {},
+  adminToken?: string | null
+) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options.headers ? (options.headers as Record<string, string>) : {})
+  };
+  if (adminToken) {
+    headers["X-Admin-Token"] = adminToken;
   }
 
   let res: Response;
@@ -307,6 +381,125 @@ export function disableSkill(slug: string, token: string | null | undefined) {
     `/api/skills/${slug}/disable`,
     { method: "POST" },
     token
+  ) as Promise<SkillItem>;
+}
+
+export function fetchCustomization(token: string | null | undefined) {
+  return apiRequest("/api/customization", {}, token) as Promise<UserCustomization>;
+}
+
+export function updateCustomizationToolPolicy(
+  payload: { source: string; name: string; enabled: boolean },
+  token: string | null | undefined
+) {
+  return apiRequest(
+    "/api/customization/tool-policy",
+    { method: "POST", body: JSON.stringify(payload) },
+    token
+  ) as Promise<UserCustomization>;
+}
+
+export function updateCustomizationSkillPolicy(
+  payload: { source: string; slug: string; enabled: boolean },
+  token: string | null | undefined
+) {
+  return apiRequest(
+    "/api/customization/skill-policy",
+    { method: "POST", body: JSON.stringify(payload) },
+    token
+  ) as Promise<UserCustomization>;
+}
+
+export function fetchAdminUsers(adminToken: string | null | undefined) {
+  return adminRequest("/api/users", {}, adminToken) as Promise<AdminUser[]>;
+}
+
+export function fetchAdminCustomization(userId: number, adminToken: string | null | undefined) {
+  return adminRequest(`/api/admin/customization/${userId}`, {}, adminToken) as Promise<UserCustomization>;
+}
+
+export function updateAdminToolPolicy(
+  userId: number,
+  payload: { source: string; name: string; enabled: boolean },
+  adminToken: string | null | undefined
+) {
+  return adminRequest(
+    `/api/admin/customization/${userId}/tool-policy`,
+    { method: "POST", body: JSON.stringify(payload) },
+    adminToken
+  ) as Promise<UserCustomization>;
+}
+
+export function updateAdminSkillPolicy(
+  userId: number,
+  payload: { source: string; slug: string; enabled: boolean },
+  adminToken: string | null | undefined
+) {
+  return adminRequest(
+    `/api/admin/customization/${userId}/skill-policy`,
+    { method: "POST", body: JSON.stringify(payload) },
+    adminToken
+  ) as Promise<UserCustomization>;
+}
+
+export function adminCreateUserSkillDraft(
+  userId: number,
+  payload: SkillDraftPayload,
+  adminToken: string | null | undefined
+) {
+  return adminRequest(
+    `/api/admin/users/${userId}/skills/draft`,
+    { method: "POST", body: JSON.stringify(payload) },
+    adminToken
+  ) as Promise<SkillDraftResponse>;
+}
+
+export function adminGetUserSkillDetail(
+  userId: number,
+  slug: string,
+  adminToken: string | null | undefined,
+  source = "user"
+) {
+  return adminRequest(
+    `/api/admin/users/${userId}/skills/${encodeURIComponent(slug)}?source=${encodeURIComponent(source)}`,
+    {},
+    adminToken
+  ) as Promise<SkillDetail>;
+}
+
+export function adminSaveUserSkillRawDraft(
+  userId: number,
+  payload: SkillRawDraftPayload,
+  adminToken: string | null | undefined
+) {
+  return adminRequest(
+    `/api/admin/users/${userId}/skills/raw-draft`,
+    { method: "POST", body: JSON.stringify(payload) },
+    adminToken
+  ) as Promise<SkillDraftResponse>;
+}
+
+export function adminPublishUserSkill(
+  userId: number,
+  slug: string,
+  adminToken: string | null | undefined
+) {
+  return adminRequest(
+    `/api/admin/users/${userId}/skills/${encodeURIComponent(slug)}/publish`,
+    { method: "POST" },
+    adminToken
+  ) as Promise<SkillItem>;
+}
+
+export function adminDisableUserSkill(
+  userId: number,
+  slug: string,
+  adminToken: string | null | undefined
+) {
+  return adminRequest(
+    `/api/admin/users/${userId}/skills/${encodeURIComponent(slug)}/disable`,
+    { method: "POST" },
+    adminToken
   ) as Promise<SkillItem>;
 }
 
