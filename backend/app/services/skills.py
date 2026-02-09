@@ -298,7 +298,7 @@ async def render_skill_from_request(
     preferred_name: str | None = None,
     existing_content: str | None = None,
 ) -> str:
-    llm = get_llm()
+    llm = get_llm(node_name="skills")
     system = SystemMessage(
         content=(
             "你是 Skill 规范生成器。输出必须是可直接保存的 SKILL.md。"
@@ -340,7 +340,7 @@ async def parse_skill_intent(
     conversation_context: str = "",
 ) -> dict:
     text = (message_content or "").strip()
-    llm = get_llm()
+    llm = get_llm(node_name="skills")
     system = SystemMessage(
         content=(
             "你是意图解析器。将用户关于技能管理的消息解析为 JSON。"

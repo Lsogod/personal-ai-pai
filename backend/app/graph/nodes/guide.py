@@ -16,6 +16,16 @@ from app.services.tool_registry import list_runtime_tool_metas
 GUIDE_DOC_PATH = Path(__file__).resolve().parents[2] / "knowledge" / "AGENT_GUIDE.md"
 
 
+def _skill_status_label(value: str | None) -> str:
+    key = str(value or "").upper()
+    return {
+        "BUILTIN": "内置",
+        "DRAFT": "草稿",
+        "PUBLISHED": "已发布",
+        "DISABLED": "已停用",
+    }.get(key, key or "未知")
+
+
 def _load_guide_doc() -> str:
     try:
         return GUIDE_DOC_PATH.read_text(encoding="utf-8").strip()
@@ -34,7 +44,7 @@ def _build_skill_context(skills: list[dict]) -> str:
         source = str(item.get("source") or "")
         name = str(item.get("name") or item.get("slug") or "")
         slug = str(item.get("slug") or "")
-        status = str(item.get("status") or "")
+        status = _skill_status_label(str(item.get("status") or ""))
         description = str(item.get("description") or "")
         lines.append(f"- [{source}] {name} ({slug}) | {status} | {description}")
     return "\n".join(lines)
@@ -69,7 +79,7 @@ async def guide_node(state: GraphState) -> GraphState:
     guide_doc = _load_guide_doc()
     context_text = render_conversation_context(state)
 
-    llm = get_llm()
+    llm = get_llm(node_name="guide")
     system = SystemMessage(
         content=(
             "你是 PAI 的帮助与能力说明助手。"

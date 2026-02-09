@@ -5,7 +5,7 @@ from enum import IntEnum
 from typing import Optional
 from uuid import uuid4
 
-from sqlalchemy import Column, DateTime, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -38,6 +38,15 @@ class User(SQLModel, table=True):
     ai_emoji: str = Field(default="🤖")
 
     setup_stage: int = Field(default=SetupStage.NEW)
+    is_blocked: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, default=False),
+    )
+    blocked_reason: Optional[str] = Field(default=None)
+    # 0 means unlimited; default for new users is 30/day.
+    daily_message_limit: int = Field(default=30)
+    # Reserved monthly quota setting. 0 means unlimited.
+    monthly_message_limit: int = Field(default=0)
 
     created_at: datetime = Field(
         default_factory=datetime.utcnow,

@@ -18,6 +18,16 @@ from app.services.skills import (
 )
 
 
+def _skill_status_label(value: str | None) -> str:
+    key = str(value or "").upper()
+    return {
+        "BUILTIN": "内置",
+        "DRAFT": "草稿",
+        "PUBLISHED": "已发布",
+        "DISABLED": "已停用",
+    }.get(key, key or "未知")
+
+
 def _extract_slug(value: str) -> str:
     return (value or "").strip().lower().replace(" ", "-")
 
@@ -58,7 +68,7 @@ async def skill_manager_node(state: GraphState) -> GraphState:
         for row in rows:
             source = "内置" if row.get("source") == "builtin" else "用户"
             lines.append(
-                f"- `[{source}] {row['source']}:{row['slug']}` | {row['name']} | {row['status']} | v{row['active_version']}"
+                f"- `[{source}] {row['source']}:{row['slug']}` | {row['name']} | {_skill_status_label(row['status'])} | v{row['active_version']}"
             )
         return {**state, "responses": ["\n".join(lines)]}
 
@@ -107,21 +117,21 @@ async def skill_manager_node(state: GraphState) -> GraphState:
             if not doc:
                 return {**state, "responses": [f"未找到内置技能 `{slug}`。"]}
             preview = (doc.content or "").strip()
-            status = "BUILTIN"
+            status = _skill_status_label("BUILTIN")
         else:
             skill = await get_skill(session, user.id, slug)
             if not skill:
                 doc = get_builtin_skill(slug)
                 if doc:
                     preview = (doc.content or "").strip()
-                    status = "BUILTIN"
+                    status = _skill_status_label("BUILTIN")
                     source = "builtin"
                 else:
                     return {**state, "responses": [f"未找到技能 `{slug}`。"]}
             else:
                 content_md = await get_skill_version_content(session, skill)
                 preview = (content_md or "").strip()
-                status = str(skill.status)
+                status = _skill_status_label(str(skill.status))
         if len(preview) > 1200:
             preview = preview[:1200] + "\n...\n(已截断)"
         return {
@@ -174,7 +184,7 @@ async def skill_manager_node(state: GraphState) -> GraphState:
             **state,
             "responses": [
                 (
-                    f"已生成技能草稿 `{skill.slug}` v{version}（状态：DRAFT）。\n"
+                    f"已生成技能草稿 `{skill.slug}` v{version}（状态：{_skill_status_label('DRAFT')}）。\n"
                     f"发送 `/skill publish {skill.slug}` 后生效。\n\n"
                     f"草稿预览：\n{preview}"
                 )

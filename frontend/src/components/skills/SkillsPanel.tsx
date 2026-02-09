@@ -20,6 +20,15 @@ interface SkillsPanelProps {
   token: string | null;
 }
 
+function skillStatusLabel(status: string) {
+  const key = String(status || "").toUpperCase();
+  if (key === "BUILTIN") return "内置";
+  if (key === "DRAFT") return "草稿";
+  if (key === "PUBLISHED") return "已发布";
+  if (key === "DISABLED") return "已停用";
+  return status || "未知";
+}
+
 function prettyApiError(err: unknown): string {
   const fallback = "请求失败，请稍后重试。";
   if (!(err instanceof Error)) return fallback;
@@ -160,7 +169,7 @@ export function SkillsPanel({ token }: SkillsPanelProps) {
                     </div>
                     <p className="text-xs text-content-tertiary mt-0.5">{item.slug}</p>
                     <p className="text-xs text-content-tertiary mt-0.5">
-                      {item.status} · v{item.active_version}
+                      {skillStatusLabel(item.status)} · v{item.active_version}
                     </p>
                   </button>
                 );

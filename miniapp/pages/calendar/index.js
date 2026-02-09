@@ -23,6 +23,15 @@ function fmtTime(isoText) {
   return `${hh}:${mm}`;
 }
 
+function scheduleStatusLabel(value) {
+  const key = String(value || "").toUpperCase();
+  if (key === "EXECUTED") return "已完成";
+  if (key === "PENDING") return "未完成";
+  if (key === "CANCELLED") return "已取消";
+  if (key === "FAILED") return "失败";
+  return value || "未知";
+}
+
 function buildCalendarGrid(days, year, month) {
   if (!Array.isArray(days) || days.length === 0) return [];
   const first = new Date(year, month - 1, 1);
@@ -100,7 +109,8 @@ Page({
         }));
         const schedules = (day.schedules || []).map((item) => ({
           ...item,
-          _time: fmtTime(item.trigger_time)
+          _time: fmtTime(item.trigger_time),
+          _status_label: scheduleStatusLabel(item.status),
         }));
         return {
           ...day,

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TypedDict
 
 from app.core.config import get_settings
+from app.services.admin_tools import load_tool_enabled_map, make_tool_key
 from app.services.mcp_fetch import MCPFetchError, get_mcp_fetch_client
 
 
@@ -44,7 +45,11 @@ def list_builtin_tool_metas() -> list[ToolMeta]:
 
 async def list_runtime_tool_metas() -> list[ToolMeta]:
     settings = get_settings()
+    enabled_map = await load_tool_enabled_map()
     rows = list_builtin_tool_metas()
+    for row in rows:
+        key = make_tool_key(row["source"], row["name"])
+        row["enabled"] = bool(enabled_map.get(key, True))
     if not settings.mcp_fetch_enabled:
         return rows
     try:
@@ -63,8 +68,7 @@ async def list_runtime_tool_metas() -> list[ToolMeta]:
                 "name": name,
                 "source": "mcp",
                 "description": desc,
-                "enabled": True,
+                "enabled": bool(enabled_map.get(make_tool_key("mcp", name), True)),
             }
         )
     return rows
-

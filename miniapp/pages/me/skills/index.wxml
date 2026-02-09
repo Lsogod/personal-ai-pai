@@ -5,7 +5,7 @@
     <view class="desc">{{item.description}}</view>
     <view class="tags">
       <text class="tag {{item.source === 'builtin' ? 'tag-builtin' : 'tag-user'}}">{{item.source === 'builtin' ? '内置' : '用户'}}</text>
-      <text class="tag {{item.status === 'PUBLISHED' ? 'tag-published' : item.status === 'DRAFT' ? 'tag-draft' : 'tag-disabled'}}">{{item.status}}</text>
+      <text class="tag {{item.status === 'PUBLISHED' ? 'tag-published' : item.status === 'DRAFT' ? 'tag-draft' : 'tag-disabled'}}">{{item.status_label || item.status}}</text>
     </view>
   </view>
 </view>
