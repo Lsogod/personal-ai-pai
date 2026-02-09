@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 860" font-family="Inter, system-ui, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 880" font-family="Inter, system-ui, sans-serif">
   <defs>
     <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#0f0f14"/>
@@ -54,7 +54,7 @@
   </defs>
 
   <!-- Background -->
-  <rect width="960" height="860" rx="16" fill="url(#bgGrad)"/>
+  <rect width="960" height="880" rx="16" fill="url(#bgGrad)"/>
 
   <!-- Title -->
   <text x="480" y="42" text-anchor="middle" fill="#e2e8f0" font-size="20" font-weight="700">PAI · 智能体决策调度流程</text>
@@ -159,7 +159,7 @@
     <text x="346" y="396" fill="#94a3b8" font-size="7.5">日历查询(日/周/月)</text>
     <line x1="342" y1="403" x2="438" y2="403" stroke="#60a5fa20" stroke-width="1"/>
     <text x="346" y="417" fill="#64748b" font-size="7" font-style="italic">send_reminder_job()</text>
-    <text x="346" y="430" fill="#64748b" font-size="7" font-style="italic">日程+账单聚合</text>
+    <text x="346" y="430" fill="#64748b" font-size="7" font-style="italic">多端广播 + 投递记录</text>
   </g>
 
   <!-- Writer -->
@@ -252,54 +252,54 @@
   <!-- ═══════ Layer 5: Fixed Edges → END ═══════ -->
 
   <!-- Vertical lines from non-Writer nodes to merge line -->
-  <line x1="88" y1="450" x2="88" y2="656" stroke="#a78bfa40" stroke-width="1" class="flow-line"/>
-  <line x1="240" y1="450" x2="240" y2="656" stroke="#34d39940" stroke-width="1" class="flow-line"/>
-  <line x1="390" y1="450" x2="390" y2="656" stroke="#60a5fa40" stroke-width="1" class="flow-line"/>
-  <line x1="684" y1="450" x2="684" y2="656" stroke="#fb923c40" stroke-width="1" class="flow-line"/>
-  <line x1="851" y1="450" x2="851" y2="656" stroke="#22d3ee40" stroke-width="1" class="flow-line"/>
+  <line x1="88" y1="450" x2="88" y2="672" stroke="#a78bfa40" stroke-width="1" class="flow-line"/>
+  <line x1="240" y1="450" x2="240" y2="672" stroke="#34d39940" stroke-width="1" class="flow-line"/>
+  <line x1="390" y1="450" x2="390" y2="672" stroke="#60a5fa40" stroke-width="1" class="flow-line"/>
+  <line x1="684" y1="450" x2="684" y2="672" stroke="#fb923c40" stroke-width="1" class="flow-line"/>
+  <line x1="851" y1="450" x2="851" y2="672" stroke="#22d3ee40" stroke-width="1" class="flow-line"/>
 
   <!-- Writer/MCP chain merges back -->
-  <line x1="533" y1="634" x2="533" y2="656" stroke="#f472b640" stroke-width="1" class="flow-line"/>
+  <line x1="533" y1="634" x2="533" y2="672" stroke="#f472b640" stroke-width="1" class="flow-line"/>
 
   <!-- Merge line -->
-  <line x1="88" y1="656" x2="851" y2="656" stroke="#64748b30" stroke-width="1.5"/>
-  <text x="470" y="652" text-anchor="middle" fill="#64748b" font-size="8">add_edge("node", END)</text>
+  <line x1="88" y1="672" x2="851" y2="672" stroke="#64748b30" stroke-width="1.5"/>
+  <text x="470" y="668" text-anchor="middle" fill="#64748b" font-size="8">add_edge("node", END)</text>
 
-  <line x1="470" y1="656" x2="470" y2="686" stroke="#64748b50" stroke-width="1.5" class="flow-line"/>
+  <line x1="470" y1="672" x2="470" y2="702" stroke="#64748b50" stroke-width="1.5" class="flow-line"/>
 
   <!-- ═══════ END Node ═══════ -->
   <g filter="url(#glow)">
-    <rect x="400" y="684" width="140" height="40" rx="20" fill="#1e1e2e" stroke="url(#red)" stroke-width="2"/>
-    <text x="470" y="709" text-anchor="middle" fill="#f87171" font-size="13" font-weight="700">🏁  END</text>
+    <rect x="400" y="700" width="140" height="40" rx="20" fill="#1e1e2e" stroke="url(#red)" stroke-width="2"/>
+    <text x="470" y="725" text-anchor="middle" fill="#f87171" font-size="13" font-weight="700">🏁  END</text>
   </g>
-  <circle cx="470" cy="704" r="2.5" fill="#f87171" class="pulse-node"/>
+  <circle cx="470" cy="720" r="2.5" fill="#f87171" class="pulse-node"/>
 
   <!-- END → responses -->
-  <line x1="470" y1="724" x2="470" y2="748" stroke="#f8717140" stroke-width="1" class="flow-line"/>
-  <text x="470" y="762" text-anchor="middle" fill="#94a3b8" font-size="10">responses: List[str] → UnifiedSender</text>
+  <line x1="470" y1="740" x2="470" y2="764" stroke="#f8717140" stroke-width="1" class="flow-line"/>
+  <text x="470" y="778" text-anchor="middle" fill="#94a3b8" font-size="10">responses: List[str] → UnifiedSender → 多平台投递</text>
 
   <!-- ═══════ Bottom Panels ═══════ -->
 
   <!-- GraphState -->
-  <rect x="30" y="784" width="280" height="58" rx="12" fill="#1e1e2e" stroke="#818cf830" stroke-width="1" filter="url(#shadow)"/>
-  <text x="52" y="805" fill="#818cf8" font-size="10" font-weight="600">📦 GraphState</text>
-  <text x="52" y="820" fill="#64748b" font-size="8" font-family="monospace">user_id · conversation_id · user_setup_stage</text>
-  <text x="52" y="834" fill="#64748b" font-size="8" font-family="monospace">message · intent · responses · extra</text>
+  <rect x="30" y="800" width="280" height="58" rx="12" fill="#1e1e2e" stroke="#818cf830" stroke-width="1" filter="url(#shadow)"/>
+  <text x="52" y="821" fill="#818cf8" font-size="10" font-weight="600">📦 GraphState</text>
+  <text x="52" y="836" fill="#64748b" font-size="8" font-family="monospace">user_id · conversation_id · user_setup_stage</text>
+  <text x="52" y="850" fill="#64748b" font-size="8" font-family="monospace">message · intent · responses · extra</text>
 
   <!-- Data Store -->
-  <rect x="340" y="784" width="280" height="58" rx="12" fill="#1e1e2e" stroke="#34d39930" stroke-width="1" filter="url(#shadow)"/>
-  <text x="362" y="805" fill="#34d399" font-size="10" font-weight="600">🗄️ 数据存储</text>
-  <text x="362" y="820" fill="#64748b" font-size="8" font-family="monospace">PostgreSQL: users / ledgers / schedules / skills</text>
-  <text x="362" y="834" fill="#64748b" font-size="8" font-family="monospace">Redis: checkpointer · pending_ledger · dedup</text>
+  <rect x="340" y="800" width="280" height="58" rx="12" fill="#1e1e2e" stroke="#34d39930" stroke-width="1" filter="url(#shadow)"/>
+  <text x="362" y="821" fill="#34d399" font-size="10" font-weight="600">🗄️ 数据存储</text>
+  <text x="362" y="836" fill="#64748b" font-size="8" font-family="monospace">PostgreSQL: users / ledgers / schedules / skills / memory</text>
+  <text x="362" y="850" fill="#64748b" font-size="8" font-family="monospace">Redis: checkpointer · pending_ledger · dedup</text>
 
   <!-- Legend -->
-  <rect x="650" y="784" width="280" height="58" rx="12" fill="#1e1e2e" stroke="#818cf830" stroke-width="1" filter="url(#shadow)"/>
-  <text x="672" y="805" fill="#818cf8" font-size="10" font-weight="600">📐 图例</text>
-  <line x1="712" y1="804" x2="742" y2="804" stroke="#34d399" stroke-width="1.5" stroke-dasharray="6 4"/>
-  <text x="750" y="807" fill="#94a3b8" font-size="8">条件边 (conditional_edges)</text>
-  <line x1="712" y1="820" x2="742" y2="820" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="6 4"/>
-  <text x="750" y="823" fill="#94a3b8" font-size="8">工具调用 (ReAct → MCP)</text>
-  <circle cx="720" cy="836" r="2.5" fill="#818cf8" class="pulse-node"/>
-  <text x="750" y="839" fill="#94a3b8" font-size="8">脉冲节点 = 核心决策点</text>
+  <rect x="650" y="800" width="280" height="58" rx="12" fill="#1e1e2e" stroke="#818cf830" stroke-width="1" filter="url(#shadow)"/>
+  <text x="672" y="821" fill="#818cf8" font-size="10" font-weight="600">📐 图例</text>
+  <line x1="712" y1="820" x2="742" y2="820" stroke="#34d399" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="750" y="823" fill="#94a3b8" font-size="8">条件边 (conditional_edges)</text>
+  <line x1="712" y1="836" x2="742" y2="836" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="750" y="839" fill="#94a3b8" font-size="8">工具调用 (ReAct → MCP)</text>
+  <circle cx="720" cy="852" r="2.5" fill="#818cf8" class="pulse-node"/>
+  <text x="750" y="855" fill="#94a3b8" font-size="8">脉冲节点 = 核心决策点</text>
 
 </svg>

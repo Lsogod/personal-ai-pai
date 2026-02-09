@@ -44,7 +44,7 @@
 
 - **🔀 Router** — 意图分类器，自动识别消息类型，支持 runtime_tools 上下文
 - **💰 Finance** — 记账、消费统计、小票 OCR 识别
-- **📅 Secretary** — 日程管理、定时提醒（APScheduler 持久化）
+- **📅 Secretary** — 日程管理、定时提醒（APScheduler 持久化 · 多端广播投递）
 - **✨️ Writer** — 翻译、润色、写作、通用问答、MCP 工具调用、天气查询
 - **🎯 Skill Manager** — 用户自定义技能的创建/更新/发布
 - **📖 Guide** — 使用指南、命令帮助、工具能力概览（加载 knowledge/AGENT_GUIDE.md）
@@ -97,7 +97,7 @@ flowchart TB
 - **提醒多端广播** — 同一提醒可投递到全部已绑定身份并记录投递结果
 
 ### 🔧 核心特性
-- **Redis 持久化 Checkpointer** — 对话状态持久存储
+- **Redis 持久化 Checkpointer** — 对话状态持久存储，断线重连无丢失
 - **消息去重** — 防止 Webhook 重复投递
 - **JWT 认证** — Web 端安全登录/注册
 - **WebSocket 实时推送** — 跨平台消息同步 & 定时提醒通知
@@ -161,7 +161,7 @@ pai/
 │   │   ├── services/           # 业务逻辑层
 │   │   │   ├── platforms/      # 各平台发送适配器
 │   │   │   ├── realtime.py     # WebSocket 实时通知推送
-│   │   │   ├── memory.py       # 长期记忆提取/存储/检索
+│   │   │   ├── memory.py       # 分层记忆系统 (提取/存储/检索)
 │   │   │   ├── mcp_fetch.py    # MCP Fetch 网页抓取客户端
 │   │   │   ├── tool_registry.py # 工具注册中心 (builtin + MCP)
 │   │   │   ├── ledger_pending.py # Redis 待确认账单管理
@@ -182,15 +182,26 @@ pai/
 ├── miniapp/                    # 微信小程序客户端
 │   ├── pages/
 │   │   ├── login/              # 小程序登录
-│   │   ├── chat/               # 聊天 + 多图 + 通知
-│   │   ├── calendar/           # 日历
-│   │   └── me/                 # 绑定与账号设置
-│   ├── utils/                  # 小程序 API 客户端
+│   │   ├── home/               # 首页入口
+│   │   ├── chat/               # 聊天 (流式 WS + 多图 + Markdown)
+│   │   ├── ledger/             # 账单列表与统计
+│   │   ├── calendar/           # 日历 (日程+账单聚合)
+│   │   ├── me/                 # 个人中心与账号设置
+│   │   ├── skills/             # 技能管理
+│   │   └── bindmgr/            # 跨平台绑定管理
+│   ├── utils/                  # 工具库
+│   │   ├── auth.js             # 登录 & Token 管理
+│   │   ├── http.js             # 请求封装
+│   │   ├── image.js            # 图片工具
+│   │   └── markdown.js         # Markdown 渲染
+│   ├── assets/icons/           # TabBar 图标 (PNG 81×81)
 │   └── config.js               # 后端域名与模板ID配置
-├── docker-compose.yml          # 服务编排
+├── docker-compose.yml          # 服务编排 (backend/frontend/db/redis/gewechat/napcat)
 └── docs/
     ├── architecture.svg        # 系统架构图
-    └── agent-workflow.svg      # 智能体决策流程图
+    ├── agent-workflow.svg      # 智能体决策流程图
+    ├── miniapp-client-full.md  # 小程序完整接入文档
+    └── wechat-miniapp-setup.md # 微信小程序联调指南
 ```
 
 ---
