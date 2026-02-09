@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="PAI brand icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#111111"/>
+      <stop offset="100%" stop-color="#1a1a1a"/>
+    </linearGradient>
+    <linearGradient id="bubbleMain" x1="38" y1="64" x2="156" y2="156" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e4e4e7"/>
+    </linearGradient>
+    <linearGradient id="bubbleAI" x1="108" y1="40" x2="218" y2="116" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#bae6fd"/>
+      <stop offset="100%" stop-color="#7dd3fc"/>
+    </linearGradient>
+    <linearGradient id="aiCore" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7dd3fc"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#000" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+
+  <!-- 微弱光晕 -->
+  <circle cx="128" cy="124" r="80" fill="#38bdf8" opacity="0.025"/>
+
+  <!-- 主聊天气泡 — 白色 (用户) -->
+  <g filter="url(#shadow)">
+    <rect x="36" y="66" width="118" height="82" rx="22" fill="url(#bubbleMain)"/>
+    <path d="M50 148 L36 170 L74 148" fill="url(#bubbleMain)"/>
+  </g>
+
+  <!-- 气泡内打字圆点 -->
+  <circle cx="72" cy="107" r="7.5" fill="#27272a"/>
+  <circle cx="95" cy="107" r="7.5" fill="#52525b" opacity="0.7"/>
+  <circle cx="118" cy="107" r="7.5" fill="#71717a" opacity="0.45"/>
+
+  <!-- AI 回复气泡 — 浅蓝色 -->
+  <g filter="url(#shadow)">
+    <rect x="108" y="40" width="110" height="66" rx="18" fill="url(#bubbleAI)"/>
+    <path d="M202 70 L220 56 L202 92" fill="url(#bubbleAI)"/>
+  </g>
+
+  <!-- AI 回复文字线条 -->
+  <line x1="124" y1="64" x2="194" y2="64" stroke="#0c4a6e" stroke-width="4" stroke-linecap="round" opacity="0.35"/>
+  <line x1="124" y1="76" x2="176" y2="76" stroke="#0c4a6e" stroke-width="4" stroke-linecap="round" opacity="0.25"/>
+  <line x1="124" y1="88" x2="156" y2="88" stroke="#0c4a6e" stroke-width="4" stroke-linecap="round" opacity="0.18"/>
+
+  <!-- AI 核心 — 浅蓝光环 -->
+  <circle cx="180" cy="168" r="38" fill="none" stroke="#38bdf8" stroke-width="2" opacity="0.12"/>
+  <circle cx="180" cy="168" r="26" fill="none" stroke="#7dd3fc" stroke-width="1.5" opacity="0.1"/>
+
+  <!-- AI 核心节点 -->
+  <circle cx="180" cy="168" r="14" fill="url(#aiCore)" filter="url(#glow)"/>
+
+  <!-- 神经连接线 -->
+  <line x1="180" y1="154" x2="180" y2="130" stroke="#7dd3fc" stroke-width="1.8" opacity="0.3" stroke-linecap="round"/>
+  <line x1="167" y1="178" x2="150" y2="190" stroke="#7dd3fc" stroke-width="1.8" opacity="0.22" stroke-linecap="round"/>
+  <line x1="193" y1="178" x2="210" y2="190" stroke="#7dd3fc" stroke-width="1.8" opacity="0.22" stroke-linecap="round"/>
+
+  <!-- 末端小点 -->
+  <circle cx="180" cy="128" r="3.5" fill="#bae6fd" opacity="0.5"/>
+  <circle cx="148" cy="192" r="3" fill="#bae6fd" opacity="0.35"/>
+  <circle cx="212" cy="192" r="3" fill="#bae6fd" opacity="0.35"/>
+
+  <!-- PAI 文字 -->
+  <text x="128" y="226" text-anchor="middle" fill="#f4f4f5" font-family="Inter, system-ui, -apple-system, sans-serif" font-size="28" font-weight="800" letter-spacing="6" opacity="0.88">PAI</text>
+</svg>
