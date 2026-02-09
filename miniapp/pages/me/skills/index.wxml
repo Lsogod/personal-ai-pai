@@ -1,0 +1,11 @@
+<view class="skills-page">
+  <view wx:if="{{skills.length === 0}}" class="card empty">暂无技能</view>
+  <view wx:for="{{skills}}" wx:key="slug" class="card item">
+    <view class="name">{{item.name}}</view>
+    <view class="desc">{{item.description}}</view>
+    <view class="tags">
+      <text class="tag {{item.source === 'builtin' ? 'tag-builtin' : 'tag-user'}}">{{item.source === 'builtin' ? '内置' : '用户'}}</text>
+      <text class="tag {{item.status === 'PUBLISHED' ? 'tag-published' : item.status === 'DRAFT' ? 'tag-draft' : 'tag-disabled'}}">{{item.status}}</text>
+    </view>
+  </view>
+</view>

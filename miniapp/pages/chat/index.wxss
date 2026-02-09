@@ -1,14 +1,13 @@
 .chat-page {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
   background: #f5f7fa;
+  min-height: 100vh;
   position: relative;
 }
 
 /* Header */
 .header {
-  flex-shrink: 0;
+  position: sticky;
+  top: 0;
   padding: 20rpx 32rpx;
   padding-top: calc(env(safe-area-inset-top) + 20rpx);
   background: linear-gradient(180deg, #ffffff 0%, #fafbfc 100%);
@@ -81,18 +80,10 @@
   font-weight: 500;
 }
 
-/* Scroll Area */
-.msg-scroll {
-  flex: 1;
-  width: 100%;
-  background: #f5f7fa;
-}
-
+/* Message List */
 .msg-list {
-  padding: 20rpx 32rpx 240rpx;
-  display: flex;
-  flex-direction: column;
-  min-height: 100%;
+  padding: 20rpx 32rpx;
+  padding-bottom: 200rpx;
 }
 
 .msg-row {

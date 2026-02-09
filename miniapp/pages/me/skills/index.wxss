@@ -1,0 +1,67 @@
+.skills-page {
+  min-height: 100vh;
+  padding: 20rpx;
+  background: #f5f7fa;
+  box-sizing: border-box;
+}
+
+.empty {
+  padding: 24rpx;
+  color: #6b7280;
+}
+
+.item {
+  padding: 22rpx;
+  margin-bottom: 12rpx;
+}
+
+.name {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #111827;
+}
+
+.desc {
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
+.tags {
+  margin-top: 12rpx;
+  display: flex;
+  gap: 8rpx;
+}
+
+.tag {
+  font-size: 20rpx;
+  line-height: 28rpx;
+  padding: 2rpx 10rpx;
+  border-radius: 999rpx;
+}
+
+.tag-builtin {
+  background: #e0f2fe;
+  color: #075985;
+}
+
+.tag-user {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.tag-published {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.tag-draft {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.tag-disabled {
+  background: #e5e7eb;
+  color: #374151;
+}

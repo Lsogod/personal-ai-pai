@@ -97,6 +97,10 @@ function fetchLedgers(limit = 30) {
   return request(`/api/ledgers?limit=${limit}`);
 }
 
+function fetchSkills() {
+  return request("/api/skills");
+}
+
 function fetchIdentities() {
   return request("/api/user/identities");
 }
@@ -125,6 +129,7 @@ module.exports = {
   fetchCalendar,
   fetchLedgerStats,
   fetchLedgers,
+  fetchSkills,
   fetchIdentities,
   createBindCode,
   consumeBindCode

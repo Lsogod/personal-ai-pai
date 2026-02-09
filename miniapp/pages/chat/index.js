@@ -61,6 +61,7 @@ Page({
     this._streamQueue = [];
     this._streaming = false;
     this._streamTimer = null;
+    this._scrollTimers = [];
   },
 
   onShow() {
@@ -68,6 +69,7 @@ Page({
     if (authed) {
       this.loadInitial();
       this.connectSocket();
+      this.scrollToBottom(true);
       return;
     }
     this.closeSocket();
@@ -79,14 +81,25 @@ Page({
     });
   },
 
+  onReady() {
+    this.scrollToBottom(true);
+  },
+
+  onPageShow() {
+    // 每次页面可见时强制滚到底部
+    this.scrollToBottom(true);
+  },
+
   onHide() {
     this.closeSocket();
     this.stopStream();
+    this.clearScrollRetry();
   },
 
   onUnload() {
     this.closeSocket();
     this.stopStream();
+    this.clearScrollRetry();
   },
 
   syncAuthState() {
@@ -117,7 +130,7 @@ Page({
         stats: stats || { total: 0, count: 0 },
         messages
       }, () => {
-        this.scrollToBottom();
+        this.scrollToBottom(true);
       });
     } catch (err) {
       wx.showToast({ title: err.message || "加载失败", icon: "none" });
@@ -233,11 +246,25 @@ Page({
     return matched;
   },
 
-  scrollToBottom() {
-    const last = this.data.messages[this.data.messages.length - 1];
-    if (!last) return;
-    const marker = `msg-${this.data.messages.length - 1}`;
-    this.setData({ scrollIntoView: marker });
+  scrollToBottom(immediate = false) {
+    this.clearScrollRetry();
+    const delays = immediate ? [0, 50, 200, 500] : [0, 100, 300];
+    this._scrollTimers = delays.map((delay) =>
+      setTimeout(() => {
+        wx.pageScrollTo({ scrollTop: 999999, duration: 0 });
+      }, delay)
+    );
+  },
+
+  clearScrollRetry() {
+    if (Array.isArray(this._scrollTimers)) {
+      this._scrollTimers.forEach((timer) => clearTimeout(timer));
+      this._scrollTimers = [];
+    }
+  },
+
+  onBubbleMediaLoad() {
+    this.scrollToBottom();
   },
 
   connectSocket() {

@@ -1,49 +1,40 @@
 <view class="me-page">
+  <view class="profile-shell" wx:if="{{authed && profile}}">
+    <view class="profile-head">
+      <view class="avatar-circle">{{profile.ai_emoji || '🤖'}}</view>
+    </view>
+    <view class="card profile-card">
+      <view class="name">{{profile.nickname || '主人'}}</view>
+      <view class="idline">{{profile.platform || 'web'}} · 引导阶段 {{profile.setup_stage}}</view>
+      <view class="ai-line">助手：{{profile.ai_name || 'PAI'}} {{profile.ai_emoji || ''}}</view>
+    </view>
+  </view>
+
   <view class="card section" wx:if="{{!authed}}">
-    <view class="title">账号与绑定</view>
-    <view class="text-muted">未登录状态下可浏览说明。登录后可查看身份、绑定其他客户端、开通提醒订阅。</view>
+    <view class="title">我的</view>
+    <view class="text-muted">登录后可查看技能、绑定账号和订阅提醒。</view>
     <button class="btn-primary action-btn" bindtap="onGoLogin">微信登录</button>
   </view>
 
-  <view wx:if="{{authed}}">
-  <view class="card profile" wx:if="{{profile}}">
-    <view class="name">{{profile.ai_name}} {{profile.ai_emoji}}</view>
-    <view class="sub">主人：{{profile.nickname}}</view>
-    <view class="sub">平台：{{profile.platform}}</view>
-    <view class="sub">引导阶段：{{profile.setup_stage}}</view>
-  </view>
+  <view class="card menu-card">
+    <view class="menu-row" bindtap="onOpenSkills">
+      <view class="menu-left">
+        <text class="menu-ico">🧩</text>
+        <text class="menu-text">技能管理</text>
+      </view>
+      <text class="menu-arrow">›</text>
+    </view>
 
-  <view class="card section">
-    <view class="title">已绑定身份</view>
-    <view wx:if="{{identities.length === 0}}" class="text-muted">暂无绑定</view>
-    <view wx:for="{{identities}}" wx:key="index" class="identity-row">
-      <text>{{item.platform}}</text>
-      <text class="text-muted">{{item.platform_id}}</text>
+    <view class="menu-divider"></view>
+
+    <view class="menu-row" bindtap="onOpenBinding">
+      <view class="menu-left">
+        <text class="menu-ico">🔗</text>
+        <text class="menu-text">账号绑定</text>
+      </view>
+      <text class="menu-arrow">›</text>
     </view>
   </view>
 
-  <view class="card section">
-    <view class="title">生成绑定码</view>
-    <button class="btn-secondary action-btn" bindtap="onCreateBindCode">生成10分钟有效绑定码</button>
-    <view wx:if="{{generatedCode}}" class="code-wrap">
-      <text class="code">{{generatedCode}}</text>
-      <button class="btn-secondary mini-btn" bindtap="onCopyCode">复制</button>
-    </view>
-    <view wx:if="{{codeExpireAt}}" class="text-muted">过期时间：{{codeExpireAt}}</view>
-  </view>
-
-  <view class="card section">
-    <view class="title">绑定已有账号</view>
-    <input class="input" placeholder="输入6位绑定码" maxlength="6" value="{{bindCode}}" bindinput="onBindCodeInput" />
-    <button class="btn-primary action-btn" bindtap="onConsumeBindCode">执行绑定</button>
-  </view>
-
-  <view class="card section">
-    <view class="title">提醒订阅</view>
-    <view class="text-muted">用于离线接收小程序提醒通知</view>
-    <button class="btn-secondary action-btn" bindtap="onEnableReminderSubscribe">请求订阅授权</button>
-  </view>
-
-  <button class="logout" bindtap="onLogout">退出登录</button>
-  </view>
+  <button wx:if="{{authed}}" class="logout" bindtap="onLogout">退出登录</button>
 </view>

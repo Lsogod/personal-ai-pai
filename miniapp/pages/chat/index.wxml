@@ -29,48 +29,40 @@
     </view>
   </view>
 
-  <scroll-view 
-    class="msg-scroll" 
-    scroll-y="true" 
-    scroll-with-animation="true" 
-    scroll-into-view="{{scrollIntoView}}"
-    enable-back-to-top="true"
-  >
-    <view class="msg-list">
-      <view
-        wx:for="{{messages}}"
-        wx:key="index"
-        id="msg-{{index}}"
-        class="msg-row {{item.role === 'user' ? 'right' : 'left'}}"
-      >
-        <view class="avatar" wx:if="{{item.role !== 'user'}}">
-           <view class="avatar-emoji" wx:if="{{profile && profile.ai_emoji}}">{{profile.ai_emoji}}</view>
-           <view class="avatar-default" wx:else>
-             <image class="avatar-default-icon" src="/assets/icons/bot.svg" mode="aspectFit" />
-           </view>
-        </view>
-        <view class="bubble {{item.role === 'user' ? 'bubble-user' : 'bubble-ai'}}">
-          <view wx:if="{{item.image_urls && item.image_urls.length > 0}}" class="bubble-images">
-            <image
-              wx:for="{{item.image_urls}}"
-              wx:for-item="imgUrl"
-              wx:for-index="imgIdx"
-              wx:key="imgIdx"
-              class="bubble-image"
-              src="{{imgUrl}}"
-              mode="aspectFill"
-              data-src="{{imgUrl}}"
-              bindtap="onPreviewBubbleImage"
-            />
-          </view>
-          <rich-text wx:if="{{item.role === 'assistant'}}" class="bubble-rich" nodes="{{item.content_nodes}}"></rich-text>
-          <text wx:else class="bubble-text" user-select="true" selectable="true">{{item.content}}</text>
-          <!-- <text class="time">{{item.created_at ? item.created_at.slice(11,16) : ''}}</text> -->
-        </view>
+  <view class="msg-list">
+    <view
+      wx:for="{{messages}}"
+      wx:key="index"
+      id="msg-{{index}}"
+      class="msg-row {{item.role === 'user' ? 'right' : 'left'}}"
+    >
+      <view class="avatar" wx:if="{{item.role !== 'user'}}">
+         <view class="avatar-emoji" wx:if="{{profile && profile.ai_emoji}}">{{profile.ai_emoji}}</view>
+         <view class="avatar-default" wx:else>
+           <image class="avatar-default-icon" src="/assets/icons/bot.svg" mode="aspectFit" />
+         </view>
       </view>
-      <view id="scroll-bottom" style="height: 1px;"></view>
+      <view class="bubble {{item.role === 'user' ? 'bubble-user' : 'bubble-ai'}}">
+        <view wx:if="{{item.image_urls && item.image_urls.length > 0}}" class="bubble-images">
+          <image
+            wx:for="{{item.image_urls}}"
+            wx:for-item="imgUrl"
+            wx:for-index="imgIdx"
+            wx:key="imgIdx"
+            class="bubble-image"
+            src="{{imgUrl}}"
+            mode="aspectFill"
+            bindload="onBubbleMediaLoad"
+            data-src="{{imgUrl}}"
+            bindtap="onPreviewBubbleImage"
+          />
+        </view>
+        <rich-text wx:if="{{item.role === 'assistant'}}" class="bubble-rich" nodes="{{item.content_nodes}}"></rich-text>
+        <text wx:else class="bubble-text" user-select="true" selectable="true">{{item.content}}</text>
+      </view>
     </view>
-  </scroll-view>
+    <view id="scroll-bottom" style="height: 1rpx;"></view>
+  </view>
 
   <view class="composer-container safe-bottom">
     <view class="preview-area" wx:if="{{selectedImages.length > 0}}">
