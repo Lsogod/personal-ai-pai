@@ -12,6 +12,7 @@ from app.models.message import Message
 from app.models.conversation import Conversation
 from app.models.skill import Skill, SkillVersion
 from app.models.reminder_delivery import ReminderDelivery
+from app.models.memory import LongTermMemory
 
 
 async def init_db() -> None:

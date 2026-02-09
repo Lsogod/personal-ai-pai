@@ -16,6 +16,7 @@ def render_conversation_context(state: GraphState, max_messages: int = 16) -> st
     extra = state.get("extra") or {}
     summary = _normalize_text(extra.get("conversation_summary") or "", 300)
     raw_messages = extra.get("context_messages") or []
+    raw_memories = extra.get("long_term_memories") or []
 
     lines: list[str] = []
     if summary:
@@ -38,6 +39,25 @@ def render_conversation_context(state: GraphState, max_messages: int = 16) -> st
         lines.append("最近对话:")
         for item in normalized_messages:
             lines.append(f"- {item['role']}: {item['content']}")
+
+    normalized_memories: list[str] = []
+    if isinstance(raw_memories, list):
+        for item in raw_memories[:8]:
+            if not isinstance(item, dict):
+                continue
+            memory_type = str(item.get("memory_type") or "fact").strip().lower()
+            importance = item.get("importance")
+            prefix = f"[{memory_type}]"
+            if isinstance(importance, int):
+                prefix = f"[{memory_type}|P{max(1, min(5, importance))}]"
+            content = _normalize_text(item.get("content") or "", 180)
+            if not content:
+                continue
+            normalized_memories.append(f"- {prefix} {content}")
+
+    if normalized_memories:
+        lines.append("长期记忆:")
+        lines.extend(normalized_memories)
 
     if not lines:
         return "（当前会话暂无可用上下文）"

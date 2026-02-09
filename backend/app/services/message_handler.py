@@ -10,8 +10,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_or_create_user
+from app.core.config import get_settings
 from app.schemas.unified import UnifiedMessage
 from app.services.llm import get_llm
+from app.services.memory import (
+    extract_memory_candidates,
+    retrieve_relevant_long_term_memories,
+    upsert_long_term_memories,
+)
 from app.services.sender import UnifiedSender
 from app.services.scheduler import get_scheduler
 from app.graph.workflow import get_graph
@@ -38,12 +44,19 @@ from app.services.runtime_context import (
     reset_scheduler,
     set_sender,
     reset_sender,
+    set_tool_user_id,
+    reset_tool_user_id,
+    set_tool_platform,
+    reset_tool_platform,
+    set_tool_conversation_id,
+    reset_tool_conversation_id,
 )
 
 
 _sender = UnifiedSender()
 _scheduler = get_scheduler()
 logger = logging.getLogger(__name__)
+settings = get_settings()
 UNSUPPORTED_REBIND_TEXT = "当前版本暂不支持换绑/解绑。你仍可使用 `/bind new` 与 `/bind <6位码>` 进行账号绑定合并。"
 
 
@@ -287,15 +300,14 @@ async def handle_message(
     )
     apply_user_message_updates(conversation, message.content)
     session.add(conversation)
-    session.add(
-        Message(
-            user_id=user_id,
-            conversation_id=conversation.id,
-            role="user",
-            content=message.content,
-            platform=platform,
-        )
+    user_message_row = Message(
+        user_id=user_id,
+        conversation_id=conversation.id,
+        role="user",
+        content=message.content,
+        platform=platform,
     )
+    session.add(user_message_row)
     await session.commit()
     if platform != "web":
         await get_notification_hub().send_to_user(
@@ -327,6 +339,12 @@ async def handle_message(
             skip_summary_update = True
         else:
             skip_summary_update = False
+            long_term_memories = await retrieve_relevant_long_term_memories(
+                session=session,
+                user_id=user_id,
+                query=message.content or "",
+                limit=settings.long_term_memory_retrieve_limit,
+            )
             state["extra"] = {
                 "conversation_summary": (conversation.summary or "").strip(),
                 "context_messages": await _load_context_messages(
@@ -335,11 +353,15 @@ async def handle_message(
                     conversation_id=conversation.id,
                     limit=20,
                 ),
+                "long_term_memories": long_term_memories,
             }
             graph = await get_graph()
             session_token = set_session(session)
             scheduler_token = set_scheduler(_scheduler)
             sender_token = set_sender(_sender)
+            tool_user_token = set_tool_user_id(user_id)
+            tool_platform_token = set_tool_platform(platform)
+            tool_conv_token = set_tool_conversation_id(conversation.id)
             try:
                 try:
                     result = await graph.ainvoke(
@@ -351,10 +373,14 @@ async def handle_message(
                     logger.exception("graph invoke failed: platform=%s user_id=%s", platform, user_id)
                     responses = ["我处理这条消息时失败了。请重试，或先用文字描述金额/分类/事项。"]
             finally:
+                reset_tool_conversation_id(tool_conv_token)
+                reset_tool_platform(tool_platform_token)
+                reset_tool_user_id(tool_user_token)
                 reset_sender(sender_token)
                 reset_scheduler(scheduler_token)
                 reset_session(session_token)
 
+    assistant_outputs: list[str] = []
     for text in responses:
         await _sender.send_text(reply_platform, reply_platform_id, text)
         await log_event(
@@ -379,6 +405,7 @@ async def handle_message(
             )
         )
         await session.commit()
+        assistant_outputs.append(text)
         if platform != "web":
             await get_notification_hub().send_to_user(
                 user_id,
@@ -391,5 +418,30 @@ async def handle_message(
                     "created_at": datetime.utcnow().isoformat(),
                 },
             )
+
+    if (
+        settings.long_term_memory_enabled
+        and assistant_outputs
+        and message.content
+        and not str(message.content).strip().startswith("/")
+    ):
+        candidates = await extract_memory_candidates(
+            user_text=message.content,
+            assistant_text="\n".join(assistant_outputs),
+            conversation_summary=(conversation.summary or "").strip(),
+        )
+        try:
+            await upsert_long_term_memories(
+                session=session,
+                user_id=user_id,
+                conversation_id=conversation.id,
+                source_message_id=user_message_row.id,
+                candidates=candidates,
+                user_nickname=user.nickname or "",
+                user_ai_name=user.ai_name or "",
+                user_ai_emoji=user.ai_emoji or "",
+            )
+        except Exception:
+            logger.exception("long-term memory upsert failed: user_id=%s", user_id)
 
     return {"ok": True, "responses": responses}

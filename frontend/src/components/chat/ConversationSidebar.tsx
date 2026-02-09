@@ -119,7 +119,11 @@ export function ConversationSidebar({ token }: ConversationSidebarProps) {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             disabled={createMutation.isPending}
-            onKeyDown={(e) => e.key === "Enter" && createMutation.mutate()}
+            onKeyDown={(e) => {
+              const native = e.nativeEvent as KeyboardEvent & { isComposing?: boolean; keyCode?: number };
+              if (native.isComposing || native.keyCode === 229) return;
+              if (e.key === "Enter") createMutation.mutate();
+            }}
           />
           <Button
             className="w-full"

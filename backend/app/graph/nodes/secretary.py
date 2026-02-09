@@ -704,7 +704,7 @@ async def secretary_node(state: GraphState) -> GraphState:
 
     relative_trigger = _parse_relative_reminder_local(content, settings.timezone)
     relative_mode = _relative_precision_mode(content)
-    if not reminder_intent and relative_trigger is not None and "提醒" in content:
+    if not reminder_intent and relative_trigger is not None:
         reminder_intent = True
         reminder_confidence = max(reminder_confidence, 0.5)
         reminder_candidate = {

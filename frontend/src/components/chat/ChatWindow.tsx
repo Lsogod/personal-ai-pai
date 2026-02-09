@@ -119,6 +119,7 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropAreaRef = useRef<HTMLDivElement>(null);
+  const isComposingRef = useRef(false);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -221,6 +222,9 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    const native = e.nativeEvent as KeyboardEvent & { isComposing?: boolean; keyCode?: number };
+    const composing = Boolean(native.isComposing) || isComposingRef.current || native.keyCode === 229;
+    if (composing) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
@@ -464,6 +468,12 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
                 placeholder="输入消息..."
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
+                onCompositionStart={() => {
+                  isComposingRef.current = true;
+                }}
+                onCompositionEnd={() => {
+                  isComposingRef.current = false;
+                }}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
                 disabled={pending}

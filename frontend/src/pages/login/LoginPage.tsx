@@ -108,7 +108,11 @@ export function LoginPage() {
                 setEmail(e.target.value);
                 if (error) setError(null);
               }}
-              onKeyDown={(e) => e.key === "Enter" && mutation.mutate()}
+              onKeyDown={(e) => {
+                const native = e.nativeEvent as KeyboardEvent & { isComposing?: boolean; keyCode?: number };
+                if (native.isComposing || native.keyCode === 229) return;
+                if (e.key === "Enter") mutation.mutate();
+              }}
             />
             <Input
               placeholder="密码"
@@ -118,7 +122,11 @@ export function LoginPage() {
                 setPassword(e.target.value);
                 if (error) setError(null);
               }}
-              onKeyDown={(e) => e.key === "Enter" && mutation.mutate()}
+              onKeyDown={(e) => {
+                const native = e.nativeEvent as KeyboardEvent & { isComposing?: boolean; keyCode?: number };
+                if (native.isComposing || native.keyCode === 229) return;
+                if (e.key === "Enter") mutation.mutate();
+              }}
             />
           </div>
 

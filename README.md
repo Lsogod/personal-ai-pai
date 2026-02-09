@@ -42,13 +42,50 @@
   <img src="docs/agent-workflow.svg" alt="PAI 智能体决策调度流程图" width="100%"/>
 </p>
 
-- **🔀 Router** — 意图分类器，自动识别消息类型
+- **🔀 Router** — 意图分类器，自动识别消息类型，支持 runtime_tools 上下文
 - **💰 Finance** — 记账、消费统计、小票 OCR 识别
 - **📅 Secretary** — 日程管理、定时提醒（APScheduler 持久化）
-- **✍️ Writer** — 翻译、润色、写作、通用问答
+- **✨️ Writer** — 翻译、润色、写作、通用问答、MCP 工具调用、天气查询
 - **🎯 Skill Manager** — 用户自定义技能的创建/更新/发布
-- **📖 Guide** — 使用指南与命令帮助
+- **📖 Guide** — 使用指南、命令帮助、工具能力概览（加载 knowledge/AGENT_GUIDE.md）
 - **🚀 Onboarding** — 新用户三步引导流程
+
+<details>
+<summary>📊 完整数据流（点击展开）</summary>
+
+```mermaid
+flowchart TB
+    A["多端输入(Web / Telegram / Feishu / WeChat / QQ)"] --> B["Gateway / MessageHandler\n统一为 UnifiedMessage"]
+    B --> C["LangGraph 入口"]
+    C --> D["router_node\nLLM 意图分类"]
+    D --> E{"route_intent"}
+
+    E -->|setup_stage < 3| N1["onboarding_node"]
+    E -->|skill_manager| N2["skill_manager_node"]
+    E -->|finance| N3["finance_node"]
+    E -->|secretary| N4["secretary_node"]
+    E -->|guide| N5["guide_node"]
+    E -->|writer| N6["writer_node"]
+
+    N1 --> DB[(PostgreSQL users)]
+    N2 --> DB
+    N3 --> DB[(PostgreSQL ledgers / messages)]
+    N4 --> DB[(PostgreSQL schedules)]
+    N4 --> SCH["Scheduler"]
+    SCH --> PUSH["send_reminder_job\n消息推送"]
+    N5 --> DOC["AGENT_GUIDE + 技能/工具目录"]
+    N6 --> AG["LangGraph ReAct Agent"]
+
+    AG --> T1["now_time"]
+    AG --> T2["mcp_list_tools"]
+    AG --> T3["mcp_call_tool"]
+    AG --> T4["fetch_url"]
+    T2 --> MCP["MCP Fetch Server"]
+    T3 --> MCP
+    T4 --> MCP
+```
+
+</details>
 
 ### 🎨 现代化 Web 客户端
 - **深色 / 浅色主题** — 一键切换，跟随系统偏好
@@ -64,6 +101,8 @@
 - **消息去重** — 防止 Webhook 重复投递
 - **JWT 认证** — Web 端安全登录/注册
 - **WebSocket 实时推送** — 跨平台消息同步 & 定时提醒通知
+- **系统级 MCP（Fetch）** — 统一网页抓取工具，可在对话中自然语言触发或命令触发
+- **分层记忆系统** — 会话短期上下文 + 用户级长期记忆（检索注入，非全量喂模型）
 - **管理 API** — 后台查看用户、账单、日程、审计日志
 - **Docker Compose 一键部署** — 含 PostgreSQL、Redis、前后端及平台网关
 
@@ -118,14 +157,18 @@ pai/
 │   │   │   ├── context.py      # 会话上下文渲染
 │   │   │   └── nodes/          # 各意图处理节点
 │   │   ├── models/             # SQLModel 数据模型
-│   │   ├── schemas/            # Pydantic 请求/响应模型
+│   │   ├── schemas/            # Pydantic 请求/响应模型 (+ mcp.py)
 │   │   ├── services/           # 业务逻辑层
 │   │   │   ├── platforms/      # 各平台发送适配器
 │   │   │   ├── realtime.py     # WebSocket 实时通知推送
+│   │   │   ├── memory.py       # 长期记忆提取/存储/检索
+│   │   │   ├── mcp_fetch.py    # MCP Fetch 网页抓取客户端
+│   │   │   ├── tool_registry.py # 工具注册中心 (builtin + MCP)
 │   │   │   ├── ledger_pending.py # Redis 待确认账单管理
 │   │   │   ├── scheduler.py    # APScheduler 定时任务
 │   │   │   └── llm.py          # LLM 客户端封装
 │   │   └── tools/              # LangChain 工具 (记账/OCR)
+│   ├── knowledge/              # 知识库文档 (AGENT_GUIDE.md)
 │   └── skills/                 # 内置技能定义 (Markdown)
 ├── frontend/                   # React 前端
 │   └── src/
@@ -166,6 +209,12 @@ pai/
 |------|------|------|
 | POST | `/api/chat/send?stream=true` | 发送消息（支持 SSE 流式） |
 | GET | `/api/chat/history` | 获取对话历史 |
+
+### MCP
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/mcp/tools` | 获取系统级 MCP 工具列表 |
+| POST | `/api/mcp/fetch` | 调用 MCP `fetch` 抓取网页内容 |
 
 ### 会话管理
 | 方法 | 路径 | 说明 |
@@ -263,6 +312,20 @@ GEWECHAT_APP_ID=your_app_id
 GEWECHAT_TOKEN=your_token
 ```
 
+### System MCP (Fetch)
+```env
+MCP_FETCH_ENABLED=true
+MCP_FETCH_URL=your_mcp_server_url
+MCP_FETCH_TIMEOUT_SEC=30
+MCP_FETCH_DEFAULT_MAX_LENGTH=5000
+```
+说明：`MCP_FETCH_URL` 必须在 `.env` 中显式配置，代码中不再内置真实地址。
+
+对话中可直接使用：
+- 自然语言：`帮我抓取并总结这个网页 https://example.com`
+- 自然语言：`现在武汉天气`
+- 命令兜底：`/mcp list`、`/fetch https://example.com`、`/weather 武汉`
+
 ---
 
 ## 🖥️ 前端开发
@@ -300,6 +363,16 @@ npm run dev
 | `MINIAPP_APP_ID` | - | - | 小程序 AppID |
 | `MINIAPP_APP_SECRET` | - | - | 小程序 AppSecret |
 | `MINIAPP_SUBSCRIBE_TEMPLATE_ID` | - | - | 小程序订阅消息模板 ID |
+| `MCP_FETCH_ENABLED` | - | `true` | 是否启用系统级 MCP Fetch |
+| `MCP_FETCH_URL` | 条件必填 | - | MCP Fetch 服务地址（`MCP_FETCH_ENABLED=true` 时必填） |
+| `MCP_FETCH_TIMEOUT_SEC` | - | `30` | MCP 请求超时秒数 |
+| `MCP_FETCH_DEFAULT_MAX_LENGTH` | - | `5000` | 默认抓取字符上限 |
+| `LONG_TERM_MEMORY_ENABLED` | - | `true` | 是否启用长期记忆 |
+| `LONG_TERM_MEMORY_MIN_CONFIDENCE` | - | `0.75` | 写入长期记忆的最小置信度 |
+| `LONG_TERM_MEMORY_MAX_WRITE_ITEMS` | - | `6` | 单轮最多写入记忆条数 |
+| `LONG_TERM_MEMORY_RETRIEVE_LIMIT` | - | `6` | 单轮注入模型的记忆条数 |
+| `LONG_TERM_MEMORY_RETRIEVE_SCAN_LIMIT` | - | `80` | 检索候选扫描上限 |
+| `LONG_TERM_MEMORY_DEFAULT_TTL_DAYS` | - | `180` | 默认记忆过期天数 |
 | `ADMIN_TOKEN` | - | - | 管理 API 令牌 |
 | `REDIS_URL` | - | `redis://redis:6379/0` | Redis 连接 |
 | `TIMEZONE` | - | `Asia/Shanghai` | 时区 |

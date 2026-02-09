@@ -10,6 +10,7 @@ from app.models.user import User
 from app.services.llm import get_llm
 from app.services.runtime_context import get_session
 from app.services.skills import list_skills_with_source
+from app.services.tool_registry import list_runtime_tool_metas
 
 
 GUIDE_DOC_PATH = Path(__file__).resolve().parents[2] / "knowledge" / "AGENT_GUIDE.md"
@@ -39,6 +40,19 @@ def _build_skill_context(skills: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _build_tool_context(tools: list[dict]) -> str:
+    if not tools:
+        return "无可用工具信息。"
+    lines: list[str] = []
+    for item in tools:
+        source = str(item.get("source") or "")
+        name = str(item.get("name") or "")
+        desc = str(item.get("description") or "")
+        enabled = bool(item.get("enabled") is True)
+        lines.append(f"- [{source}] {name} | enabled={str(enabled).lower()} | {desc}")
+    return "\n".join(lines)
+
+
 async def guide_node(state: GraphState) -> GraphState:
     message = state["message"]
     content = (message.content or "").strip()
@@ -51,6 +65,7 @@ async def guide_node(state: GraphState) -> GraphState:
 
     skills = await list_skills_with_source(session, user.id)
     skill_context = _build_skill_context(skills)
+    tool_context = _build_tool_context(await list_runtime_tool_metas())
     guide_doc = _load_guide_doc()
     context_text = render_conversation_context(state)
 
@@ -64,7 +79,7 @@ async def guide_node(state: GraphState) -> GraphState:
             "涉及命令时，只能使用以下命令族："
             "/new /history /switch /rename /delete /ledger(list|update|delete) "
             "/calendar(today|week|month|YYYY-MM-DD) "
-            "/skill(list|show|create|publish|disable) /help。"
+            "/skill(list|show|create|publish|disable) /mcp list /fetch <url> /weather <city> /help。"
             "严禁输出不存在的命令（例如 /skill use、/ledger --limit）。"
             "按用户问题自动决定回答粒度："
             "1) 若用户问“怎么用/帮助/命令/教程/手册”，给结构化使用说明；"
@@ -78,6 +93,7 @@ async def guide_node(state: GraphState) -> GraphState:
         content=(
             f"《平台说明文档》:\n{guide_doc}\n\n"
             f"《当前用户技能上下文》:\n{skill_context}\n\n"
+            f"《当前可用工具上下文》:\n{tool_context}\n\n"
             f"《当前会话上下文》:\n{context_text}\n\n"
             f"用户提问:\n{content}"
         )

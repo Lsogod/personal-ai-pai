@@ -23,6 +23,12 @@ PAI is a multi-tenant personal AI assistant for Web, Telegram, Feishu, WeChat (G
 - Generate bind code on one platform and consume it on another.
 - Merge data under one canonical user account.
 - Rebind/unbind is currently not supported in natural language flow.
+7. Web content retrieval (System MCP):
+- Builtin MCP server: `fetch` (web page extraction to markdown).
+- Supports natural-language tool planning: assistant first checks tool list, chooses suitable tool, then summarizes output.
+- Supports web fetch even when user did not provide URL (assistant can infer a source URL for solvable queries, then fetch and summarize).
+- Weather is one common example, but not the only tool use case.
+- Command fallback: `/mcp list`, `/fetch <url>`, `/weather <city>`.
 
 ## Natural Language First
 - Prefer natural language understanding for user intent.
@@ -33,6 +39,7 @@ PAI is a multi-tenant personal AI assistant for Web, Telegram, Feishu, WeChat (G
 - Ledger: `/ledger list` `/ledger update <id> <amount> [category] [item]` `/ledger delete <id|latest>`
 - Calendar: `/calendar today|week|month|YYYY-MM-DD`
 - Skills: `/skill list` `/skill show <source:slug>` `/skill create ...` `/skill publish <slug>` `/skill disable <slug>`
+- MCP: `/mcp list` `/fetch <url>` `/weather <city>`
 - Help: `/help`
 
 ## Web UI Notes
