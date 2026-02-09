@@ -1,0 +1,66 @@
+<view class="schedule-page">
+  <view class="toolbar card">
+    <button class="btn-secondary nav" bindtap="onPrevMonth">上月</button>
+    <text class="month">{{monthLabel}}</text>
+    <button class="btn-secondary nav" bindtap="onNextMonth">下月</button>
+  </view>
+
+  <view class="guest card" wx:if="{{!authed}}">
+    <view class="guest-title">未登录状态</view>
+    <view class="guest-text">登录后查看提醒、执行状态与触发时间。</view>
+    <button class="btn-primary guest-btn" bindtap="onGoLogin">微信登录查看日程</button>
+  </view>
+
+  <block wx:if="{{authed}}">
+    <view class="calendar card">
+      <view class="week-header">
+        <text wx:for="{{weekHeaders}}" wx:key="*this" class="week-cell">{{item}}</text>
+      </view>
+      <view class="grid">
+        <view
+          wx:for="{{calendarGrid}}"
+          wx:key="key"
+          class="day-cell {{item.empty ? 'empty' : ''}} {{item.date === activeDate ? 'active' : ''}} {{item.isToday ? 'today' : ''}}"
+          data-date="{{item.date}}"
+          bindtap="onPickDay"
+        >
+          <view wx:if="{{!item.empty}}" class="day-content">
+            <text class="day-no">{{item.day}}</text>
+            <view class="day-meta">
+              <text class="meta-chip ledger" wx:if="{{item.ledger_count > 0}}">账 {{item.ledger_count}}</text>
+              <text class="meta-chip schedule" wx:if="{{item.schedule_count > 0}}">程 {{item.schedule_count}}</text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view class="detail card" wx:if="{{activeDay}}">
+      <view class="title">{{activeDay.date}} 详情</view>
+
+      <view class="section">
+        <view class="section-title">账单</view>
+        <view wx:if="{{activeDay.ledgers.length === 0}}" class="text-muted">当天无账单</view>
+        <view wx:for="{{activeDay.ledgers}}" wx:key="id" class="item-row">
+          <view class="item-main">
+            <view class="item-content">{{item.item || '未命名账单'}}</view>
+            <view class="item-time">{{item._time}} · {{item.category || '未分类'}}</view>
+          </view>
+          <view class="amount">¥{{item.amount}}</view>
+        </view>
+      </view>
+
+      <view class="section">
+        <view class="section-title">日程</view>
+        <view wx:if="{{activeDay.schedules.length === 0}}" class="text-muted">当天无日程</view>
+        <view wx:for="{{activeDay.schedules}}" wx:key="id" class="item-row">
+          <view class="item-main">
+            <view class="item-content">{{item.content}}</view>
+            <view class="item-time">{{item._time}}</view>
+          </view>
+          <view class="status {{item.status === 'EXECUTED' ? 'ok' : item.status === 'PENDING' ? 'pending' : 'cancel'}}">{{item.status}}</view>
+        </view>
+      </view>
+    </view>
+  </block>
+</view>

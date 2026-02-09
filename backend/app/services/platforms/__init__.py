@@ -1,3 +1,3 @@
-from . import feishu, gewechat, onebot, telegram
+from . import feishu, gewechat, miniapp, onebot, telegram
 
-__all__ = ["feishu", "gewechat", "onebot", "telegram"]
+__all__ = ["feishu", "gewechat", "miniapp", "onebot", "telegram"]

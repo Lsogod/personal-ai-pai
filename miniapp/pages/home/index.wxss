@@ -1,0 +1,148 @@
+.home-page {
+  min-height: 100vh;
+  padding: 32rpx;
+  padding-bottom: calc(32rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 28rpx;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8rpx 4rpx;
+}
+
+.greeting {
+  display: flex;
+  align-items: center;
+}
+
+.logo {
+  font-size: 44rpx;
+  font-weight: 800;
+  color: var(--text-main);
+  letter-spacing: -1rpx;
+}
+
+.hero {
+  padding: 40rpx 32rpx;
+  background: #ffffff;
+}
+
+.hero-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.title {
+  font-size: 44rpx;
+  font-weight: 800;
+  color: var(--text-main);
+  line-height: 1.3;
+  margin-bottom: 16rpx;
+}
+
+.subtitle {
+  font-size: 28rpx;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 36rpx;
+}
+
+.actions {
+  display: flex;
+  gap: 20rpx;
+}
+
+.action-main,
+.action-sub {
+  flex: 1;
+  height: 88rpx;
+  font-size: 28rpx;
+  margin: 0;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+}
+
+.section-header {
+  margin-bottom: 20rpx;
+  padding: 0 4rpx;
+}
+
+.section-title {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20rpx;
+}
+
+.grid-item {
+  width: calc(50% - 10rpx);
+  padding: 28rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+  box-sizing: border-box;
+}
+
+.grid-item:active {
+  opacity: 0.9;
+}
+
+.icon-box {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-box .emoji {
+  font-size: 36rpx;
+}
+
+.icon-box.funding { background: #eff6ff; }
+.icon-box.schedule { background: #fdf2f8; }
+.icon-box.sync { background: #f0fdf4; }
+.icon-box.skill { background: #fff7ed; }
+
+.item-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.item-title {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 6rpx;
+}
+
+.item-text {
+  font-size: 22rpx;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.footer {
+  margin-top: auto;
+  padding: 32rpx 0 16rpx;
+  text-align: center;
+}
+
+.footer-text {
+  font-size: 22rpx;
+  color: #9ca3af;
+}

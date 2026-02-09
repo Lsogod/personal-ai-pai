@@ -14,3 +14,12 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class MiniappLoginRequest(BaseModel):
+    code: str
+    nickname: str | None = None
+
+
+class MiniappTokenResponse(TokenResponse):
+    openid: str

@@ -1,0 +1,70 @@
+<view class="home-page safe-bottom">
+  <view class="header">
+    <view class="greeting">
+      <view class="logo">PAI</view>
+    </view>
+  </view>
+
+  <view class="hero card">
+    <view class="hero-content">
+      <view class="title">你的私人 AI 助手</view>
+      <view class="subtitle">全能助手，支持记账、日程管理与跨端同步。一键开启你的智能生活。</view>
+      <view class="actions">
+        <button class="btn-primary action-main" bindtap="onOpenChat">
+          <text>{{authed ? '继续对话' : '开始使用'}}</text>
+        </button>
+        <button class="btn-secondary action-sub" bindtap="onOpenCalendar">
+          <text>日程管理</text>
+        </button>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-header">
+      <view class="section-title">核心能力</view>
+    </view>
+    <view class="grid">
+      <view class="grid-item card">
+        <view class="icon-box funding">
+          <text class="emoji">¥</text>
+        </view>
+        <view class="item-content">
+          <view class="item-title">智能记账</view>
+          <view class="item-text">拍照或文本，自动归类统计</view>
+        </view>
+      </view>
+      <view class="grid-item card">
+        <view class="icon-box schedule">
+           <text class="emoji">📅</text>
+        </view>
+        <view class="item-content">
+          <view class="item-title">日程提醒</view>
+          <view class="item-text">自然语言创建，准时推送</view>
+        </view>
+      </view>
+      <view class="grid-item card">
+        <view class="icon-box sync">
+           <text class="emoji">☁️</text>
+        </view>
+        <view class="item-content">
+          <view class="item-title">跨端同步</view>
+          <view class="item-text">Web / Telegram 多端互通</view>
+        </view>
+      </view>
+      <view class="grid-item card">
+        <view class="icon-box skill">
+           <text class="emoji">⚡️</text>
+        </view>
+        <view class="item-content">
+          <view class="item-title">技能无限</view>
+          <view class="item-text">自定义技能，无限扩展</view>
+        </view>
+      </view>
+    </view>
+  </view>
+  
+  <view class="footer">
+    <text class="footer-text">Powered by AI · Designed for You</text>
+  </view>
+</view>

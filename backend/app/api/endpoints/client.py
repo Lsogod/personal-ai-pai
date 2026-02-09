@@ -14,7 +14,9 @@ from app.models.user import User, SetupStage
 from app.models.message import Message
 from app.models.ledger import Ledger
 from app.models.schedule import Schedule
+from app.models.identity import UserIdentity
 from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse
+from app.schemas.auth import MiniappLoginRequest, MiniappTokenResponse
 from app.schemas.binding import (
     BindCodeConsumeRequest,
     BindCodeConsumeResponse,
@@ -53,7 +55,9 @@ from app.services.binding import (
     ensure_identity,
     list_identities,
 )
+from app.services.platforms import miniapp as miniapp_platform
 from app.services.message_handler import handle_message
+from app.api.deps import get_or_create_user
 from app.services.mcp_fetch import MCPFetchError, get_mcp_fetch_client
 from app.services.conversations import (
     create_new_conversation,
@@ -128,6 +132,27 @@ async def login(payload: LoginRequest, session: AsyncSession = Depends(get_sessi
         raise HTTPException(status_code=401, detail="invalid credentials")
     token = create_access_token(user.id)
     return TokenResponse(access_token=token)
+
+
+@router.post("/miniapp/auth/login", response_model=MiniappTokenResponse)
+async def miniapp_login(payload: MiniappLoginRequest, session: AsyncSession = Depends(get_session)):
+    code = (payload.code or "").strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="miniapp code is required")
+
+    openid = await miniapp_platform.exchange_code_for_openid(code)
+    if not openid:
+        raise HTTPException(status_code=401, detail="miniapp login failed")
+
+    user, _ = await get_or_create_user(session, "miniapp", openid)
+    await ensure_identity(session, user.id, "miniapp", openid)
+    nickname = (payload.nickname or "").strip()
+    if nickname and (not user.nickname or user.nickname == "主人"):
+        user.nickname = nickname
+        session.add(user)
+        await session.commit()
+    token = create_access_token(user.id)
+    return MiniappTokenResponse(access_token=token, openid=openid)
 
 
 @router.get("/mcp/tools", response_model=List[MCPToolItem])
@@ -433,18 +458,39 @@ async def chat_send(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    web_platform_id = f"web:{user.id}"
-    await ensure_identity(session, user.id, "web", web_platform_id)
+    source_platform = (payload.source_platform or "web").strip().lower()
+    if source_platform not in {"web", "miniapp"}:
+        source_platform = "web"
+
+    platform_id = ""
+    if source_platform == "miniapp":
+        identity_result = await session.execute(
+            select(UserIdentity).where(
+                UserIdentity.user_id == user.id,
+                UserIdentity.platform == "miniapp",
+            )
+            .order_by(UserIdentity.id.desc())
+            .limit(1)
+        )
+        identity = identity_result.scalar_one_or_none()
+        platform_id = (identity.platform_id if identity else "").strip()
+        if not platform_id:
+            source_platform = "web"
+
+    if source_platform == "web":
+        platform_id = f"web:{user.id}"
+        await ensure_identity(session, user.id, "web", platform_id)
+
     normalized = {
-        "platform_id": web_platform_id,
+        "platform_id": platform_id,
         "content": payload.content,
         "image_urls": payload.image_urls,
-        "message_id": f"web-{datetime.utcnow().timestamp()}",
+        "message_id": f"{source_platform}-{datetime.utcnow().timestamp()}",
         "event_ts": int(datetime.utcnow().timestamp()),
-        "raw_data": {"web": True},
+        "raw_data": {"source_platform": source_platform},
     }
 
-    result = await handle_message("web", normalized, session)
+    result = await handle_message(source_platform, normalized, session)
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error", "failed"))
     responses = result.get("responses") or []

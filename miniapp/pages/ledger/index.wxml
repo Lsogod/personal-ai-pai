@@ -1,0 +1,31 @@
+<view class="ledger-page">
+  <view class="guest card" wx:if="{{!authed}}">
+    <view class="guest-title">未登录状态</view>
+    <view class="guest-text">登录后查看你的账单明细、时间与分类统计。</view>
+    <button class="btn-primary guest-btn" bindtap="onGoLogin">微信登录查看账单</button>
+  </view>
+
+  <block wx:if="{{authed}}">
+    <view class="summary card">
+      <view class="title">近30天概览</view>
+      <view class="chips">
+        <view class="chip">总支出 ¥{{stats.total || 0}}</view>
+        <view class="chip">记录 {{stats.count || 0}} 笔</view>
+      </view>
+    </view>
+
+    <scroll-view class="list" scroll-y="true">
+      <view class="empty card" wx:if="{{ledgers.length === 0}}">暂无账单</view>
+      <view class="item card" wx:for="{{ledgers}}" wx:key="id">
+        <view class="row top">
+          <text class="item-title">{{item.item || '未命名账单'}}</text>
+          <text class="amount">¥{{item.amount}}</text>
+        </view>
+        <view class="row bottom">
+          <text class="meta">{{item._time}}</text>
+          <text class="meta">{{item.category || '未分类'}} · {{item.currency}}</text>
+        </view>
+      </view>
+    </scroll-view>
+  </block>
+</view>

@@ -32,6 +32,7 @@
 | **微信** | GeWeChat 网关 | 通过 GeWeChat 容器实现微信消息收发 |
 | **QQ** | NapCat (OneBot v11) | HTTP POST 回调 + 主动发送 |
 | **飞书** | 事件订阅 | App ID/Secret 配置后即用 |
+| **微信小程序** | 独立客户端 | `wx.login` + JWT，支持在线 WS 与离线订阅提醒 |
 | **Web** | 独立客户端 | React SPA，支持 SSE 流式对话 |
 
 ### 🧠 LangGraph 智能工作流
@@ -93,6 +94,7 @@ flowchart TB
 - **技能工作台** — 可视化创建、编辑、发布自定义 AI 技能
 - **日历视图** — 按月查看账单与日程汇总
 - **跨平台绑定** — 将多个平台身份绑定到同一账号
+- **提醒多端广播** — 同一提醒可投递到全部已绑定身份并记录投递结果
 
 ### 🔧 核心特性
 - **Redis 持久化 Checkpointer** — 对话状态持久存储
@@ -131,6 +133,7 @@ docker compose up --build
 | Web 客户端 | `http://localhost:3001` |
 | 后端 API | `http://localhost:8000` |
 | API 文档 | `http://localhost:8000/docs` |
+| 微信小程序客户端 | `miniapp/`（微信开发者工具导入） |
 
 首次访问 Web 端会引导注册账号，之后即可开始对话。
 
@@ -176,6 +179,14 @@ pai/
 │       ├── pages/              # 页面 (Chat / Login)
 │       ├── store/              # Zustand 状态管理 (auth/theme)
 │       └── lib/                # API 客户端 & 工具函数
+├── miniapp/                    # 微信小程序客户端
+│   ├── pages/
+│   │   ├── login/              # 小程序登录
+│   │   ├── chat/               # 聊天 + 多图 + 通知
+│   │   ├── calendar/           # 日历
+│   │   └── me/                 # 绑定与账号设置
+│   ├── utils/                  # 小程序 API 客户端
+│   └── config.js               # 后端域名与模板ID配置
 ├── docker-compose.yml          # 服务编排
 └── docs/
     ├── architecture.svg        # 系统架构图
@@ -191,6 +202,7 @@ pai/
 |------|------|------|
 | POST | `/api/auth/register` | 注册新用户 |
 | POST | `/api/auth/login` | 登录获取 JWT |
+| POST | `/api/miniapp/auth/login` | 小程序登录（code 换取 JWT） |
 
 ### 对话
 | 方法 | 路径 | 说明 |
@@ -249,6 +261,9 @@ pai/
 |------|------|------|
 | WS | `/api/chat/ws?token=JWT` | WebSocket 实时双向对话 |
 | WS | `/api/notifications/ws?token=JWT` | 实时通知推送（提醒、跨平台消息） |
+
+完整小程序接入与提醒架构见：`docs/miniapp-client-full.md`
+微信小程序客户端导入与联调步骤见：`docs/wechat-miniapp-setup.md`
 
 ### Webhook 入口
 | 方法 | 路径 | 说明 |
@@ -323,6 +338,26 @@ npm run dev
 
 开发模式自动代理 `/api` 到 `http://localhost:8000`。
 
+### 微信小程序配置（开发/生产区分）
+
+1. 小程序前端使用 `miniapp/config.js` 按 `envVersion` 自动切换环境：
+- `develop` -> `DEV_API_BASE_URL`
+- `trial` -> `TRIAL_API_BASE_URL`
+- `release` -> `PROD_API_BASE_URL`
+
+2. 在本地创建私有覆盖文件（不提交到仓库）：
+```bash
+cp miniapp/config.local.example.js miniapp/config.local.js
+```
+然后填写你的真实域名与模板 ID。
+
+3. `miniapp/project.config.json` 使用模板 `appid`（`touristappid`）用于仓库共享。
+真实 `appid` 请只在本机微信开发者工具或私有配置中设置。
+
+4. 安全建议：
+- `AppID` 可公开，但不建议在公共仓库固定生产 `AppID`
+- `AppSecret` 只能放后端 `.env`（`MINIAPP_APP_SECRET`），禁止出现在前端代码
+
 | 技术栈 | 用途 |
 |--------|------|
 | React 18 | UI 框架 |
@@ -345,6 +380,9 @@ npm run dev
 | `OPENAI_MODEL` | - | `gpt-4o` | 默认模型 |
 | `DB_PASSWORD` | ✅ | - | PostgreSQL 密码 |
 | `JWT_SECRET` | ✅ | `change_me` | JWT 签名密钥 |
+| `MINIAPP_APP_ID` | - | - | 小程序 AppID |
+| `MINIAPP_APP_SECRET` | - | - | 小程序 AppSecret |
+| `MINIAPP_SUBSCRIBE_TEMPLATE_ID` | - | - | 小程序订阅消息模板 ID |
 | `MCP_FETCH_ENABLED` | - | `true` | 是否启用系统级 MCP Fetch |
 | `MCP_FETCH_URL` | 条件必填 | - | MCP Fetch 服务地址（`MCP_FETCH_ENABLED=true` 时必填） |
 | `MCP_FETCH_TIMEOUT_SEC` | - | `30` | MCP 请求超时秒数 |

@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 class ChatSendRequest(BaseModel):
     content: str
     image_urls: List[str] = Field(default_factory=list)
+    source_platform: Optional[str] = None
 
 
 class ChatMessage(BaseModel):
