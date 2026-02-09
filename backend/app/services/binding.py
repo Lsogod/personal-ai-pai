@@ -16,6 +16,7 @@ from app.models.message import Message
 from app.models.conversation import Conversation
 from app.models.skill import Skill
 from app.models.audit import AuditLog
+from app.services.memory import deactivate_identity_memories_for_user
 
 
 def _generate_code() -> str:
@@ -190,6 +191,7 @@ async def merge_users(
         target.active_conversation_id = source.active_conversation_id
         session.add(target)
 
+    await deactivate_identity_memories_for_user(session, user_id=target_user_id)
     await session.commit()
 
 

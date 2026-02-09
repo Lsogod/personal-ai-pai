@@ -100,6 +100,7 @@ flowchart TB
 - **JWT 认证** — Web 端安全登录/注册
 - **WebSocket 实时推送** — 跨平台消息同步 & 定时提醒通知
 - **系统级 MCP（Fetch）** — 统一网页抓取工具，可在对话中自然语言触发或命令触发
+- **分层记忆系统** — 会话短期上下文 + 用户级长期记忆（检索注入，非全量喂模型）
 - **管理 API** — 后台查看用户、账单、日程、审计日志
 - **Docker Compose 一键部署** — 含 PostgreSQL、Redis、前后端及平台网关
 
@@ -157,6 +158,7 @@ pai/
 │   │   ├── services/           # 业务逻辑层
 │   │   │   ├── platforms/      # 各平台发送适配器
 │   │   │   ├── realtime.py     # WebSocket 实时通知推送
+│   │   │   ├── memory.py       # 长期记忆提取/存储/检索
 │   │   │   ├── mcp_fetch.py    # MCP Fetch 网页抓取客户端
 │   │   │   ├── tool_registry.py # 工具注册中心 (builtin + MCP)
 │   │   │   ├── ledger_pending.py # Redis 待确认账单管理
@@ -347,6 +349,12 @@ npm run dev
 | `MCP_FETCH_URL` | 条件必填 | - | MCP Fetch 服务地址（`MCP_FETCH_ENABLED=true` 时必填） |
 | `MCP_FETCH_TIMEOUT_SEC` | - | `30` | MCP 请求超时秒数 |
 | `MCP_FETCH_DEFAULT_MAX_LENGTH` | - | `5000` | 默认抓取字符上限 |
+| `LONG_TERM_MEMORY_ENABLED` | - | `true` | 是否启用长期记忆 |
+| `LONG_TERM_MEMORY_MIN_CONFIDENCE` | - | `0.75` | 写入长期记忆的最小置信度 |
+| `LONG_TERM_MEMORY_MAX_WRITE_ITEMS` | - | `6` | 单轮最多写入记忆条数 |
+| `LONG_TERM_MEMORY_RETRIEVE_LIMIT` | - | `6` | 单轮注入模型的记忆条数 |
+| `LONG_TERM_MEMORY_RETRIEVE_SCAN_LIMIT` | - | `80` | 检索候选扫描上限 |
+| `LONG_TERM_MEMORY_DEFAULT_TTL_DAYS` | - | `180` | 默认记忆过期天数 |
 | `ADMIN_TOKEN` | - | - | 管理 API 令牌 |
 | `REDIS_URL` | - | `redis://redis:6379/0` | Redis 连接 |
 | `TIMEZONE` | - | `Asia/Shanghai` | 时区 |

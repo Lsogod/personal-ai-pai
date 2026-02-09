@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     mcp_fetch_timeout_sec: int = 30
     mcp_fetch_default_max_length: int = 5000
 
+    long_term_memory_enabled: bool = True
+    long_term_memory_min_confidence: float = 0.75
+    long_term_memory_max_write_items: int = 6
+    long_term_memory_retrieve_limit: int = 6
+    long_term_memory_retrieve_scan_limit: int = 80
+    long_term_memory_default_ttl_days: int = 180
+
     admin_token: str = ""
     dedup_ttl_seconds: int = 86400
 

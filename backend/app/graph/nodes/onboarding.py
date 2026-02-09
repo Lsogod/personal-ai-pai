@@ -7,6 +7,7 @@ from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
 from app.models.user import SetupStage, User
 from app.services.llm import get_llm
+from app.services.memory import deactivate_identity_memories_for_user
 from app.services.runtime_context import get_session
 
 
@@ -197,6 +198,7 @@ async def onboarding_node(state: GraphState) -> GraphState:
         nickname = await _extract_nickname_with_llm(message.content or "", context_text)
         user.nickname = nickname
         user.setup_stage = SetupStage.AI_NAMED
+        await deactivate_identity_memories_for_user(session, user_id=user.id)
         session.add(user)
         await session.commit()
         return {
@@ -209,6 +211,7 @@ async def onboarding_node(state: GraphState) -> GraphState:
         user.ai_name = ai_name
         user.ai_emoji = emoji
         user.setup_stage = SetupStage.COMPLETED
+        await deactivate_identity_memories_for_user(session, user_id=user.id)
         session.add(user)
         await session.commit()
         return {
