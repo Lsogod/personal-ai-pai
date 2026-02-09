@@ -72,6 +72,23 @@ function fetchHistory() {
   return request("/api/chat/history");
 }
 
+function fetchConversations() {
+  return request("/api/conversations");
+}
+
+function createConversation(title) {
+  return request("/api/conversations", {
+    method: "POST",
+    data: title ? { title } : {}
+  });
+}
+
+function switchConversation(conversationId) {
+  return request(`/api/conversations/${conversationId}/switch`, {
+    method: "POST"
+  });
+}
+
 function sendChat(content, imageUrls) {
   return request("/api/chat/send", {
     method: "POST",
@@ -125,6 +142,9 @@ module.exports = {
   miniappLogin,
   fetchProfile,
   fetchHistory,
+  fetchConversations,
+  createConversation,
+  switchConversation,
   sendChat,
   fetchCalendar,
   fetchLedgerStats,

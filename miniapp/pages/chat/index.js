@@ -1,6 +1,9 @@
 const { getToken } = require("../../utils/auth");
 const {
   fetchHistory,
+  fetchConversations,
+  createConversation,
+  switchConversation,
   fetchProfile,
   fetchLedgerStats,
   sendChat,
@@ -20,6 +23,28 @@ function fmtTime(isoText) {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function fmtDateTime(isoText) {
+  if (!isoText) return "";
+  const dt = new Date(isoText);
+  if (Number.isNaN(dt.getTime())) return "";
+  const mm = `${dt.getMonth() + 1}`.padStart(2, "0");
+  const dd = `${dt.getDate()}`.padStart(2, "0");
+  const hh = `${dt.getHours()}`.padStart(2, "0");
+  const mi = `${dt.getMinutes()}`.padStart(2, "0");
+  return `${mm}-${dd} ${hh}:${mi}`;
+}
+
+function compactText(value, maxLen = 80) {
+  const src = String(value || "")
+    .replace(/[\r\n]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/[`*_>#]/g, " ")
+    .trim();
+  if (!src) return "";
+  if (src.length <= maxLen) return src;
+  return `${src.slice(0, maxLen)}...`;
 }
 
 function normalizeMessage(item) {
@@ -45,6 +70,9 @@ Page({
     profile: null,
     stats: { total: 0, count: 0 },
     messages: [],
+    sidebarOpen: false,
+    conversations: [],
+    loadingConversations: false,
     pendingState: "",
     inputText: "",
     selectedImages: [],
@@ -71,6 +99,7 @@ Page({
     const authed = this.syncAuthState();
     if (authed) {
       this.loadInitial();
+      this.loadConversations();
       this.connectSocket();
       this.scrollToBottom(true);
       return;
@@ -80,6 +109,9 @@ Page({
       profile: { ai_name: "PAI", ai_emoji: "" },
       stats: { total: 0, count: 0 },
       messages: [],
+      sidebarOpen: false,
+      conversations: [],
+      loadingConversations: false,
       pendingState: "",
       notifyCards: []
     });
@@ -140,6 +172,76 @@ Page({
       });
     } catch (err) {
       wx.showToast({ title: err.message || "加载失败", icon: "none" });
+    }
+  },
+
+  async loadConversations() {
+    if (!this.data.authed) return;
+    this.setData({ loadingConversations: true });
+    try {
+      const rows = await fetchConversations();
+      const conversations = (rows || []).map((item) => ({
+        id: item.id,
+        title: compactText(item.title || `会话 #${item.id}`, 22),
+        summary: compactText(item.summary || "", 88),
+        active: !!item.active,
+        lastText: fmtDateTime(item.last_message_at || ""),
+      }));
+      this.setData({ conversations, loadingConversations: false });
+    } catch (err) {
+      this.setData({ loadingConversations: false });
+    }
+  },
+
+  onToggleSidebar() {
+    if (!this.data.authed) {
+      this.onGoLogin();
+      return;
+    }
+    const next = !this.data.sidebarOpen;
+    this.setData({ sidebarOpen: next });
+    if (next) {
+      this.loadConversations();
+    }
+  },
+
+  onCloseSidebar() {
+    this.setData({ sidebarOpen: false });
+  },
+
+  stopTap() {},
+
+  async onNewConversation() {
+    if (!this.data.authed) return;
+    if (this._sendingLock) return;
+    try {
+      await createConversation();
+      this.setData({ sidebarOpen: false });
+      await this.loadConversations();
+      await this.loadInitial();
+      wx.showToast({ title: "已新建会话", icon: "none" });
+    } catch (err) {
+      wx.showToast({ title: err.message || "新建失败", icon: "none" });
+    }
+  },
+
+  async onSwitchConversation(e) {
+    if (!this.data.authed) return;
+    const id = Number(e.currentTarget.dataset.id);
+    if (!id) return;
+    const current = this.data.conversations.find((x) => x.active);
+    if (current && current.id === id) {
+      this.setData({ sidebarOpen: false });
+      return;
+    }
+    try {
+      await switchConversation(id);
+      this.setData({ sidebarOpen: false });
+      await this.loadConversations();
+      await this.loadInitial();
+      wx.showToast({ title: "已切换会话", icon: "none" });
+    } catch (err) {
+      wx.showToast({ title: err.message || "切换失败", icon: "none" });
     }
   },
 
@@ -537,6 +639,7 @@ Page({
 
   onGoLogin() {
     this.setPendingState("");
+    this.setData({ sidebarOpen: false });
     const redirect = encodeURIComponent("/pages/chat/index");
     wx.navigateTo({ url: `/pages/login/index?redirect=${redirect}` });
   }

@@ -1,4 +1,35 @@
 <view class="chat-page">
+  <view wx:if="{{sidebarOpen}}" class="sidebar-mask show" bindtap="onCloseSidebar"></view>
+  <view class="conv-sidebar {{sidebarOpen ? 'open' : ''}}" catchtap="stopTap">
+    <view class="conv-header">
+      <view class="conv-title-wrap">
+        <image class="conv-title-icon" src="/assets/icons/chat.svg" mode="aspectFit" />
+        <text class="conv-title">会话目录</text>
+      </view>
+      <view class="conv-add-btn" bindtap="onNewConversation">
+        <text>新建</text>
+      </view>
+    </view>
+    <scroll-view class="conv-list" scroll-y="true">
+      <view wx:if="{{loadingConversations}}" class="conv-empty">加载中...</view>
+      <view wx:elif="{{conversations.length === 0}}" class="conv-empty">暂无历史会话</view>
+      <view
+        wx:for="{{conversations}}"
+        wx:key="id"
+        class="conv-item {{item.active ? 'active' : ''}}"
+        data-id="{{item.id}}"
+        bindtap="onSwitchConversation"
+      >
+        <view class="conv-item-title">{{item.title}}</view>
+        <view class="conv-item-meta">{{item.summary || '暂无摘要'}}</view>
+        <view class="conv-item-time">
+          <image class="conv-time-icon" src="/assets/icons/tab-calendar.svg" mode="aspectFit" />
+          <text>{{item.lastText}}</text>
+        </view>
+      </view>
+    </scroll-view>
+  </view>
+
   <view class="notify-stack" wx:if="{{notifyCards.length > 0}}">
     <view class="notify-card" wx:for="{{notifyCards}}" wx:key="id">
       <view class="notify-title-row">
@@ -17,7 +48,10 @@
         <view class="status-dot {{wsOpen ? 'online' : 'offline'}}"></view>
       </view>
       <view class="header-actions">
-        <!-- Future: Add settings or clear history btn -->
+        <view class="conv-toggle-btn" bindtap="onToggleSidebar">
+          <image class="conv-toggle-icon" src="/assets/icons/chat.svg" mode="aspectFit" />
+          <text>会话</text>
+        </view>
       </view>
     </view>
     <view class="stats-row" wx:if="{{authed}}">
