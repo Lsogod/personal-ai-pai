@@ -45,6 +45,7 @@ Page({
     profile: null,
     stats: { total: 0, count: 0 },
     messages: [],
+    pendingState: "",
     inputText: "",
     selectedImages: [],
     sending: false,
@@ -62,6 +63,8 @@ Page({
     this._streaming = false;
     this._streamTimer = null;
     this._scrollTimers = [];
+    this._pendingReplyTimer = null;
+    this._pendingNonce = 0;
   },
 
   onShow() {
@@ -77,6 +80,7 @@ Page({
       profile: { ai_name: "PAI", ai_emoji: "" },
       stats: { total: 0, count: 0 },
       messages: [],
+      pendingState: "",
       notifyCards: []
     });
   },
@@ -94,12 +98,14 @@ Page({
     this.closeSocket();
     this.stopStream();
     this.clearScrollRetry();
+    this.clearPendingReplyTimer();
   },
 
   onUnload() {
     this.closeSocket();
     this.stopStream();
     this.clearScrollRetry();
+    this.clearPendingReplyTimer();
   },
 
   syncAuthState() {
@@ -143,14 +149,51 @@ Page({
 
   appendMessages(rows) {
     const next = [...this.data.messages];
+    let hasAssistant = false;
     for (const row of rows) {
       const msg = normalizeMessage(row);
+      if (msg.role === "assistant") {
+        hasAssistant = true;
+      }
       const key = this.messageKey(msg);
       if (this._seenKeys.has(key)) continue;
       this._seenKeys.add(key);
       next.push(msg);
     }
+    if (hasAssistant) {
+      this.clearPendingByAssistantSignal();
+    }
     this.setData({ messages: next }, () => this.scrollToBottom());
+  },
+
+  clearPendingByAssistantSignal() {
+    if (!this.data.pendingState) return;
+    this._pendingNonce += 1;
+    this.clearPendingReplyTimer();
+    this.setData({ pendingState: "" });
+  },
+
+  setPendingState(state) {
+    const nextState = state || "";
+    this._pendingNonce += 1;
+    const nonce = this._pendingNonce;
+    this.clearPendingReplyTimer();
+    if (this.data.pendingState === nextState) return;
+    this.setData({ pendingState: nextState }, () => this.scrollToBottom());
+    if (nextState) {
+      this._pendingReplyTimer = setTimeout(() => {
+        if (nonce !== this._pendingNonce) return;
+        if (!this.data.pendingState) return;
+        this.setData({ pendingState: "" });
+      }, 20000);
+    }
+  },
+
+  clearPendingReplyTimer() {
+    if (this._pendingReplyTimer) {
+      clearTimeout(this._pendingReplyTimer);
+      this._pendingReplyTimer = null;
+    }
   },
 
   stopStream() {
@@ -165,6 +208,7 @@ Page({
   enqueueAssistantStream(text, createdAt) {
     const raw = normText(text);
     if (!raw) return;
+    this.clearPendingByAssistantSignal();
     const msg = normalizeMessage({ role: "assistant", content: raw, created_at: createdAt || nowIso() });
     const key = this.messageKey(msg);
     if (this._seenKeys.has(key)) return;
@@ -312,6 +356,7 @@ Page({
       if (!payload || !payload.type) return;
 
       if (payload.type === "reminder") {
+        this.setPendingState("");
         const content = payload.content || "提醒";
         const createdAt = payload.created_at || nowIso();
         this.appendMessages([{ role: "assistant", content, created_at: createdAt }]);
@@ -327,6 +372,7 @@ Page({
           return;
         }
         if (role === "assistant") {
+          this.setPendingState("");
           this.enqueueAssistantStream(payload.content, payload.created_at || nowIso());
         } else {
           this.appendMessages([{ role, content: payload.content, created_at: payload.created_at || nowIso() }]);
@@ -432,7 +478,8 @@ Page({
       return;
     }
     const text = (this.data.inputText || "").trim();
-    const hasImages = this.data.selectedImages.length > 0;
+    const selectedImagesSnapshot = [...this.data.selectedImages];
+    const hasImages = selectedImagesSnapshot.length > 0;
     if (!text && !hasImages) return;
     this._sendingLock = true;
 
@@ -440,27 +487,37 @@ Page({
       role: "user",
       content: text || "[图片]",
       created_at: nowIso(),
-      image_urls: this.data.selectedImages.map((x) => x.path)
+      image_urls: selectedImagesSnapshot.map((x) => x.path)
     };
     this.appendMessages([userMsg]);
     const payloadText = text || "请帮我识别这张图片";
     this.queuePendingUserEcho(payloadText);
     this.queuePendingUserEcho(text || "[图片]");
 
-    this.setData({ sending: true });
+    // Optimistic clear: avoid keeping sent text in input while waiting server response.
+    this.setData({ sending: true, inputText: "", selectedImages: [] });
+    this.setPendingState("thinking");
     try {
-      const imageUrls = this.data.selectedImages.map((x) => x.dataUrl);
+      const imageUrls = selectedImagesSnapshot.map((x) => x.dataUrl);
       const res = await sendChat(payloadText, imageUrls);
       const responses = Array.isArray(res.responses) ? res.responses : [];
+      if (!this.data.wsOpen && responses.length === 0) {
+        this.setPendingState("");
+      }
       // If websocket is not connected, fallback to local append to avoid blank replies.
       if (!this.data.wsOpen) {
         responses.forEach((item) => {
           this.enqueueAssistantStream(item, nowIso());
         });
       }
-      this.setData({ inputText: "", selectedImages: [] });
       this.refreshStats();
     } catch (err) {
+      this.setPendingState("");
+      // Rollback input on failure to prevent user text loss.
+      this.setData({
+        inputText: text,
+        selectedImages: selectedImagesSnapshot
+      });
       wx.showToast({ title: err.message || "发送失败", icon: "none" });
     } finally {
       this._sendingLock = false;
@@ -479,6 +536,7 @@ Page({
   },
 
   onGoLogin() {
+    this.setPendingState("");
     const redirect = encodeURIComponent("/pages/chat/index");
     wx.navigateTo({ url: `/pages/login/index?redirect=${redirect}` });
   }

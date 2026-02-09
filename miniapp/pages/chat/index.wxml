@@ -61,6 +61,24 @@
         <text wx:else class="bubble-text" user-select="true" selectable="true">{{item.content}}</text>
       </view>
     </view>
+    <view wx:if="{{pendingState}}" class="msg-row left msg-row-pending">
+      <view class="avatar">
+        <view class="avatar-emoji" wx:if="{{profile && profile.ai_emoji}}">{{profile.ai_emoji}}</view>
+        <view class="avatar-default" wx:else>
+          <image class="avatar-default-icon" src="/assets/icons/bot.svg" mode="aspectFit" />
+        </view>
+      </view>
+      <view class="bubble bubble-ai bubble-pending">
+        <view class="typing-line">
+          <text class="typing-label">思考中</text>
+          <view class="typing-dots">
+            <text class="typing-dot dot-1">•</text>
+            <text class="typing-dot dot-2">•</text>
+            <text class="typing-dot dot-3">•</text>
+          </view>
+        </view>
+      </view>
+    </view>
     <view id="scroll-bottom" style="height: 1rpx;"></view>
   </view>
 
