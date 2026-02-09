@@ -423,3 +423,304 @@ export function consumeBindCode(
     token
   ) as Promise<BindCodeConsumeResponse>;
 }
+
+export async function adminRequest(
+  path: string,
+  options: RequestInit = {},
+  adminToken?: string | null
+) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options.headers ? (options.headers as Record<string, string>) : {}),
+  };
+  if (adminToken) {
+    headers["X-Admin-Token"] = adminToken;
+  }
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers,
+    });
+  } catch {
+    throw new Error("网络连接失败，请检查网络后重试。");
+  }
+  if (!res.ok) {
+    const contentType = res.headers.get("content-type") || "";
+    let payload: unknown = null;
+    if (contentType.includes("application/json")) {
+      payload = await res.json().catch(() => null);
+    } else {
+      payload = await res.text().catch(() => null);
+    }
+    throw new Error(normalizeBackendError(payload, res.status));
+  }
+  return res.json();
+}
+
+export interface AdminDashboardResponse {
+  cards: {
+    total_users: number;
+    new_users_today: number;
+    dau_today: number;
+    total_messages: number;
+    window_messages: number;
+    total_prompt_tokens: number;
+    total_completion_tokens: number;
+    total_tokens: number;
+    llm_calls: number;
+    metered_calls: number;
+    unmetered_calls: number;
+  };
+  trend_days: number;
+  trend: Array<{
+    date: string;
+    new_users: number;
+    messages: number;
+    tokens: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+  }>;
+  intent_distribution: Array<{ name: string; count: number }>;
+  platform_distribution: Array<{ platform: string; count: number }>;
+}
+
+export interface AdminUserItem {
+  id: number;
+  uuid: string;
+  nickname: string;
+  platform: string;
+  platform_id: string;
+  email?: string | null;
+  setup_stage: number;
+  binding_stage: number;
+  is_blocked: boolean;
+  blocked_reason: string;
+  daily_message_limit: number;
+  monthly_message_limit: number;
+  message_count: number;
+  ledger_count: number;
+  skill_count: number;
+  identity_platform_count: number;
+  last_active_at: string;
+  created_at: string;
+}
+
+export interface AdminPagedUsers {
+  page: number;
+  size: number;
+  total: number;
+  items: AdminUserItem[];
+}
+
+export interface AdminToolItem {
+  source: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  calls: number;
+  success_rate: number;
+  avg_latency_ms: number;
+}
+
+export interface AdminSkillsItem {
+  id: number;
+  user_id: number;
+  user_nickname: string;
+  slug: string;
+  name: string;
+  description: string;
+  status: string;
+  active_version: number;
+  version_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminAuditItem {
+  id: number;
+  user_id?: number | null;
+  platform: string;
+  action: string;
+  detail: unknown;
+  created_at: string;
+}
+
+export interface AdminConversationItem {
+  id: number;
+  user_id: number;
+  user_nickname: string;
+  title: string;
+  summary: string;
+  message_count: number;
+  created_at: string;
+  last_message_at: string;
+  updated_at: string;
+}
+
+export interface AdminConversationMessageItem {
+  id: number;
+  role: string;
+  platform: string;
+  content: string;
+  created_at: string;
+}
+
+export interface AdminConversationStatsResponse {
+  days: number;
+  by_day: Array<{
+    date: string;
+    user: number;
+    assistant: number;
+    system: number;
+    [key: string]: string | number;
+  }>;
+  by_platform: Array<{ platform: string; count: number }>;
+}
+
+export function fetchAdminDashboard(adminToken: string, days = 30) {
+  return adminRequest(`/api/admin/v1/dashboard?days=${days}`, {}, adminToken) as Promise<AdminDashboardResponse>;
+}
+
+export function fetchAdminUsers(
+  adminToken: string,
+  params: { page?: number; size?: number; q?: string; platform?: string; blocked?: boolean } = {}
+) {
+  const search = new URLSearchParams();
+  if (params.page) search.set("page", String(params.page));
+  if (params.size) search.set("size", String(params.size));
+  if (params.q) search.set("q", params.q);
+  if (params.platform) search.set("platform", params.platform);
+  if (typeof params.blocked === "boolean") search.set("blocked", String(params.blocked));
+  return adminRequest(`/api/admin/v1/users?${search.toString()}`, {}, adminToken) as Promise<AdminPagedUsers>;
+}
+
+export function adminSetUserBlock(
+  adminToken: string,
+  userId: number,
+  payload: { is_blocked: boolean; reason?: string }
+) {
+  return adminRequest(
+    `/api/admin/v1/users/${userId}/block`,
+    { method: "PATCH", body: JSON.stringify(payload) },
+    adminToken
+  );
+}
+
+export function adminSetUserQuota(
+  adminToken: string,
+  userId: number,
+  payload: { daily_message_limit?: number; monthly_message_limit?: number }
+) {
+  return adminRequest(
+    `/api/admin/v1/users/${userId}/quota`,
+    { method: "PATCH", body: JSON.stringify(payload) },
+    adminToken
+  );
+}
+
+export function fetchAdminTools(adminToken: string, days = 30) {
+  return adminRequest(`/api/admin/v1/tools?days=${days}`, {}, adminToken) as Promise<{ days: number; items: AdminToolItem[] }>;
+}
+
+export function adminSetToolSwitch(
+  adminToken: string,
+  source: string,
+  name: string,
+  enabled: boolean
+) {
+  return adminRequest(
+    `/api/admin/v1/tools/${encodeURIComponent(source)}/${encodeURIComponent(name)}`,
+    { method: "PATCH", body: JSON.stringify({ enabled }) },
+    adminToken
+  );
+}
+
+export function fetchAdminSkills(
+  adminToken: string,
+  params: { page?: number; size?: number; status?: string; q?: string; user_id?: number } = {}
+) {
+  const search = new URLSearchParams();
+  if (params.page) search.set("page", String(params.page));
+  if (params.size) search.set("size", String(params.size));
+  if (params.status) search.set("status", params.status);
+  if (params.q) search.set("q", params.q);
+  if (params.user_id) search.set("user_id", String(params.user_id));
+  return adminRequest(`/api/admin/v1/skills?${search.toString()}`, {}, adminToken) as Promise<{
+    page: number;
+    size: number;
+    total: number;
+    items: AdminSkillsItem[];
+  }>;
+}
+
+export function fetchAdminConversations(
+  adminToken: string,
+  params: { page?: number; size?: number; user_id?: number; q?: string } = {}
+) {
+  const search = new URLSearchParams();
+  if (params.page) search.set("page", String(params.page));
+  if (params.size) search.set("size", String(params.size));
+  if (params.user_id) search.set("user_id", String(params.user_id));
+  if (params.q) search.set("q", params.q);
+  return adminRequest(`/api/admin/v1/conversations?${search.toString()}`, {}, adminToken) as Promise<{
+    page: number;
+    size: number;
+    total: number;
+    items: AdminConversationItem[];
+  }>;
+}
+
+export function fetchAdminConversationMessages(
+  adminToken: string,
+  conversationId: number,
+  params: { page?: number; size?: number } = {}
+) {
+  const search = new URLSearchParams();
+  if (params.page) search.set("page", String(params.page));
+  if (params.size) search.set("size", String(params.size));
+  return adminRequest(
+    `/api/admin/v1/conversations/${conversationId}/messages?${search.toString()}`,
+    {},
+    adminToken
+  ) as Promise<{
+    conversation_id: number;
+    page: number;
+    size: number;
+    total: number;
+    items: AdminConversationMessageItem[];
+  }>;
+}
+
+export function fetchAdminConversationStats(adminToken: string, days = 30) {
+  return adminRequest(`/api/admin/v1/conversations/stats?days=${days}`, {}, adminToken) as Promise<AdminConversationStatsResponse>;
+}
+
+export function adminDisableSkill(adminToken: string, skillId: number) {
+  return adminRequest(`/api/admin/v1/skills/${skillId}/disable`, { method: "POST" }, adminToken);
+}
+
+export function fetchAdminScheduleDelivery(adminToken: string, days = 30) {
+  return adminRequest(`/api/admin/v1/schedules/delivery?days=${days}`, {}, adminToken) as Promise<{
+    days: number;
+    items: Array<{ platform: string; total: number; delivered: number; failed: number; pending: number; success_rate: number }>;
+  }>;
+}
+
+export function fetchAdminAudit(
+  adminToken: string,
+  params: { page?: number; size?: number; user_id?: number; action?: string; q?: string } = {}
+) {
+  const search = new URLSearchParams();
+  if (params.page) search.set("page", String(params.page));
+  if (params.size) search.set("size", String(params.size));
+  if (params.user_id) search.set("user_id", String(params.user_id));
+  if (params.action) search.set("action", params.action);
+  if (params.q) search.set("q", params.q);
+  return adminRequest(`/api/admin/v1/audit?${search.toString()}`, {}, adminToken) as Promise<{
+    page: number;
+    size: number;
+    total: number;
+    items: AdminAuditItem[];
+  }>;
+}

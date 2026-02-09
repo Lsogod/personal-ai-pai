@@ -4,9 +4,10 @@ import json
 import logging
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_or_create_user
@@ -60,6 +61,20 @@ settings = get_settings()
 UNSUPPORTED_REBIND_TEXT = "当前版本暂不支持换绑/解绑。你仍可使用 `/bind new` 与 `/bind <6位码>` 进行账号绑定合并。"
 
 
+def _today_start_utc_naive() -> datetime:
+    tz = ZoneInfo(settings.timezone)
+    now_local = datetime.now(tz)
+    start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+
+def _month_start_utc_naive() -> datetime:
+    tz = ZoneInfo(settings.timezone)
+    now_local = datetime.now(tz)
+    start_local = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return start_local.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+
 def _format_history_lines(current_id: int | None, rows: list) -> str:
     if not rows:
         return "暂无历史会话。发送 /new 创建新会话。"
@@ -89,7 +104,7 @@ async def _is_rebind_natural_intent(text: str) -> bool:
     content = (text or "").strip()
     if not content or content.startswith("/"):
         return False
-    llm = get_llm()
+    llm = get_llm(node_name="message_handler")
     system = SystemMessage(
         content=(
             "你是意图分类器。判断用户是否在表达“换绑/解绑/重新绑定账号”的诉求。"
@@ -278,6 +293,118 @@ async def handle_message(
         message_id=normalized.get("message_id"),
         event_ts=normalized.get("event_ts"),
     )
+
+    async def _emit_block_notice(text: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        await _sender.send_text(reply_platform, reply_platform_id, text)
+        await log_event(
+            session,
+            action="message_sent",
+            platform=platform,
+            user_id=user_id,
+            detail={"content": text, "conversation_id": conversation.id, **(extra or {})},
+        )
+        conversation.last_message_at = datetime.utcnow()
+        session.add(conversation)
+        session.add(
+            Message(
+                user_id=user_id,
+                conversation_id=conversation.id,
+                role="assistant",
+                content=text,
+                platform=platform,
+            )
+        )
+        await session.commit()
+        if platform != "web":
+            await get_notification_hub().send_to_user(
+                user_id,
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": text,
+                    "platform": platform,
+                    "conversation_id": conversation.id,
+                    "created_at": datetime.utcnow().isoformat(),
+                },
+            )
+        return {"ok": True, "responses": [text]}
+
+    if bool(user.is_blocked):
+        blocked_msg = "你的账号已被管理员禁用。"
+        reason = (user.blocked_reason or "").strip()
+        if reason:
+            blocked_msg = f"{blocked_msg} 原因：{reason}"
+        await log_event(
+            session,
+            action="message_blocked",
+            platform=platform,
+            user_id=user_id,
+            detail={
+                "reason": reason,
+                "message_id": message.message_id,
+                "conversation_id": conversation.id,
+            },
+        )
+        result = await _emit_block_notice(blocked_msg, {"blocked": True})
+        result["blocked"] = True
+        return result
+
+    if int(user.daily_message_limit or 0) > 0:
+        today_start_utc = _today_start_utc_naive()
+        count_result = await session.execute(
+            select(func.count(Message.id)).where(
+                Message.user_id == user_id,
+                Message.role == "user",
+                Message.created_at >= today_start_utc,
+            )
+        )
+        sent_today = int(count_result.scalar_one() or 0)
+        if sent_today >= int(user.daily_message_limit):
+            limit_msg = f"你今日消息配额已用完（{int(user.daily_message_limit)} 条），请明天再试。"
+            await log_event(
+                session,
+                action="message_quota_blocked",
+                platform=platform,
+                user_id=user_id,
+                detail={
+                    "daily_message_limit": int(user.daily_message_limit),
+                    "sent_today": sent_today,
+                    "message_id": message.message_id,
+                    "conversation_id": conversation.id,
+                },
+            )
+            result = await _emit_block_notice(limit_msg, {"quota_scope": "daily", "quota_blocked": True})
+            result["quota_blocked"] = True
+            return result
+
+    if int(user.monthly_message_limit or 0) > 0:
+        month_start_utc = _month_start_utc_naive()
+        month_count_result = await session.execute(
+            select(func.count(Message.id)).where(
+                Message.user_id == user_id,
+                Message.role == "user",
+                Message.created_at >= month_start_utc,
+            )
+        )
+        sent_this_month = int(month_count_result.scalar_one() or 0)
+        if sent_this_month >= int(user.monthly_message_limit):
+            limit_msg = f"你本月消息配额已用完（{int(user.monthly_message_limit)} 条），请下月再试。"
+            await log_event(
+                session,
+                action="message_quota_blocked",
+                platform=platform,
+                user_id=user_id,
+                detail={
+                    "scope": "monthly",
+                    "monthly_message_limit": int(user.monthly_message_limit),
+                    "sent_this_month": sent_this_month,
+                    "message_id": message.message_id,
+                    "conversation_id": conversation.id,
+                },
+            )
+            result = await _emit_block_notice(limit_msg, {"quota_scope": "monthly", "quota_blocked": True})
+            result["quota_blocked"] = True
+            return result
 
     state = {
         "user_id": user_id,

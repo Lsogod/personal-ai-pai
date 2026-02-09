@@ -249,3 +249,8 @@
   color: #374151;
   background: #e5e7eb;
 }
+
+.status.failed {
+  color: #b91c1c;
+  background: #fee2e2;
+}

@@ -116,7 +116,7 @@ def _is_safe_sql(sql: str, intent: str, user_message: str) -> tuple[bool, str]:
 
 
 async def _plan_sql(message: str, conversation_context: str = "") -> dict[str, Any]:
-    llm = get_llm()
+    llm = get_llm(node_name="ledger_text2sql")
     now = datetime.utcnow().isoformat()
     system_prompt = (
         "你是账单 Text-to-SQL 规划器（PostgreSQL）。"

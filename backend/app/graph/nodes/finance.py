@@ -1,5 +1,6 @@
 import json
 import re
+import time as _time
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -14,6 +15,7 @@ from app.models.ledger import Ledger
 from app.models.user import User
 from app.services.llm import get_llm
 from app.services.runtime_context import get_session
+from app.services.usage import log_tool_usage
 from app.services.ledger_pending import (
     clear_pending_ledger,
     get_pending_ledger,
@@ -26,8 +28,85 @@ from app.tools.finance import (
     list_recent_ledgers,
     update_ledger,
 )
-from app.tools.ledger_text2sql import try_execute_ledger_text2sql
-from app.tools.vision import analyze_receipt
+from app.tools.ledger_text2sql import try_execute_ledger_text2sql as _raw_text2sql
+from app.tools.vision import analyze_receipt as _raw_analyze_receipt
+
+
+async def _tracked_analyze_receipt(
+    image_ref: str,
+    *,
+    user_id: int | None = None,
+    platform: str = "",
+    conversation_id: int | None = None,
+) -> dict[str, Any]:
+    """analyze_receipt 的用量追踪包装。"""
+    started = _time.perf_counter()
+    try:
+        result = await _raw_analyze_receipt(image_ref)
+        ok = float(result.get("confidence") or 0) > 0
+        await log_tool_usage(
+            user_id=user_id,
+            platform=platform,
+            conversation_id=conversation_id,
+            tool_source="builtin",
+            tool_name="analyze_receipt",
+            success=ok,
+            latency_ms=int((_time.perf_counter() - started) * 1000),
+            error=str(result.get("reason") or "") if not ok else "",
+        )
+        return result
+    except Exception as exc:
+        await log_tool_usage(
+            user_id=user_id,
+            platform=platform,
+            conversation_id=conversation_id,
+            tool_source="builtin",
+            tool_name="analyze_receipt",
+            success=False,
+            latency_ms=int((_time.perf_counter() - started) * 1000),
+            error=str(exc)[:500],
+        )
+        raise
+
+
+async def _tracked_text2sql(
+    *,
+    user_id: int,
+    message: str,
+    conversation_context: str = "",
+    platform: str = "",
+    conversation_id: int | None = None,
+) -> str | None:
+    """try_execute_ledger_text2sql 的用量追踪包装。"""
+    started = _time.perf_counter()
+    try:
+        result = await _raw_text2sql(
+            user_id=user_id,
+            message=message,
+            conversation_context=conversation_context,
+        )
+        await log_tool_usage(
+            user_id=user_id,
+            platform=platform,
+            conversation_id=conversation_id,
+            tool_source="builtin",
+            tool_name="ledger_text2sql",
+            success=result is not None,
+            latency_ms=int((_time.perf_counter() - started) * 1000),
+        )
+        return result
+    except Exception as exc:
+        await log_tool_usage(
+            user_id=user_id,
+            platform=platform,
+            conversation_id=conversation_id,
+            tool_source="builtin",
+            tool_name="ledger_text2sql",
+            success=False,
+            latency_ms=int((_time.perf_counter() - started) * 1000),
+            error=str(exc)[:500],
+        )
+        raise
 
 
 DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -254,7 +333,7 @@ async def _understand_pending_selection(
     pending: dict,
     conversation_context: str,
 ) -> dict:
-    llm = get_llm()
+    llm = get_llm(node_name="finance")
     system = SystemMessage(
         content=(
             "你是待确认记账解析器。只输出 JSON。"
@@ -330,7 +409,7 @@ def _parse_vision_result(result: dict) -> dict:
 
 
 async def _understand_finance_message(content: str, conversation_context: str) -> dict:
-    llm = get_llm()
+    llm = get_llm(node_name="finance")
     system = SystemMessage(
         content=(
             "你是记账意图解析器。只输出 JSON。"
@@ -475,7 +554,7 @@ async def _answer_ledger_with_llm(
     category: str | None,
     rows: list[Ledger],
 ) -> str:
-    llm = get_llm()
+    llm = get_llm(node_name="finance")
     payload = _build_ledger_payload(rows)
     system = SystemMessage(
         content=(
@@ -707,7 +786,12 @@ async def finance_node(state: GraphState) -> GraphState:
         if len(image_inputs) > 1:
             parsed_images: list[dict] = []
             for idx, image_ref in enumerate(image_inputs, start=1):
-                result = await analyze_receipt(image_ref)
+                result = await _tracked_analyze_receipt(
+                    image_ref,
+                    user_id=user_id,
+                    platform=user_platform,
+                    conversation_id=conversation_id,
+                )
                 parsed = _parse_vision_result(result)
                 parsed_images.append({**parsed, "index": idx, "image_url": image_ref})
 
@@ -757,7 +841,12 @@ async def finance_node(state: GraphState) -> GraphState:
             if lines:
                 return {**state, "responses": ["\n".join(lines)]}
 
-        result = await analyze_receipt(image_inputs[0] if image_inputs else message.image_urls[0])
+        result = await _tracked_analyze_receipt(
+            image_inputs[0] if image_inputs else message.image_urls[0],
+            user_id=user_id,
+            platform=user_platform,
+            conversation_id=conversation_id,
+        )
         parsed_single = _parse_vision_result(result)
         image_type = str(parsed_single.get("image_type") or "other")
         confidence = float(parsed_single.get("confidence") or 0.0)
@@ -918,10 +1007,12 @@ async def finance_node(state: GraphState) -> GraphState:
     if intent == "unknown":
         # LLM SQL fallback for long-tail ledger CRUD queries.
         try:
-            sql_response = await try_execute_ledger_text2sql(
+            sql_response = await _tracked_text2sql(
                 user_id=user_id,
                 message=content,
                 conversation_context=context_text,
+                platform=user_platform,
+                conversation_id=conversation_id,
             )
         except Exception:
             sql_response = None

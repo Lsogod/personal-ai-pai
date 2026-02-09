@@ -79,6 +79,16 @@ SCHEDULE_STATUS_DB = {
 }
 
 
+def _schedule_status_label(value: str | None) -> str:
+    key = str(value or "").upper()
+    return {
+        "PENDING": "未完成",
+        "EXECUTED": "已完成",
+        "CANCELLED": "已取消",
+        "FAILED": "失败",
+    }.get(key, key or "未知")
+
+
 def _local_today() -> date:
     tz_name = get_settings().timezone
     return datetime.now(ZoneInfo(tz_name)).date()
@@ -297,7 +307,7 @@ async def _understand_reminder_fallback(content: str, conversation_context: str)
     settings = get_settings()
     tz = settings.timezone
     now_local = datetime.now(ZoneInfo(tz)).strftime("%Y-%m-%d %H:%M")
-    llm = get_llm()
+    llm = get_llm(node_name="secretary")
     system = SystemMessage(
         content=(
             "你是提醒专用解析器。只输出 JSON。"
@@ -359,7 +369,7 @@ async def _understand_secretary_message(content: str, conversation_context: str)
     settings = get_settings()
     tz = settings.timezone
     now_local = datetime.now(ZoneInfo(tz)).strftime("%Y-%m-%d %H:%M")
-    llm = get_llm()
+    llm = get_llm(node_name="secretary")
     system = SystemMessage(
         content=(
             "你是提醒与日历意图解析器。只输出 JSON。"
@@ -391,7 +401,7 @@ async def _understand_secretary_message(content: str, conversation_context: str)
 
 
 async def _answer_context_recall(content: str, conversation_context: str) -> str:
-    llm = get_llm()
+    llm = get_llm(node_name="secretary")
     system = SystemMessage(
         content=(
             "你是会话回忆助手。请仅依据给定会话上下文回答用户问题。"
@@ -534,7 +544,7 @@ async def _answer_calendar_with_llm(
     ledgers: list[Ledger],
     schedules: list[Schedule],
 ) -> str:
-    llm = get_llm()
+    llm = get_llm(node_name="secretary")
     payload = _build_calendar_payload(ledgers, schedules)
     system = SystemMessage(
         content=(
@@ -590,7 +600,7 @@ def _render_calendar_text(ledgers: list[Ledger], schedules: list[Schedule], labe
         lines.append("日程：")
         for row in filtered_schedules[:8]:
             lines.append(
-                f"- {_fmt_dt(row.trigger_time)} #{row.id} {row.content} [{row.status}]"
+                f"- {_fmt_dt(row.trigger_time)} #{row.id} {row.content} [{_schedule_status_label(row.status)}]"
             )
         if len(filtered_schedules) > 8:
             lines.append(f"- ... 其余 {len(filtered_schedules) - 8} 条")

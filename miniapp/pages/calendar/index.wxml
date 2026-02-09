@@ -58,7 +58,7 @@
             <view class="item-content">{{item.content}}</view>
             <view class="item-time">{{item._time}}</view>
           </view>
-          <view class="status {{item.status === 'EXECUTED' ? 'ok' : item.status === 'PENDING' ? 'pending' : 'cancel'}}">{{item.status}}</view>
+          <view class="status {{item.status === 'EXECUTED' ? 'ok' : item.status === 'PENDING' ? 'pending' : item.status === 'FAILED' ? 'failed' : 'cancel'}}">{{item._status_label || item.status}}</view>
         </view>
       </view>
     </view>

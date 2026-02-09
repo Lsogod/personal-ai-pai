@@ -39,7 +39,7 @@ async def _extract_nickname_with_llm(raw: str, conversation_context: str) -> str
     if not text:
         return "主人"
 
-    llm = get_llm()
+    llm = get_llm(node_name="onboarding")
     system = SystemMessage(
         content=(
             "你是字段提取器。请从用户消息中提取用户昵称。"
@@ -74,7 +74,7 @@ async def _extract_ai_profile_with_llm(raw: str, conversation_context: str) -> t
     if not text:
         return "PAI", "🤖"
 
-    llm = get_llm()
+    llm = get_llm(node_name="onboarding")
     system = SystemMessage(
         content=(
             "你是字段提取器。请从用户消息中提取 AI 名称和 AI 表情。"
@@ -111,7 +111,7 @@ async def _understand_binding_answer(raw: str, conversation_context: str) -> str
     text = (raw or "").strip()
     if not text:
         return "unknown"
-    llm = get_llm()
+    llm = get_llm(node_name="onboarding")
     system = SystemMessage(
         content=(
             "你是绑定引导意图解析器。只输出 JSON。"

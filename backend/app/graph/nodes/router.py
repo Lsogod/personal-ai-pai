@@ -34,7 +34,7 @@ async def _classify_intent_with_llm(
     conversation_context: str,
     runtime_tools: str,
 ) -> str:
-    llm = get_llm()
+    llm = get_llm(node_name="router")
     system = SystemMessage(
         content=(
             "你是消息路由器。请将用户消息分类到一个意图，且只输出 JSON。"

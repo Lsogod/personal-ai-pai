@@ -18,11 +18,13 @@ from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
 from app.models.user import User
 from app.services.audit import log_event
+from app.services.admin_tools import is_tool_enabled
 from app.services.llm import get_llm
 from app.services.mcp_fetch import MCPFetchError, get_mcp_fetch_client
 from app.services.runtime_context import get_session
 from app.services.skills import load_skills
 from app.services.tool_registry import list_runtime_tool_metas
+from app.services.usage import log_tool_usage
 
 URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 WEATHER_CITY_ALIASES = {
@@ -53,6 +55,7 @@ async def _audit_tool_call(
     platform: str,
     conversation_id: int | None,
     tool_name: str,
+    tool_source: str,
     arguments: dict[str, Any],
     ok: bool,
     latency_ms: int,
@@ -79,6 +82,16 @@ async def _audit_tool_call(
                 user_id=user_id,
                 detail=detail,
             )
+        await log_tool_usage(
+            user_id=user_id,
+            platform=platform,
+            conversation_id=conversation_id,
+            tool_source=tool_source,
+            tool_name=tool_name,
+            success=ok,
+            latency_ms=latency_ms,
+            error=error,
+        )
     except Exception:
         return
 
@@ -108,7 +121,7 @@ async def _classify_writer_request_with_llm(
     context_text: str,
     runtime_tools: str,
 ) -> dict[str, Any]:
-    llm = get_llm()
+    llm = get_llm(node_name="writer")
     system = SystemMessage(
         content=(
             "你是 writer 节点的请求分析器。只输出 JSON。"
@@ -233,7 +246,7 @@ async def _answer_with_fetched_content(
     fetched_markdown: str,
     source_url: str,
 ) -> str:
-    llm = get_llm()
+    llm = get_llm(node_name="writer")
     system = SystemMessage(
         content=(
             f"你是{user.nickname}的私人助理{user.ai_name} {user.ai_emoji}。"
@@ -263,6 +276,20 @@ def _build_writer_tools(
         """Get current local time by timezone name, for example: Asia/Shanghai."""
         start = time.perf_counter()
         args = {"timezone": timezone}
+        if not await is_tool_enabled("builtin", "now_time"):
+            text = "工具 now_time 已被管理员停用。"
+            await _audit_tool_call(
+                user_id=user_id,
+                platform=platform,
+                conversation_id=conversation_id,
+                tool_name="now_time",
+                tool_source="builtin",
+                arguments=args,
+                ok=False,
+                latency_ms=int((time.perf_counter() - start) * 1000),
+                error=text,
+            )
+            return text
         tz = (timezone or "").strip() or "Asia/Shanghai"
         try:
             now = datetime.now(ZoneInfo(tz))
@@ -272,6 +299,7 @@ def _build_writer_tools(
                 platform=platform,
                 conversation_id=conversation_id,
                 tool_name="now_time",
+                tool_source="builtin",
                 arguments=args,
                 ok=True,
                 latency_ms=int((time.perf_counter() - start) * 1000),
@@ -286,6 +314,7 @@ def _build_writer_tools(
                 platform=platform,
                 conversation_id=conversation_id,
                 tool_name="now_time",
+                tool_source="builtin",
                 arguments=args,
                 ok=True,
                 latency_ms=int((time.perf_counter() - start) * 1000),
@@ -298,6 +327,20 @@ def _build_writer_tools(
         """List all system MCP tools and their descriptions."""
         start = time.perf_counter()
         args: dict[str, Any] = {}
+        if not await is_tool_enabled("builtin", "mcp_list_tools"):
+            text = "工具 mcp_list_tools 已被管理员停用。"
+            await _audit_tool_call(
+                user_id=user_id,
+                platform=platform,
+                conversation_id=conversation_id,
+                tool_name="mcp_list_tools",
+                tool_source="builtin",
+                arguments=args,
+                ok=False,
+                latency_ms=int((time.perf_counter() - start) * 1000),
+                error=text,
+            )
+            return text
         settings = get_settings()
         if not settings.mcp_fetch_enabled:
             text = "MCP 未启用。"
@@ -306,6 +349,7 @@ def _build_writer_tools(
                 platform=platform,
                 conversation_id=conversation_id,
                 tool_name="mcp_list_tools",
+                tool_source="builtin",
                 arguments=args,
                 ok=False,
                 latency_ms=int((time.perf_counter() - start) * 1000),
@@ -320,6 +364,7 @@ def _build_writer_tools(
                 platform=platform,
                 conversation_id=conversation_id,
                 tool_name="mcp_list_tools",
+                tool_source="builtin",
                 arguments=args,
                 ok=True,
                 latency_ms=int((time.perf_counter() - start) * 1000),
@@ -333,6 +378,7 @@ def _build_writer_tools(
                 platform=platform,
                 conversation_id=conversation_id,
                 tool_name="mcp_list_tools",
+                tool_source="builtin",
                 arguments=args,
                 ok=False,
                 latency_ms=int((time.perf_counter() - start) * 1000),
@@ -346,6 +392,20 @@ def _build_writer_tools(
         start = time.perf_counter()
         settings = get_settings()
         audit_args = {"tool_name": tool_name, "arguments_json": arguments_json}
+        if not await is_tool_enabled("builtin", "mcp_call_tool"):
+            text = "工具 mcp_call_tool 已被管理员停用。"
+            await _audit_tool_call(
+                user_id=user_id,
+                platform=platform,
+                conversation_id=conversation_id,
+                tool_name="mcp_call_tool",
+                tool_source="builtin",
+                arguments=audit_args,
+                ok=False,
+                latency_ms=int((time.perf_counter() - start) * 1000),
+                error=text,
+            )
+            return text
         if not settings.mcp_fetch_enabled:
             text = "MCP 未启用。"
             await _audit_tool_call(
@@ -353,6 +413,7 @@ def _build_writer_tools(
                 platform=platform,
                 conversation_id=conversation_id,
                 tool_name="mcp_call_tool",
+                tool_source="builtin",
                 arguments=audit_args,
                 ok=False,
                 latency_ms=int((time.perf_counter() - start) * 1000),
@@ -367,6 +428,7 @@ def _build_writer_tools(
                 platform=platform,
                 conversation_id=conversation_id,
                 tool_name="mcp_call_tool",
+                tool_source="builtin",
                 arguments=audit_args,
                 ok=False,
                 latency_ms=int((time.perf_counter() - start) * 1000),
@@ -374,13 +436,28 @@ def _build_writer_tools(
             )
             return text
         args = _parse_json_object(arguments_json)
+        if not await is_tool_enabled("mcp", name):
+            text = f"MCP 工具 `{name}` 已被管理员停用。"
+            await _audit_tool_call(
+                user_id=user_id,
+                platform=platform,
+                conversation_id=conversation_id,
+                tool_name=name,
+                tool_source="mcp",
+                arguments=args,
+                ok=False,
+                latency_ms=int((time.perf_counter() - start) * 1000),
+                error=text,
+            )
+            return text
         try:
             output = await get_mcp_fetch_client().call_tool(name=name, arguments=args)
             await _audit_tool_call(
                 user_id=user_id,
                 platform=platform,
                 conversation_id=conversation_id,
-                tool_name="mcp_call_tool",
+                tool_name=name,
+                tool_source="mcp",
                 arguments={"tool_name": name, "arguments": args},
                 ok=True,
                 latency_ms=int((time.perf_counter() - start) * 1000),
@@ -393,7 +470,8 @@ def _build_writer_tools(
                 user_id=user_id,
                 platform=platform,
                 conversation_id=conversation_id,
-                tool_name="mcp_call_tool",
+                tool_name=name,
+                tool_source="mcp",
                 arguments={"tool_name": name, "arguments": args},
                 ok=False,
                 latency_ms=int((time.perf_counter() - start) * 1000),
@@ -417,6 +495,20 @@ def _build_writer_tools(
             "start_index": start_index,
             "raw": raw,
         }
+        if not await is_tool_enabled("builtin", "fetch_url"):
+            text = "工具 fetch_url 已被管理员停用。"
+            await _audit_tool_call(
+                user_id=user_id,
+                platform=platform,
+                conversation_id=conversation_id,
+                tool_name="fetch_url",
+                tool_source="builtin",
+                arguments=audit_args,
+                ok=False,
+                latency_ms=int((time.perf_counter() - start) * 1000),
+                error=text,
+            )
+            return text
         if not settings.mcp_fetch_enabled:
             text = "MCP 未启用。"
             await _audit_tool_call(
@@ -424,6 +516,7 @@ def _build_writer_tools(
                 platform=platform,
                 conversation_id=conversation_id,
                 tool_name="fetch_url",
+                tool_source="builtin",
                 arguments=audit_args,
                 ok=False,
                 latency_ms=int((time.perf_counter() - start) * 1000),
@@ -438,6 +531,7 @@ def _build_writer_tools(
                 platform=platform,
                 conversation_id=conversation_id,
                 tool_name="fetch_url",
+                tool_source="builtin",
                 arguments=audit_args,
                 ok=False,
                 latency_ms=int((time.perf_counter() - start) * 1000),
@@ -465,6 +559,7 @@ def _build_writer_tools(
                 platform=platform,
                 conversation_id=conversation_id,
                 tool_name="fetch_url",
+                tool_source="builtin",
                 arguments=audit_args,
                 ok=True,
                 latency_ms=int((time.perf_counter() - start) * 1000),
@@ -478,6 +573,7 @@ def _build_writer_tools(
                 platform=platform,
                 conversation_id=conversation_id,
                 tool_name="fetch_url",
+                tool_source="builtin",
                 arguments=audit_args,
                 ok=False,
                 latency_ms=int((time.perf_counter() - start) * 1000),
@@ -550,7 +646,7 @@ async def _ground_answer_with_tool_outputs(
     tool_outputs: list[str],
     draft_answer: str,
 ) -> str:
-    llm = get_llm()
+    llm = get_llm(node_name="writer")
     merged = "\n\n---\n\n".join(tool_outputs)
     if len(merged) > 16000:
         merged = merged[:16000] + "\n...(tool outputs truncated)"
@@ -584,7 +680,7 @@ async def _run_tool_agent(
     runtime_tools: str,
 ) -> tuple[str, int]:
     agent = create_react_agent(
-        model=get_llm(),
+        model=get_llm(node_name="writer"),
         tools=_build_writer_tools(
             user_id=user.id,
             platform=platform,
@@ -723,6 +819,7 @@ async def _weather_fallback_fetch_and_answer(
             platform=platform,
             conversation_id=conversation_id,
             tool_name="fetch_url",
+            tool_source="builtin",
             arguments={"url": url, "raw": True},
             ok=True,
             latency_ms=int((time.perf_counter() - start) * 1000),
@@ -742,6 +839,7 @@ async def _weather_fallback_fetch_and_answer(
             platform=platform,
             conversation_id=conversation_id,
             tool_name="fetch_url",
+            tool_source="builtin",
             arguments={"url": url, "raw": True},
             ok=False,
             latency_ms=int((time.perf_counter() - start) * 1000),
@@ -850,7 +948,7 @@ async def writer_node(state: GraphState) -> GraphState:
         }
 
     # Final plain-LLM fallback.
-    llm = get_llm()
+    llm = get_llm(node_name="writer")
     system = SystemMessage(
         content=(
             f"你是{user.nickname}的私人助理{user.ai_name} {user.ai_emoji}。"

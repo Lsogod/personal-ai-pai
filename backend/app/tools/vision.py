@@ -171,7 +171,7 @@ async def analyze_receipt(image_url: str) -> dict[str, Any]:
     if not image_data_url:
         return {"confidence": 0.0, "reason": reason or "image_resolve_failed"}
 
-    llm = get_llm(model=settings.vision_model)
+    llm = get_llm(model=settings.vision_model, node_name="vision")
     system = SystemMessage(
         content=(
             "你是记账视觉解析器。你会收到一张图片，可能是小票，也可能是支付截图。"

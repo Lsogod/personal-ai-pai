@@ -141,7 +141,7 @@ async def extract_memory_candidates(
     if not content or not reply:
         return []
 
-    llm = get_llm()
+    llm = get_llm(node_name="memory")
     system = SystemMessage(
         content=(
             "你是长期记忆提取器。"

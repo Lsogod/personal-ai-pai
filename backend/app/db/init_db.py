@@ -13,6 +13,9 @@ from app.models.conversation import Conversation
 from app.models.skill import Skill, SkillVersion
 from app.models.reminder_delivery import ReminderDelivery
 from app.models.memory import LongTermMemory
+from app.models.admin_tool import AdminToolSwitch
+from app.models.llm_usage import LLMUsageLog
+from app.models.tool_usage import ToolUsageLog
 
 
 async def init_db() -> None:
@@ -23,9 +26,17 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS hashed_password VARCHAR"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS active_conversation_id INTEGER"))
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS binding_stage INTEGER"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN DEFAULT FALSE"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked_reason VARCHAR"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_message_limit INTEGER DEFAULT 30"))
+            await conn.execute(text("ALTER TABLE users ALTER COLUMN daily_message_limit SET DEFAULT 30"))
+            await conn.execute(text("UPDATE users SET daily_message_limit = 30 WHERE daily_message_limit IS NULL"))
+            await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_message_limit INTEGER DEFAULT 0"))
+            await conn.execute(text("ALTER TABLE users ALTER COLUMN monthly_message_limit SET DEFAULT 0"))
             await conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS conversation_id INTEGER"))
             await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_conversation_id ON messages (conversation_id)"))
             await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_active_conversation_id ON users (active_conversation_id)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_is_blocked ON users (is_blocked)"))
             await conn.execute(
                 text("CREATE INDEX IF NOT EXISTS ix_reminder_deliveries_schedule_id ON reminder_deliveries (schedule_id)")
             )
