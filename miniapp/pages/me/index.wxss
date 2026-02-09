@@ -1,81 +1,128 @@
 .me-page {
   min-height: 100vh;
-  padding: 16rpx;
+  padding: 24rpx;
+  padding-bottom: calc(env(safe-area-inset-bottom) + 24rpx);
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 14rpx;
+  gap: 24rpx;
+  background: #f5f7fa;
 }
 
-.profile,
 .section {
-  padding: 20rpx;
+  padding: 28rpx;
 }
 
-.name {
-  font-size: 32rpx;
-  font-weight: 700;
-  margin-bottom: 8rpx;
+/* Profile Card specific styles */
+.profile {
+  padding: 32rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
-.sub {
-  color: #6b7280;
-  font-size: 24rpx;
-  margin-top: 4rpx;
+.profile .name {
+  font-size: 40rpx;
+  font-weight: 800;
+  color: var(--text-main);
+  margin-bottom: 20rpx;
+  text-align: center;
+}
+
+.profile .sub {
+  color: var(--text-secondary);
+  font-size: 26rpx;
+  margin-top: 8rpx;
+  background: #f3f4f6;
+  padding: 6rpx 20rpx;
+  border-radius: 999rpx;
+  display: inline-block;
 }
 
 .title {
-  font-size: 28rpx;
+  font-size: 30rpx;
   font-weight: 700;
-  margin-bottom: 12rpx;
+  color: var(--text-main);
+  margin-bottom: 24rpx;
+}
+
+.text-muted {
+  line-height: 1.6;
 }
 
 .identity-row {
   display: flex;
   justify-content: space-between;
-  gap: 12rpx;
-  padding: 10rpx 0;
+  align-items: center;
+  padding: 24rpx 0;
   border-bottom: 1rpx solid #eceff3;
-  font-size: 24rpx;
+  font-size: 28rpx;
+  color: var(--text-main);
+}
+
+.identity-row:last-child {
+  border-bottom: none;
 }
 
 .input {
-  height: 84rpx;
-  border-radius: 14rpx;
-  background: #f3f4f6;
-  padding: 0 20rpx;
+  height: 96rpx;
+  border-radius: 16rpx;
+  background: #f9fafb;
+  padding: 0 32rpx;
+  font-size: 30rpx;
+  margin-bottom: 24rpx;
+  border: 1px solid #e5e7eb;
 }
 
 .action-btn {
-  margin-top: 12rpx;
-  border-radius: 14rpx;
-  font-size: 26rpx;
+  width: 100%;
+  height: 88rpx;
+  font-size: 28rpx;
+  line-height: 88rpx;
+  margin-top: 16rpx;
+}
+
+.action-btn::after {
+  border: none;
 }
 
 .code-wrap {
-  margin-top: 12rpx;
+  margin-top: 24rpx;
+  background: #f3f4f6;
+  padding: 24rpx;
+  border-radius: 16rpx;
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 10rpx;
 }
 
 .code {
+  font-family: monospace;
   font-size: 36rpx;
-  letter-spacing: 6rpx;
   font-weight: 700;
+  color: var(--primary-color);
+  letter-spacing: 4rpx;
 }
 
 .mini-btn {
-  height: 56rpx;
-  line-height: 56rpx;
+  height: 64rpx;
   font-size: 24rpx;
-  border-radius: 12rpx;
+  padding: 0 24rpx;
+  margin: 0;
+  min-width: auto;
 }
 
 .logout {
-  margin-top: 8rpx;
-  background: #fff;
-  border: 1rpx solid #e5e7eb;
-  color: #111827;
-  border-radius: 14rpx;
+  margin-top: 40rpx;
+  height: 88rpx;
+  background: #fef2f2;
+  color: #ef4444;
+  border: none;
+  border-radius: 16rpx;
+  font-size: 28rpx;
+  font-weight: 600;
+}
+
+.logout::after {
+  border: none;
 }

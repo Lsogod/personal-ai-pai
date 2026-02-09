@@ -93,6 +93,10 @@ function fetchLedgerStats(days = 30) {
   return request(`/api/stats/ledger?days=${days}`);
 }
 
+function fetchLedgers(limit = 30) {
+  return request(`/api/ledgers?limit=${limit}`);
+}
+
 function fetchIdentities() {
   return request("/api/user/identities");
 }
@@ -120,6 +124,7 @@ module.exports = {
   sendChat,
   fetchCalendar,
   fetchLedgerStats,
+  fetchLedgers,
   fetchIdentities,
   createBindCode,
   consumeBindCode

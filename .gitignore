@@ -7,3 +7,5 @@ logs/
 .DS_Store
 frontend/node_modules/
 frontend/dist/
+miniapp/config.local.js
+miniapp/project.private.config.json

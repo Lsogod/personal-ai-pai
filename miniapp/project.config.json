@@ -5,7 +5,7 @@
     "include": []
   },
   "setting": {
-    "urlCheck": true,
+    "urlCheck": false,
     "es6": true,
     "enhance": true,
     "postcss": true,
@@ -45,7 +45,7 @@
   },
   "compileType": "miniprogram",
   "libVersion": "3.4.5",
-  "appid": "wx42e72ecaa2078ca1",
+  "appid": "touristappid",
   "projectname": "pai-miniapp",
   "condition": {},
   "simulatorPluginLibVersion": {},

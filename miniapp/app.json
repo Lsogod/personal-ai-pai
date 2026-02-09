@@ -1,35 +1,49 @@
 {
   "pages": [
-    "pages/login/index",
     "pages/chat/index",
+    "pages/ledger/index",
     "pages/calendar/index",
-    "pages/me/index"
+    "pages/me/index",
+    "pages/login/index",
+    "pages/home/index"
   ],
   "window": {
     "navigationBarTitleText": "PAI",
     "navigationBarBackgroundColor": "#ffffff",
     "navigationBarTextStyle": "black",
-    "backgroundColor": "#f6f7fb",
+    "backgroundColor": "#f5f7fa",
     "backgroundTextStyle": "light"
   },
   "tabBar": {
     "custom": false,
     "color": "#7d8590",
-    "selectedColor": "#111827",
+    "selectedColor": "#3b82f6",
     "backgroundColor": "#ffffff",
     "borderStyle": "black",
     "list": [
       {
         "pagePath": "pages/chat/index",
-        "text": "聊天"
+        "text": "聊天",
+        "iconPath": "assets/icons/tab-chat.png",
+        "selectedIconPath": "assets/icons/tab-chat-active.png"
+      },
+      {
+        "pagePath": "pages/ledger/index",
+        "text": "账单",
+        "iconPath": "assets/icons/tab-ledger.png",
+        "selectedIconPath": "assets/icons/tab-ledger-active.png"
       },
       {
         "pagePath": "pages/calendar/index",
-        "text": "日历"
+        "text": "日程",
+        "iconPath": "assets/icons/tab-calendar.png",
+        "selectedIconPath": "assets/icons/tab-calendar-active.png"
       },
       {
         "pagePath": "pages/me/index",
-        "text": "我的"
+        "text": "我的",
+        "iconPath": "assets/icons/tab-me.png",
+        "selectedIconPath": "assets/icons/tab-me-active.png"
       }
     ]
   },

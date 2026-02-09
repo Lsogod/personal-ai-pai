@@ -17,6 +17,7 @@
     <button class="btn-primary login-btn" loading="{{loading}}" disabled="{{loading}}" bindtap="onLogin">
       微信一键登录
     </button>
+    <button class="btn-secondary guest-btn" bindtap="onBackHome">返回聊天页</button>
 
     <view wx:if="{{error}}" class="error">{{error}}</view>
   </view>

@@ -2,24 +2,40 @@
   <view class="notify-stack" wx:if="{{notifyCards.length > 0}}">
     <view class="notify-card" wx:for="{{notifyCards}}" wx:key="id">
       <view class="notify-title-row">
-        <text class="notify-title">日程提醒</text>
-        <text class="notify-close" data-id="{{item.id}}" bindtap="onDismissNotify">关闭</text>
+        <text class="notify-title" user-select="true">日程提醒</text>
+        <text class="notify-close" user-select="true" data-id="{{item.id}}" bindtap="onDismissNotify">关闭</text>
       </view>
       <view class="notify-content">{{item.content}}</view>
       <view class="notify-time">{{item.timeText}}</view>
     </view>
   </view>
 
-  <view class="top card">
-    <view class="name">{{profile.ai_name || 'PAI'}} {{profile.ai_emoji || ''}}</view>
-    <view class="meta text-muted">{{profile.nickname || '用户'}} · {{wsOpen ? '已连接' : '连接中'}}</view>
-    <view class="stats">
-      <view class="badge">30天支出 ¥{{stats.total || 0}}</view>
-      <view class="badge">账单 {{stats.count || 0}} 笔</view>
+  <view class="header">
+    <view class="header-main">
+      <view class="ai-info">
+        <text class="ai-name fade-in" user-select="true">{{profile.ai_name || 'PAI Assistant'}} {{profile.ai_emoji || ''}}</text>
+        <view class="status-dot {{wsOpen ? 'online' : 'offline'}}"></view>
+      </view>
+      <view class="header-actions">
+        <!-- Future: Add settings or clear history btn -->
+      </view>
+    </view>
+    <view class="stats-row" wx:if="{{authed}}">
+      <view class="stat-tag">支出 ¥{{stats.total || 0}}</view>
+      <view class="stat-tag">账单 {{stats.count || 0}}</view>
+    </view>
+    <view class="guest-banner" wx:else bindtap="onGoLogin">
+      <text user-select="true">未登录模式 · 点击同步数据</text>
     </view>
   </view>
 
-  <scroll-view class="msg-scroll" scroll-y="true" scroll-with-animation="true" scroll-into-view="{{scrollIntoView}}">
+  <scroll-view 
+    class="msg-scroll" 
+    scroll-y="true" 
+    scroll-with-animation="true" 
+    scroll-into-view="{{scrollIntoView}}"
+    enable-back-to-top="true"
+  >
     <view class="msg-list">
       <view
         wx:for="{{messages}}"
@@ -27,44 +43,71 @@
         id="msg-{{index}}"
         class="msg-row {{item.role === 'user' ? 'right' : 'left'}}"
       >
+        <view class="avatar" wx:if="{{item.role !== 'user'}}">
+           <view class="avatar-emoji" wx:if="{{profile && profile.ai_emoji}}">{{profile.ai_emoji}}</view>
+           <view class="avatar-default" wx:else>
+             <image class="avatar-default-icon" src="/assets/icons/bot.svg" mode="aspectFit" />
+           </view>
+        </view>
         <view class="bubble {{item.role === 'user' ? 'bubble-user' : 'bubble-ai'}}">
-          <text class="bubble-text">{{item.content}}</text>
           <view wx:if="{{item.image_urls && item.image_urls.length > 0}}" class="bubble-images">
             <image
               wx:for="{{item.image_urls}}"
-              wx:key="index"
+              wx:for-item="imgUrl"
+              wx:for-index="imgIdx"
+              wx:key="imgIdx"
               class="bubble-image"
-              src="{{item}}"
+              src="{{imgUrl}}"
               mode="aspectFill"
+              data-src="{{imgUrl}}"
+              bindtap="onPreviewBubbleImage"
             />
           </view>
-          <text class="time">{{item.created_at ? item.created_at.slice(11,16) : ''}}</text>
+          <rich-text wx:if="{{item.role === 'assistant'}}" class="bubble-rich" nodes="{{item.content_nodes}}"></rich-text>
+          <text wx:else class="bubble-text" user-select="true" selectable="true">{{item.content}}</text>
+          <!-- <text class="time">{{item.created_at ? item.created_at.slice(11,16) : ''}}</text> -->
         </view>
       </view>
+      <view id="scroll-bottom" style="height: 1px;"></view>
     </view>
   </scroll-view>
 
-  <view class="composer card">
-    <scroll-view class="preview-list" scroll-x="true" wx:if="{{selectedImages.length > 0}}">
-      <view class="preview-inner">
-        <view class="preview-item" wx:for="{{selectedImages}}" wx:key="index">
-          <image class="preview-image" src="{{item.path}}" mode="aspectFill" data-index="{{index}}" bindtap="onPreviewImage"/>
-          <view class="preview-remove" data-index="{{index}}" bindtap="onRemoveImage">×</view>
+  <view class="composer-container safe-bottom">
+    <view class="preview-area" wx:if="{{selectedImages.length > 0}}">
+      <scroll-view class="preview-list" scroll-x="true">
+        <view class="preview-inner">
+          <view class="preview-item" wx:for="{{selectedImages}}" wx:key="index">
+            <image class="preview-image" src="{{item.path}}" mode="aspectFill" data-index="{{index}}" bindtap="onPreviewImage"/>
+            <view class="preview-remove" data-index="{{index}}" catchtap="onRemoveImage">
+              <text class="remove-icon">×</text>
+            </view>
+          </view>
         </view>
-      </view>
-    </scroll-view>
+      </scroll-view>
+    </view>
 
-    <view class="compose-row">
-      <button class="pick-btn" bindtap="onChooseImage">图</button>
-      <textarea
-        class="input"
-        placeholder="输入消息..."
-        auto-height="true"
-        maxlength="2000"
-        value="{{inputText}}"
-        bindinput="onInput"
-      />
-      <button class="send-btn" loading="{{sending}}" disabled="{{sending}}" bindtap="onSend">发送</button>
+    <view class="input-area">
+      <view class="tool-btn" bindtap="onChooseImage">
+        <image class="icon-image" src="/assets/icons/image.svg" mode="aspectFit"/>
+      </view>
+      <view class="input-wrapper">
+        <textarea
+          class="input-box"
+          placeholder="输入消息..."
+          placeholder-style="color: #9ca3af;"
+          auto-height="true"
+          maxlength="2000"
+          cursor-spacing="20"
+          confirm-type="send"
+          show-confirm-bar="{{true}}"
+          value="{{inputText}}"
+          bindinput="onInput"
+          bindconfirm="onConfirmSend"
+        />
+      </view>
+      <view class="send-btn {{inputText || selectedImages.length > 0 ? 'active' : ''}}" bindtap="onSend">
+        <image class="icon-send-img" src="/assets/icons/send.svg" mode="aspectFit"/>
+      </view>
     </view>
   </view>
 </view>

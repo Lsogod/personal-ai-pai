@@ -9,6 +9,7 @@ const {
 
 Page({
   data: {
+    authed: false,
     profile: null,
     identities: [],
     bindCode: "",
@@ -18,8 +19,17 @@ Page({
   },
 
   onShow() {
-    if (!getToken()) {
-      wx.reLaunch({ url: "/pages/login/index" });
+    const token = getToken();
+    const authed = !!token;
+    this.setData({ authed });
+    if (!authed) {
+      this.setData({
+        profile: null,
+        identities: [],
+        bindCode: "",
+        generatedCode: "",
+        codeExpireAt: ""
+      });
       return;
     }
     this.loadData();
@@ -99,6 +109,19 @@ Page({
   onLogout() {
     clearToken();
     getApp().globalData.token = "";
-    wx.reLaunch({ url: "/pages/login/index" });
+    this.setData({
+      authed: false,
+      profile: null,
+      identities: [],
+      bindCode: "",
+      generatedCode: "",
+      codeExpireAt: ""
+    });
+    wx.showToast({ title: "已退出", icon: "none" });
+  },
+
+  onGoLogin() {
+    const redirect = encodeURIComponent("/pages/me/index");
+    wx.navigateTo({ url: `/pages/login/index?redirect=${redirect}` });
   }
 });

@@ -1,4 +1,11 @@
 <view class="me-page">
+  <view class="card section" wx:if="{{!authed}}">
+    <view class="title">账号与绑定</view>
+    <view class="text-muted">未登录状态下可浏览说明。登录后可查看身份、绑定其他客户端、开通提醒订阅。</view>
+    <button class="btn-primary action-btn" bindtap="onGoLogin">微信登录</button>
+  </view>
+
+  <view wx:if="{{authed}}">
   <view class="card profile" wx:if="{{profile}}">
     <view class="name">{{profile.ai_name}} {{profile.ai_emoji}}</view>
     <view class="sub">主人：{{profile.nickname}}</view>
@@ -38,4 +45,5 @@
   </view>
 
   <button class="logout" bindtap="onLogout">退出登录</button>
+  </view>
 </view>

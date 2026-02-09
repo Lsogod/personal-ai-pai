@@ -1,29 +1,62 @@
 page {
-  background: #f6f7fb;
-  color: #111827;
+  background: #f5f7fa;
+  color: #1a202c;
   font-size: 28rpx;
+  line-height: 1.5;
+  --primary-color: #3b82f6;
+  --primary-dark: #2563eb;
+  --text-main: #111827;
+  --text-secondary: #6b7280;
+  --bg-card: #ffffff;
+  --safe-bottom: env(safe-area-inset-bottom);
 }
 
 .card {
-  background: #ffffff;
+  background: var(--bg-card);
   border-radius: 24rpx;
-  box-shadow: 0 8rpx 24rpx rgba(15, 23, 42, 0.06);
+  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.04);
 }
 
 .btn-primary {
-  background: #111827;
+  background: linear-gradient(135deg, #111827 0%, #1f2937 100%);
   color: #ffffff;
+  border-radius: 16rpx;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border: none;
+}
+
+.btn-primary::after {
+  border: none;
+}
+
+.btn-primary:active {
+  opacity: 0.85;
 }
 
 .btn-secondary {
-  background: #eef0f4;
+  background: #ffffff;
   color: #111827;
+  font-weight: 500;
+  border-radius: 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2rpx solid #e5e7eb;
+}
+
+.btn-secondary::after {
   border: none;
 }
 
+.btn-secondary:active {
+  background: #f9fafb;
+}
+
 .text-muted {
-  color: #8a919e;
+  color: var(--text-secondary);
 }
 
 .badge {
@@ -33,6 +66,19 @@ page {
   border-radius: 999rpx;
   padding: 8rpx 20rpx;
   font-size: 22rpx;
-  background: #eef0f4;
-  color: #111827;
+  background: rgba(17, 24, 39, 0.05);
+  color: var(--text-main);
+  font-weight: 500;
+}
+
+.safe-bottom {
+  padding-bottom: constant(safe-area-inset-bottom);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* 按钮通用样式重置 */
+button {
+  margin: 0;
+  padding: 0;
+  line-height: inherit;
 }

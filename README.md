@@ -338,6 +338,26 @@ npm run dev
 
 开发模式自动代理 `/api` 到 `http://localhost:8000`。
 
+### 微信小程序配置（开发/生产区分）
+
+1. 小程序前端使用 `miniapp/config.js` 按 `envVersion` 自动切换环境：
+- `develop` -> `DEV_API_BASE_URL`
+- `trial` -> `TRIAL_API_BASE_URL`
+- `release` -> `PROD_API_BASE_URL`
+
+2. 在本地创建私有覆盖文件（不提交到仓库）：
+```bash
+cp miniapp/config.local.example.js miniapp/config.local.js
+```
+然后填写你的真实域名与模板 ID。
+
+3. `miniapp/project.config.json` 使用模板 `appid`（`touristappid`）用于仓库共享。
+真实 `appid` 请只在本机微信开发者工具或私有配置中设置。
+
+4. 安全建议：
+- `AppID` 可公开，但不建议在公共仓库固定生产 `AppID`
+- `AppSecret` 只能放后端 `.env`（`MINIAPP_APP_SECRET`），禁止出现在前端代码
+
 | 技术栈 | 用途 |
 |--------|------|
 | React 18 | UI 框架 |

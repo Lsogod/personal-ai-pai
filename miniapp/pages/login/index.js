@@ -1,17 +1,27 @@
 const { miniappLogin } = require("../../utils/http");
-const { setToken } = require("../../utils/auth");
+const { getToken, setToken } = require("../../utils/auth");
 
 Page({
   data: {
     nickname: "",
     loading: false,
-    error: ""
+    error: "",
+    redirect: "/pages/chat/index"
+  },
+
+  onLoad(options) {
+    const redirect = decodeURIComponent((options && options.redirect) || "").trim();
+    if (redirect.startsWith("/pages/")) {
+      this.setData({ redirect });
+    }
   },
 
   onShow() {
     const app = getApp();
-    if (app.globalData.token) {
-      wx.switchTab({ url: "/pages/chat/index" });
+    const token = app.globalData.token || getToken();
+    if (token) {
+      app.globalData.token = token;
+      this.goAfterLogin();
     }
   },
 
@@ -44,11 +54,30 @@ Page({
       setToken(data.access_token);
       const app = getApp();
       app.globalData.token = data.access_token;
-      wx.switchTab({ url: "/pages/chat/index" });
+      this.goAfterLogin();
     } catch (err) {
       this.setData({ error: err.message || "登录失败，请稍后重试" });
     } finally {
       this.setData({ loading: false });
     }
+  },
+
+  goAfterLogin() {
+    const redirect = this.data.redirect || "/pages/chat/index";
+    const tabPages = [
+      "/pages/chat/index",
+      "/pages/ledger/index",
+      "/pages/calendar/index",
+      "/pages/me/index"
+    ];
+    if (tabPages.includes(redirect)) {
+      wx.switchTab({ url: redirect });
+      return;
+    }
+    wx.redirectTo({ url: redirect });
+  },
+
+  onBackHome() {
+    wx.switchTab({ url: "/pages/chat/index" });
   }
 });
