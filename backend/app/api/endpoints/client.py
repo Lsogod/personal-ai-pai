@@ -32,8 +32,14 @@ from app.schemas.calendar import (
 from app.schemas.chat import ChatSendRequest, ChatSendResponse, ProfileResponse
 from app.schemas.conversation import ConversationCreateRequest, ConversationResponse
 from app.schemas.conversation import ConversationDeleteResponse, ConversationUpdateRequest
-from app.schemas.ledger import LedgerDeleteResponse, LedgerItemResponse, LedgerUpdateRequest
+from app.schemas.ledger import LedgerCreateRequest, LedgerDeleteResponse, LedgerItemResponse, LedgerUpdateRequest
 from app.schemas.mcp import MCPFetchRequest, MCPFetchResponse, MCPToolItem
+from app.schemas.schedule import (
+    ScheduleCreateRequest,
+    ScheduleDeleteResponse,
+    ScheduleItemResponse,
+    ScheduleUpdateRequest,
+)
 from app.schemas.skill import (
     SkillDetailResponse,
     SkillDraftRequest,
@@ -77,8 +83,10 @@ from app.services.skills import (
     publish_skill,
     render_skill_from_request,
 )
-from app.tools.finance import delete_ledger, query_stats, update_ledger
+from app.tools.finance import delete_ledger, insert_ledger, query_stats, update_ledger
 from app.services.realtime import get_notification_hub
+from app.services.scheduler import get_scheduler
+from app.services.scheduler_tasks import send_reminder_job
 
 
 router = APIRouter(prefix="/api")
@@ -754,6 +762,188 @@ async def ledger_delete(
     if not deleted:
         raise HTTPException(status_code=404, detail="ledger not found")
     return LedgerDeleteResponse(ok=True, id=deleted.id)
+
+
+@router.post("/ledgers", response_model=LedgerItemResponse)
+async def ledger_create(
+    payload: LedgerCreateRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    txn_date = None
+    if payload.transaction_date:
+        try:
+            raw = payload.transaction_date.replace("Z", "+00:00")
+            txn_date = datetime.fromisoformat(raw)
+        except Exception:
+            pass
+
+    ledger = await insert_ledger(
+        session,
+        user_id=user.id,
+        amount=payload.amount,
+        category=payload.category or "其他",
+        item=payload.item or "手动记录",
+        transaction_date=txn_date,
+        platform=user.platform,
+    )
+    return LedgerItemResponse(
+        id=ledger.id,
+        amount=ledger.amount,
+        currency=ledger.currency,
+        category=ledger.category,
+        item=ledger.item,
+        transaction_date=ledger.transaction_date.isoformat() + "Z",
+        created_at=ledger.created_at.isoformat() + "Z",
+    )
+
+
+# ── Schedule CRUD ──
+
+@router.get("/schedules", response_model=List[ScheduleItemResponse])
+async def schedule_list(
+    limit: int = Query(default=50, ge=1, le=200),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    result = await session.execute(
+        select(Schedule)
+        .where(Schedule.user_id == user.id)
+        .order_by(Schedule.trigger_time.desc())
+        .limit(limit)
+    )
+    return [
+        ScheduleItemResponse(
+            id=row.id,
+            content=row.content,
+            trigger_time=row.trigger_time.isoformat() + "Z",
+            status=row.status,
+            created_at=row.created_at.isoformat() + "Z",
+        )
+        for row in result.scalars().all()
+    ]
+
+
+@router.post("/schedules", response_model=ScheduleItemResponse)
+async def schedule_create(
+    payload: ScheduleCreateRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    try:
+        raw = payload.trigger_time.replace("Z", "+00:00")
+        trigger = datetime.fromisoformat(raw)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid trigger_time format")
+
+    from uuid import uuid4
+
+    job_id = str(uuid4())
+    schedule = Schedule(
+        user_id=user.id,
+        job_id=job_id,
+        content=payload.content,
+        trigger_time=trigger,
+    )
+    session.add(schedule)
+    await session.commit()
+    await session.refresh(schedule)
+
+    # Register APScheduler job if in future
+    if trigger > datetime.utcnow():
+        try:
+            scheduler = get_scheduler()
+            scheduler.add_job(job_id, trigger, send_reminder_job, schedule.id)
+        except Exception:
+            pass
+
+    await log_event(
+        session,
+        action="schedule_created",
+        platform=user.platform,
+        user_id=user.id,
+        detail={"content": payload.content, "trigger_time": trigger.isoformat(), "via": "manual"},
+    )
+    return ScheduleItemResponse(
+        id=schedule.id,
+        content=schedule.content,
+        trigger_time=schedule.trigger_time.isoformat() + "Z",
+        status=schedule.status,
+        created_at=schedule.created_at.isoformat() + "Z",
+    )
+
+
+@router.patch("/schedules/{schedule_id}", response_model=ScheduleItemResponse)
+async def schedule_patch(
+    schedule_id: int,
+    payload: ScheduleUpdateRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    schedule = await session.get(Schedule, schedule_id)
+    if not schedule or schedule.user_id != user.id:
+        raise HTTPException(status_code=404, detail="schedule not found")
+
+    if payload.content is not None:
+        schedule.content = payload.content
+    if payload.status is not None:
+        schedule.status = payload.status.upper()
+    if payload.trigger_time is not None:
+        try:
+            raw = payload.trigger_time.replace("Z", "+00:00")
+            new_trigger = datetime.fromisoformat(raw)
+            schedule.trigger_time = new_trigger
+            # Reschedule APScheduler job
+            if new_trigger > datetime.utcnow():
+                try:
+                    scheduler = get_scheduler()
+                    scheduler.remove_job(schedule.job_id)
+                    scheduler.add_job(schedule.job_id, new_trigger, send_reminder_job, schedule.id)
+                except Exception:
+                    pass
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid trigger_time format")
+
+    session.add(schedule)
+    await session.commit()
+    await session.refresh(schedule)
+    return ScheduleItemResponse(
+        id=schedule.id,
+        content=schedule.content,
+        trigger_time=schedule.trigger_time.isoformat() + "Z",
+        status=schedule.status,
+        created_at=schedule.created_at.isoformat() + "Z",
+    )
+
+
+@router.delete("/schedules/{schedule_id}", response_model=ScheduleDeleteResponse)
+async def schedule_delete(
+    schedule_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    schedule = await session.get(Schedule, schedule_id)
+    if not schedule or schedule.user_id != user.id:
+        raise HTTPException(status_code=404, detail="schedule not found")
+
+    # Remove APScheduler job
+    try:
+        scheduler = get_scheduler()
+        scheduler.remove_job(schedule.job_id)
+    except Exception:
+        pass
+
+    snapshot_id = schedule.id
+    await session.delete(schedule)
+    await session.commit()
+    await log_event(
+        session,
+        action="schedule_deleted",
+        platform=user.platform,
+        user_id=user.id,
+        detail={"schedule_id": snapshot_id, "content": schedule.content, "via": "manual"},
+    )
+    return ScheduleDeleteResponse(ok=True, id=snapshot_id)
 
 
 @router.get("/skills", response_model=List[SkillItemResponse])

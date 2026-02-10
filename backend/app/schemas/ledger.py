@@ -13,6 +13,13 @@ class LedgerItemResponse(BaseModel):
     created_at: str
 
 
+class LedgerCreateRequest(BaseModel):
+    amount: float = Field(ge=0)
+    category: str = ""
+    item: str = ""
+    transaction_date: str | None = None  # ISO format, optional
+
+
 class LedgerUpdateRequest(BaseModel):
     amount: float | None = Field(default=None, ge=0)
     category: str | None = None
