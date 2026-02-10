@@ -41,7 +41,7 @@
       <view class="chart-card card">
         <view class="chart-title">分类占比</view>
         <view class="pie-wrap">
-          <canvas id="pieCanvas" type="2d" class="pie-canvas"></canvas>
+          <canvas id="pieCanvas" type="2d" class="pie-canvas" wx:if="{{!showForm}}"></canvas>
           <view class="cat-legend">
             <view class="cat-row" wx:for="{{catStats.entries}}" wx:key="name">
               <view class="cat-dot" style="background:{{item.color}}"></view>
@@ -59,7 +59,7 @@
           <text class="chart-title">近14天趋势</text>
           <text class="chart-sub" wx:if="{{maxDay.value>0}}">峰值 {{maxDay.label}} ¥{{maxDay.value}}</text>
         </view>
-        <canvas id="trendCanvas" type="2d" class="trend-canvas"></canvas>
+        <canvas id="trendCanvas" type="2d" class="trend-canvas" wx:if="{{!showForm}}"></canvas>
       </view>
     </block>
 

@@ -43,13 +43,13 @@
           <text class="stats-card-value">¥{{monthStats.totalSpend}}</text>
         </view>
         <text class="stats-card-sub">共 {{monthStats.billCount}} 笔</text>
-        <canvas id="spendBarCanvas" type="2d" class="spend-bar-canvas"></canvas>
+        <canvas id="spendBarCanvas" type="2d" class="spend-bar-canvas" wx:if="{{!showLedgerForm && !showScheduleForm}}"></canvas>
       </view>
       <view class="stats-card card stats-card-ring">
         <view class="stats-card-head">
           <text class="stats-card-title">日程完成</text>
         </view>
-        <canvas id="rateRingCanvas" type="2d" class="rate-ring-canvas"></canvas>
+        <canvas id="rateRingCanvas" type="2d" class="rate-ring-canvas" wx:if="{{!showLedgerForm && !showScheduleForm}}"></canvas>
         <view class="ring-legend">
           <view class="ring-legend-row"><view class="ring-dot ring-dot-done"></view><text class="ring-label">已完成 {{monthStats.scheduleDone}}</text></view>
           <view class="ring-legend-row"><view class="ring-dot ring-dot-pending"></view><text class="ring-label">未完成 {{monthStats.schedulePending}}</text></view>

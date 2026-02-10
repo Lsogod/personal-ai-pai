@@ -100,7 +100,7 @@ Page({
     const rawDate=(item.transaction_date||"").replace("Z","").slice(0,16);
     this.setData({showForm:true,formMode:"edit",formId:item.id,formAmount:String(item.amount||""),formItem:item.item||"",formCategory:item.category||"其他",formDate:rawDate||todayISO()});
   },
-  onCloseForm(){this.setData({showForm:false});},
+  onCloseForm(){this.setData({showForm:false},()=>{if(this.data.activeTab==="overview")setTimeout(()=>{this.drawPie();this.drawTrend();},60);});},
   onFormAmount(e){this.setData({formAmount:e.detail.value});},
   onFormItem(e){this.setData({formItem:e.detail.value});},
   onFormCat(e){this.setData({formCategory:CATS[e.detail.value]||"其他"});},

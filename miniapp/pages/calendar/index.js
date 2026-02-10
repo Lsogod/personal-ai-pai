@@ -174,7 +174,7 @@ Page({
     this.setData({ showLedgerForm: true, ledgerFormMode: "edit", ledgerFormId: item.id,
       lf_amount: String(item.amount||""), lf_item: item.item||"", lf_category: item.category||"其他", lf_date: raw });
   },
-  onCloseLedgerForm() { this.setData({ showLedgerForm: false }); },
+  onCloseLedgerForm() { this.setData({ showLedgerForm: false }, () => { setTimeout(() => { this.drawSpendBar(); this.drawRateRing(); }, 60); }); },
   onLfAmount(e) { this.setData({ lf_amount: e.detail.value }); },
   onLfItem(e) { this.setData({ lf_item: e.detail.value }); },
   onLfCat(e) { this.setData({ lf_category: CATS[e.detail.value] || "其他" }); },
@@ -214,7 +214,7 @@ Page({
     this.setData({ showScheduleForm: true, scheduleFormMode: "edit", scheduleFormId: item.id,
       sf_content: item.content||"", sf_date: raw.slice(0,10), sf_time: raw.slice(11,16)||"12:00" });
   },
-  onCloseScheduleForm() { this.setData({ showScheduleForm: false }); },
+  onCloseScheduleForm() { this.setData({ showScheduleForm: false }, () => { setTimeout(() => { this.drawSpendBar(); this.drawRateRing(); }, 60); }); },
   onSfContent(e) { this.setData({ sf_content: e.detail.value }); },
   onSfDate(e) { this.setData({ sf_date: e.detail.value }); },
   onSfTime(e) { this.setData({ sf_time: e.detail.value }); },
