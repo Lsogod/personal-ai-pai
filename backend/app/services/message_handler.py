@@ -259,7 +259,7 @@ async def _load_context_messages(
             {
                 "role": (row.role or "user").strip().lower(),
                 "content": content,
-                "created_at": row.created_at.isoformat() if row.created_at else "",
+                "created_at": (row.created_at.isoformat() + "Z") if row.created_at else "",
             }
         )
     return context_messages
@@ -324,7 +324,7 @@ async def handle_message(
                     "content": text,
                     "platform": platform,
                     "conversation_id": conversation.id,
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": datetime.utcnow().isoformat() + "Z",
                 },
             )
         return {"ok": True, "responses": [text]}
@@ -445,7 +445,7 @@ async def handle_message(
                 "content": message.content,
                 "platform": platform,
                 "conversation_id": conversation.id,
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.utcnow().isoformat() + "Z",
             },
         )
 
@@ -542,7 +542,7 @@ async def handle_message(
                     "content": text,
                     "platform": platform,
                     "conversation_id": conversation.id,
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": datetime.utcnow().isoformat() + "Z",
                 },
             )
 

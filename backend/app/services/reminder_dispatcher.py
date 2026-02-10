@@ -86,8 +86,8 @@ async def _send_target_once(
                     "type": "reminder",
                     "content": text,
                     "schedule_id": schedule.id,
-                    "trigger_time": schedule.trigger_time.isoformat(),
-                    "created_at": datetime.utcnow().isoformat(),
+                    "trigger_time": schedule.trigger_time.isoformat() + "Z",
+                    "created_at": datetime.utcnow().isoformat() + "Z",
                 },
             )
             return True, ""
@@ -99,8 +99,8 @@ async def _send_target_once(
                     "type": "reminder",
                     "content": text,
                     "schedule_id": schedule.id,
-                    "trigger_time": schedule.trigger_time.isoformat(),
-                    "created_at": datetime.utcnow().isoformat(),
+                    "trigger_time": schedule.trigger_time.isoformat() + "Z",
+                    "created_at": datetime.utcnow().isoformat() + "Z",
                 },
             )
             ok, err = await miniapp.send_subscribe_reminder(
