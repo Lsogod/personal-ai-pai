@@ -82,18 +82,18 @@
 }
 
 .grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 20rpx;
 }
 
 .grid-item {
-  width: calc(50% - 10rpx);
   padding: 28rpx;
   display: flex;
   flex-direction: column;
   gap: 20rpx;
   box-sizing: border-box;
+  min-width: 0;
 }
 
 .grid-item:active {
