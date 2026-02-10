@@ -16,7 +16,6 @@
 
     <!-- Overview Tab -->
     <block wx:if="{{activeTab==='overview'}}">
-      <!-- Summary Card -->
       <view class="summary-card">
         <view class="summary-head">
           <text class="summary-label">近30天概览</text>
@@ -39,7 +38,6 @@
         </view>
       </view>
 
-      <!-- Category Donut -->
       <view class="chart-card card">
         <view class="chart-title">分类占比</view>
         <view class="pie-wrap">
@@ -56,7 +54,6 @@
         </view>
       </view>
 
-      <!-- Daily Trend -->
       <view class="chart-card card">
         <view class="chart-head">
           <text class="chart-title">近14天趋势</text>
@@ -68,23 +65,73 @@
 
     <!-- List Tab -->
     <block wx:if="{{activeTab==='list'}}">
+      <view class="list-toolbar">
+        <view class="list-toolbar-title">账单明细</view>
+        <view class="fab-btn" bindtap="onShowAdd">+ 记一笔</view>
+      </view>
       <scroll-view class="bill-list" scroll-y="true">
         <view class="empty-state" wx:if="{{ledgers.length === 0}}">
           <text class="empty-icon">📄</text>
-          <text class="empty-text">暂无账单</text>
+          <text class="empty-text">暂无账单，点击右上角添加</text>
         </view>
         <view class="bill-item card" wx:for="{{ledgers}}" wx:key="id">
           <view class="bill-top">
-            <view class="bill-cat-dot" style="background:{{item.category ? '' : '#94A3B8'}}; background:{{item.category}}"></view>
+            <view class="bill-cat-dot" style="background:{{item._catClr}}"></view>
             <text class="bill-name">{{item.item || '未命名'}}</text>
             <text class="bill-amount">¥{{item.amount}}</text>
           </view>
           <view class="bill-bottom">
             <text class="bill-meta">{{item._time}}</text>
             <text class="bill-tag">{{item.category || '未分类'}}</text>
+            <view class="bill-actions">
+              <view class="bill-action-btn edit-btn" data-item="{{item}}" bindtap="onShowEdit">
+                <image class="action-icon" src="/assets/icons/ic-edit.svg" mode="aspectFit" />
+              </view>
+              <view class="bill-action-btn del-btn" data-item="{{item}}" bindtap="onDeleteLedger">
+                <image class="action-icon" src="/assets/icons/ic-delete.svg" mode="aspectFit" />
+              </view>
+            </view>
           </view>
         </view>
       </scroll-view>
     </block>
   </block>
+
+  <!-- Add/Edit Form Modal -->
+  <view class="modal-mask" wx:if="{{showForm}}" bindtap="onCloseForm">
+    <view class="modal-body card" catchtap="">
+      <view class="modal-title">{{formMode==='add' ? '新增账单' : '编辑账单'}}</view>
+
+      <view class="form-group">
+        <text class="form-label">金额</text>
+        <input class="form-input" type="digit" placeholder="请输入金额" value="{{formAmount}}" bindinput="onFormAmount" />
+      </view>
+      <view class="form-group">
+        <text class="form-label">摘要</text>
+        <input class="form-input" placeholder="如：午餐、地铁" value="{{formItem}}" bindinput="onFormItem" />
+      </view>
+      <view class="form-group">
+        <text class="form-label">分类</text>
+        <picker mode="selector" range="{{cats}}" value="{{cats.indexOf(formCategory)}}" bindchange="onFormCat">
+          <view class="form-picker">{{formCategory}} ▾</view>
+        </picker>
+      </view>
+      <view class="form-group">
+        <text class="form-label">日期</text>
+        <view class="form-datetime">
+          <picker mode="date" value="{{formDate}}" bindchange="onFormDate">
+            <view class="form-picker">{{formDate ? formDate.slice(0,10) : '选择日期'}} ▾</view>
+          </picker>
+          <picker mode="time" value="{{formDate ? formDate.slice(11,16) : '12:00'}}" bindchange="onFormTime">
+            <view class="form-picker">{{formDate ? formDate.slice(11,16) : '12:00'}} ▾</view>
+          </picker>
+        </view>
+      </view>
+
+      <view class="modal-actions">
+        <button class="btn-secondary modal-btn" bindtap="onCloseForm">取消</button>
+        <button class="btn-primary modal-btn" bindtap="onFormSubmit">{{formMode==='add' ? '添加' : '保存'}}</button>
+      </view>
+    </view>
+  </view>
 </view>

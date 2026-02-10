@@ -114,6 +114,34 @@ function fetchLedgers(limit = 30) {
   return request(`/api/ledgers?limit=${limit}`);
 }
 
+function createLedger(data) {
+  return request("/api/ledgers", { method: "POST", data });
+}
+
+function updateLedger(id, data) {
+  return request(`/api/ledgers/${id}`, { method: "PATCH", data });
+}
+
+function deleteLedger(id) {
+  return request(`/api/ledgers/${id}`, { method: "DELETE" });
+}
+
+function fetchSchedules(limit = 50) {
+  return request(`/api/schedules?limit=${limit}`);
+}
+
+function createSchedule(data) {
+  return request("/api/schedules", { method: "POST", data });
+}
+
+function updateSchedule(id, data) {
+  return request(`/api/schedules/${id}`, { method: "PATCH", data });
+}
+
+function deleteSchedule(id) {
+  return request(`/api/schedules/${id}`, { method: "DELETE" });
+}
+
 function fetchSkills() {
   return request("/api/skills");
 }
@@ -149,6 +177,13 @@ module.exports = {
   fetchCalendar,
   fetchLedgerStats,
   fetchLedgers,
+  createLedger,
+  updateLedger,
+  deleteLedger,
+  fetchSchedules,
+  createSchedule,
+  updateSchedule,
+  deleteSchedule,
   fetchSkills,
   fetchIdentities,
   createBindCode,

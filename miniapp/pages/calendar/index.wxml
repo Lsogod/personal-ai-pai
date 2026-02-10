@@ -21,16 +21,14 @@
         <text wx:for="{{weekHeaders}}" wx:key="*this" class="week-cell">{{item}}</text>
       </view>
       <view class="day-grid">
-        <view
-          wx:for="{{calendarGrid}}" wx:key="key"
-          class="day-cell {{item.empty ? 'is-empty' : ''}} {{item.date === activeDate ? 'is-active' : ''}} {{item.isToday ? 'is-today' : ''}}"
-          data-date="{{item.date}}" bindtap="onPickDay"
-        >
+        <view wx:for="{{calendarGrid}}" wx:key="key"
+          class="day-cell {{item.empty?'is-empty':''}} {{item.date===activeDate?'is-active':''}} {{item.isToday?'is-today':''}}"
+          data-date="{{item.date}}" bindtap="onPickDay">
           <view wx:if="{{!item.empty}}" class="day-inner">
             <text class="day-num">{{item.day}}</text>
             <view class="day-badges">
-              <view class="day-badge badge-green" wx:if="{{item.ledger_count > 0}}">{{item.ledger_count}}</view>
-              <view class="day-badge badge-blue" wx:if="{{item.schedule_count > 0}}">{{item.schedule_count}}</view>
+              <view class="day-badge badge-green" wx:if="{{item.ledger_count>0}}">{{item.ledger_count}}</view>
+              <view class="day-badge badge-blue" wx:if="{{item.schedule_count>0}}">{{item.schedule_count}}</view>
             </view>
           </view>
         </view>
@@ -39,7 +37,6 @@
 
     <!-- Monthly Stats -->
     <view class="stats-row">
-      <!-- Spend Overview -->
       <view class="stats-card card">
         <view class="stats-card-head">
           <text class="stats-card-title">本月支出</text>
@@ -48,60 +45,139 @@
         <text class="stats-card-sub">共 {{monthStats.billCount}} 笔</text>
         <canvas id="spendBarCanvas" type="2d" class="spend-bar-canvas"></canvas>
       </view>
-      <!-- Schedule Rate -->
       <view class="stats-card card stats-card-ring">
         <view class="stats-card-head">
           <text class="stats-card-title">日程完成</text>
         </view>
         <canvas id="rateRingCanvas" type="2d" class="rate-ring-canvas"></canvas>
         <view class="ring-legend">
-          <view class="ring-legend-row">
-            <view class="ring-dot ring-dot-done"></view>
-            <text class="ring-label">已完成 {{monthStats.scheduleDone}}</text>
-          </view>
-          <view class="ring-legend-row">
-            <view class="ring-dot ring-dot-pending"></view>
-            <text class="ring-label">未完成 {{monthStats.schedulePending}}</text>
-          </view>
+          <view class="ring-legend-row"><view class="ring-dot ring-dot-done"></view><text class="ring-label">已完成 {{monthStats.scheduleDone}}</text></view>
+          <view class="ring-legend-row"><view class="ring-dot ring-dot-pending"></view><text class="ring-label">未完成 {{monthStats.schedulePending}}</text></view>
         </view>
       </view>
     </view>
 
-    <!-- Detail -->
+    <!-- Day Detail -->
     <view class="detail card" wx:if="{{activeDay}}">
-      <view class="detail-title">{{activeDay.date}} 详情</view>
+      <view class="detail-header">
+        <view class="detail-title">{{activeDay.date}} 详情</view>
+        <view class="detail-add-btns">
+          <view class="detail-add-btn add-green" bindtap="onShowAddLedger">+ 账单</view>
+          <view class="detail-add-btn add-blue" bindtap="onShowAddSchedule">+ 日程</view>
+        </view>
+      </view>
 
+      <!-- Ledgers -->
       <view class="detail-section">
         <view class="detail-section-head">
           <text class="detail-section-dot dot-green"></text>
           <text class="detail-section-label">账单</text>
         </view>
-        <view wx:if="{{activeDay.ledgers.length === 0}}" class="detail-empty">当天无账单</view>
+        <view wx:if="{{activeDay.ledgers.length===0}}" class="detail-empty">当天无账单</view>
         <view wx:for="{{activeDay.ledgers}}" wx:key="id" class="detail-row">
           <view class="detail-main">
             <text class="detail-content">{{item.item || '未命名账单'}}</text>
             <text class="detail-time">{{item._time}} · {{item.category || '未分类'}}</text>
           </view>
           <text class="detail-amount">¥{{item.amount}}</text>
+          <view class="detail-actions">
+            <view class="act-btn act-edit" data-item="{{item}}" bindtap="onShowEditLedger">
+              <image class="action-icon" src="/assets/icons/ic-edit.svg" mode="aspectFit" />
+            </view>
+            <view class="act-btn act-del" data-item="{{item}}" bindtap="onDeleteLedger">
+              <image class="action-icon" src="/assets/icons/ic-delete.svg" mode="aspectFit" />
+            </view>
+          </view>
         </view>
       </view>
 
+      <!-- Schedules -->
       <view class="detail-section">
         <view class="detail-section-head">
           <text class="detail-section-dot dot-blue"></text>
           <text class="detail-section-label">日程</text>
         </view>
-        <view wx:if="{{activeDay.schedules.length === 0}}" class="detail-empty">当天无日程</view>
+        <view wx:if="{{activeDay.schedules.length===0}}" class="detail-empty">当天无日程</view>
         <view wx:for="{{activeDay.schedules}}" wx:key="id" class="detail-row">
-          <view class="detail-main">
-            <text class="detail-content">{{item.content}}</text>
-            <text class="detail-time">{{item._time}}</text>
+          <view class="detail-check {{item.status==='EXECUTED'?'checked':''}}" data-item="{{item}}" bindtap="onToggleScheduleStatus">
+            <text wx:if="{{item.status==='EXECUTED'}}">✓</text>
           </view>
-          <view class="detail-status {{item.status === 'EXECUTED' ? 'st-ok' : item.status === 'PENDING' ? 'st-pending' : item.status === 'FAILED' ? 'st-failed' : 'st-cancel'}}">
-            {{item._status_label || item.status}}
+          <view class="detail-main">
+            <text class="detail-content {{item.status==='EXECUTED'?'done-text':''}}">{{item.content}}</text>
+            <text class="detail-time">{{item._time}} · {{item._status_label}}</text>
+          </view>
+          <view class="detail-actions">
+            <view class="act-btn act-edit" data-item="{{item}}" bindtap="onShowEditSchedule">
+              <image class="action-icon" src="/assets/icons/ic-edit.svg" mode="aspectFit" />
+            </view>
+            <view class="act-btn act-del" data-item="{{item}}" bindtap="onDeleteSchedule">
+              <image class="action-icon" src="/assets/icons/ic-delete.svg" mode="aspectFit" />
+            </view>
           </view>
         </view>
       </view>
     </view>
   </block>
+
+  <!-- Ledger Form Modal -->
+  <view class="modal-mask" wx:if="{{showLedgerForm}}" bindtap="onCloseLedgerForm">
+    <view class="modal-body card" catchtap="">
+      <view class="modal-title">{{ledgerFormMode==='add'?'新增账单':'编辑账单'}}</view>
+      <view class="form-group">
+        <text class="form-label">金额</text>
+        <input class="form-input" type="digit" placeholder="请输入金额" value="{{lf_amount}}" bindinput="onLfAmount" />
+      </view>
+      <view class="form-group">
+        <text class="form-label">摘要</text>
+        <input class="form-input" placeholder="如：午餐、地铁" value="{{lf_item}}" bindinput="onLfItem" />
+      </view>
+      <view class="form-group">
+        <text class="form-label">分类</text>
+        <picker mode="selector" range="{{cats}}" value="{{cats.indexOf(lf_category)}}" bindchange="onLfCat">
+          <view class="form-picker">{{lf_category}} ▾</view>
+        </picker>
+      </view>
+      <view class="form-group">
+        <text class="form-label">日期时间</text>
+        <view class="form-datetime">
+          <picker mode="date" value="{{lf_date}}" bindchange="onLfDate">
+            <view class="form-picker">{{lf_date?lf_date.slice(0,10):'选择'}} ▾</view>
+          </picker>
+          <picker mode="time" value="{{lf_date?lf_date.slice(11,16):'12:00'}}" bindchange="onLfTime">
+            <view class="form-picker">{{lf_date?lf_date.slice(11,16):'12:00'}} ▾</view>
+          </picker>
+        </view>
+      </view>
+      <view class="modal-actions">
+        <button class="btn-secondary modal-btn" bindtap="onCloseLedgerForm">取消</button>
+        <button class="btn-primary modal-btn" bindtap="onLedgerSubmit">{{ledgerFormMode==='add'?'添加':'保存'}}</button>
+      </view>
+    </view>
+  </view>
+
+  <!-- Schedule Form Modal -->
+  <view class="modal-mask" wx:if="{{showScheduleForm}}" bindtap="onCloseScheduleForm">
+    <view class="modal-body card" catchtap="">
+      <view class="modal-title">{{scheduleFormMode==='add'?'新增日程':'编辑日程'}}</view>
+      <view class="form-group">
+        <text class="form-label">内容</text>
+        <input class="form-input" placeholder="日程内容" value="{{sf_content}}" bindinput="onSfContent" />
+      </view>
+      <view class="form-group">
+        <text class="form-label">日期时间</text>
+        <view class="form-datetime">
+          <picker mode="date" value="{{sf_date}}" bindchange="onSfDate">
+            <view class="form-picker">{{sf_date || '选择日期'}} ▾</view>
+          </picker>
+          <picker mode="time" value="{{sf_time}}" bindchange="onSfTime">
+            <view class="form-picker">{{sf_time || '12:00'}} ▾</view>
+          </picker>
+        </view>
+      </view>
+      <view class="modal-actions">
+        <button class="btn-secondary modal-btn" bindtap="onCloseScheduleForm">取消</button>
+        <button class="btn-primary modal-btn" bindtap="onScheduleSubmit">{{scheduleFormMode==='add'?'添加':'保存'}}</button>
+      </view>
+    </view>
+  </view>
 </view>

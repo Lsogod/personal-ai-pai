@@ -1,5 +1,5 @@
 const { getToken } = require("../../utils/auth");
-const { fetchLedgers, fetchLedgerStats } = require("../../utils/http");
+const { fetchLedgers, fetchLedgerStats, createLedger, updateLedger, deleteLedger } = require("../../utils/http");
 
 function fmtSafe(iso) {
   return String(iso || "").replace(/-/g, "/").replace("T", " ").replace("Z", " +00:00");
@@ -11,13 +11,19 @@ function fmtDateTime(iso) {
   const pad = n => (n+"").padStart(2,"0");
   return pad(d.getMonth()+1)+"-"+pad(d.getDate())+" "+pad(d.getHours())+":"+pad(d.getMinutes());
 }
+function todayISO() {
+  const d = new Date();
+  const pad = n => (n+"").padStart(2,"0");
+  return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+"T"+pad(d.getHours())+":"+pad(d.getMinutes());
+}
 
-const CAT_CLR = {"\u9910\u996e":"#4F6EF7","\u4ea4\u901a":"#34D399","\u8d2d\u7269":"#F59E0B","\u5c45\u5bb6":"#8B5CF6","\u5a31\u4e50":"#EC4899","\u533b\u7597":"#EF4444","\u6559\u80b2":"#06B6D4","\u5176\u4ed6":"#94A3B8"};
+const CATS = ["餐饮","交通","购物","居家","娱乐","医疗","教育","其他"];
+const CAT_CLR = {"餐饮":"#4F6EF7","交通":"#34D399","购物":"#F59E0B","居家":"#8B5CF6","娱乐":"#EC4899","医疗":"#EF4444","教育":"#06B6D4","其他":"#94A3B8"};
 function catClr(c){return CAT_CLR[c]||"#94A3B8";}
 
 function buildCatStats(rows){
   const m={};let total=0;
-  for(const r of rows){const c=r.category||"\u5176\u4ed6",a=parseFloat(r.amount)||0;m[c]=(m[c]||0)+a;total+=a;}
+  for(const r of rows){const c=r.category||"其他",a=parseFloat(r.amount)||0;m[c]=(m[c]||0)+a;total+=a;}
   const entries=Object.entries(m).sort((a,b)=>b[1]-a[1]).map(([name,value])=>({
     name,value:Math.round(value*100)/100,
     percent:total>0?Math.round(value/total*1000)/10:0,
@@ -50,6 +56,10 @@ Page({
     catStats:{total:0,entries:[]},dailyTrend:[],
     avgDaily:0,maxDay:{label:"-",value:0},
     activeTab:"overview",
+    cats:CATS,
+    // form
+    showForm:false, formMode:"add", formId:null,
+    formAmount:"", formItem:"", formCategory:"其他", formDate:"",
   },
   onLoad(){this._dpr=wx.getWindowInfo().pixelRatio||2;},
   onShow(){
@@ -61,7 +71,7 @@ Page({
     this.setData({loading:true});
     try{
       const[stats,ledgers]=await Promise.all([fetchLedgerStats(30),fetchLedgers(100)]);
-      const rows=(Array.isArray(ledgers)?ledgers:[]).map(r=>({...r,_time:fmtDateTime(r.transaction_date)}));
+      const rows=(Array.isArray(ledgers)?ledgers:[]).map(r=>({...r,_time:fmtDateTime(r.transaction_date),_catClr:catClr(r.category)}));
       const catStats=buildCatStats(rows);
       const dailyTrend=buildDailyTrend(rows);
       const vals=dailyTrend.map(d=>d.value).filter(v=>v>0);
@@ -70,7 +80,7 @@ Page({
       this.setData({stats:stats||{total:0,count:0},ledgers:rows,catStats,dailyTrend,avgDaily,maxDay},()=>{
         if(this.data.activeTab==="overview"){this.drawPie();this.drawTrend();}
       });
-    }catch(err){wx.showToast({title:err.message||"\u52a0\u8f7d\u5931\u8d25",icon:"none"});}
+    }catch(err){wx.showToast({title:err.message||"加载失败",icon:"none"});}
     finally{this.setData({loading:false});}
   },
   onSwitchTab(e){
@@ -79,6 +89,70 @@ Page({
       if(tab==="overview")setTimeout(()=>{this.drawPie();this.drawTrend();},60);
     });
   },
+
+  /* ── Form ── */
+  onShowAdd(){
+    this.setData({showForm:true,formMode:"add",formId:null,formAmount:"",formItem:"",formCategory:"其他",formDate:todayISO()});
+  },
+  onShowEdit(e){
+    const item=e.currentTarget.dataset.item;
+    if(!item)return;
+    const rawDate=(item.transaction_date||"").replace("Z","").slice(0,16);
+    this.setData({showForm:true,formMode:"edit",formId:item.id,formAmount:String(item.amount||""),formItem:item.item||"",formCategory:item.category||"其他",formDate:rawDate||todayISO()});
+  },
+  onCloseForm(){this.setData({showForm:false});},
+  onFormAmount(e){this.setData({formAmount:e.detail.value});},
+  onFormItem(e){this.setData({formItem:e.detail.value});},
+  onFormCat(e){this.setData({formCategory:CATS[e.detail.value]||"其他"});},
+  onFormDate(e){this.setData({formDate:e.detail.value});},
+  onFormTime(e){
+    const cur=this.data.formDate||"";
+    const datePart=cur.slice(0,10)||todayISO().slice(0,10);
+    this.setData({formDate:datePart+"T"+e.detail.value});
+  },
+
+  async onFormSubmit(){
+    const amt=parseFloat(this.data.formAmount);
+    if(!amt||amt<=0){wx.showToast({title:"请输入金额",icon:"none"});return;}
+    const data={
+      amount:amt,
+      item:this.data.formItem||"手动记录",
+      category:this.data.formCategory||"其他",
+    };
+    if(this.data.formDate)data.transaction_date=this.data.formDate+":00Z";
+
+    try{
+      if(this.data.formMode==="add"){
+        await createLedger(data);
+        wx.showToast({title:"添加成功",icon:"success"});
+      }else{
+        await updateLedger(this.data.formId,data);
+        wx.showToast({title:"修改成功",icon:"success"});
+      }
+      this.setData({showForm:false});
+      this.loadData();
+    }catch(err){wx.showToast({title:err.message||"操作失败",icon:"none"});}
+  },
+
+  onDeleteLedger(e){
+    const item=e.currentTarget.dataset.item;
+    if(!item)return;
+    wx.showModal({
+      title:"确认删除",
+      content:"删除「"+(item.item||"账单")+"」¥"+item.amount+"？",
+      confirmColor:"#EF4444",
+      success:async(res)=>{
+        if(!res.confirm)return;
+        try{
+          await deleteLedger(item.id);
+          wx.showToast({title:"已删除",icon:"success"});
+          this.loadData();
+        }catch(err){wx.showToast({title:err.message||"删除失败",icon:"none"});}
+      }
+    });
+  },
+
+  /* ── Charts ── */
   drawPie(){
     this.createSelectorQuery().select("#pieCanvas").fields({node:true,size:true}).exec(res=>{
       if(!res||!res[0]||!res[0].node)return;
@@ -93,14 +167,14 @@ Page({
     if(!entries.length){
       ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.strokeStyle="#e5e7eb";ctx.lineWidth=2;ctx.stroke();
       ctx.fillStyle="#9ca3af";ctx.font="13px -apple-system,sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";
-      ctx.fillText("\u6682\u65e0\u6570\u636e",cx,cy);return;
+      ctx.fillText("暂无数据",cx,cy);return;
     }
     let a=-Math.PI/2;
     for(const e of entries){const sw=(e.value/total)*Math.PI*2;ctx.beginPath();ctx.moveTo(cx,cy);ctx.arc(cx,cy,r,a,a+sw);ctx.closePath();ctx.fillStyle=e.color;ctx.fill();a+=sw;}
     ctx.beginPath();ctx.arc(cx,cy,ir,0,Math.PI*2);ctx.fillStyle="#fff";ctx.fill();
     ctx.fillStyle="#111827";ctx.font="bold 17px -apple-system,sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";
-    ctx.fillText("\u00a5"+total,cx,cy-6);
-    ctx.fillStyle="#6b7280";ctx.font="11px -apple-system,sans-serif";ctx.fillText("\u603b\u652f\u51fa",cx,cy+12);
+    ctx.fillText("¥"+total,cx,cy-6);
+    ctx.fillStyle="#6b7280";ctx.font="11px -apple-system,sans-serif";ctx.fillText("总支出",cx,cy+12);
   },
   drawTrend(){
     this.createSelectorQuery().select("#trendCanvas").fields({node:true,size:true}).exec(res=>{
