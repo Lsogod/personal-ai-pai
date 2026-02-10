@@ -9,6 +9,10 @@ Page({
     wx.navigateTo({ url: "/pages/chat/index" });
   },
 
+  onOpenLedger() {
+    wx.switchTab({ url: "/pages/ledger/index" });
+  },
+
   onOpenCalendar() {
     wx.switchTab({ url: "/pages/calendar/index" });
   },

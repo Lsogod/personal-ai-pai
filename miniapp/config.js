@@ -12,14 +12,25 @@ const DEV_API_BASE_URL = local.DEV_API_BASE_URL || "http://127.0.0.1:8000";
 const TRIAL_API_BASE_URL = local.TRIAL_API_BASE_URL || DEV_API_BASE_URL;
 const PROD_API_BASE_URL = local.PROD_API_BASE_URL || "https://api.example.com";
 
-let envVersion = "develop";
-try {
-  if (typeof wx !== "undefined" && typeof wx.getAccountInfoSync === "function") {
-    envVersion = wx.getAccountInfoSync()?.miniProgram?.envVersion || "develop";
+function resolveEnvVersion() {
+  const override = String(local.ENV_VERSION || "").trim().toLowerCase();
+  if (override === "develop" || override === "trial" || override === "release") {
+    return override;
   }
-} catch (_) {
-  envVersion = "develop";
+  try {
+    // Avoid getAccountInfoSync() path in some devtools environments.
+    if (typeof __wxConfig !== "undefined" && __wxConfig && __wxConfig.envVersion) {
+      const runtimeEnv = String(__wxConfig.envVersion).toLowerCase();
+      if (runtimeEnv === "develop" || runtimeEnv === "trial" || runtimeEnv === "release") {
+        return runtimeEnv;
+      }
+    }
+  } catch (_) {
+    // ignore
+  }
+  return "develop";
 }
+const envVersion = resolveEnvVersion();
 
 module.exports = {
   // develop -> local, trial -> test/staging, release -> production

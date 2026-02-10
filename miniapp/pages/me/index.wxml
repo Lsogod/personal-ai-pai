@@ -1,12 +1,11 @@
 <view class="me-page">
   <view class="profile-shell" wx:if="{{authed && profile}}">
     <view class="profile-head">
-      <view class="avatar-circle">{{profile.ai_emoji || '🤖'}}</view>
+      <view class="avatar-circle">📋</view>
     </view>
     <view class="card profile-card">
-      <view class="name">{{profile.nickname || '主人'}}</view>
-      <view class="idline">{{profile.platform || 'web'}} · 引导阶段 {{profile.setup_stage}}</view>
-      <view class="ai-line">助手：{{profile.ai_name || 'PAI'}} {{profile.ai_emoji || ''}}</view>
+      <view class="name">{{profile.nickname || '用户'}}</view>
+      <view class="idline">{{profile.platform || 'miniapp'}} · 阶段 {{profile.setup_stage}}</view>
     </view>
   </view>
 

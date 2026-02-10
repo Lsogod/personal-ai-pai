@@ -259,6 +259,12 @@
   margin-top: 16rpx;
 }
 
+.assistant-caption {
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: #6b7280;
+}
+
 .stat-tag {
   font-size: 22rpx;
   color: #6b7280;
@@ -268,9 +274,75 @@
   font-weight: 500;
 }
 
+.task-board {
+  margin: 16rpx 24rpx 6rpx;
+  padding: 18rpx;
+  border-radius: 18rpx;
+  background: linear-gradient(180deg, #ffffff 0%, #f9fbff 100%);
+  border: 1rpx solid #e7ecf5;
+}
+
+.task-title {
+  font-size: 24rpx;
+  color: #334155;
+  font-weight: 700;
+  margin-bottom: 12rpx;
+}
+
+.task-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10rpx;
+}
+
+.task-card {
+  background: #f8fafc;
+  border: 1rpx solid #e2e8f0;
+  border-radius: 14rpx;
+  padding: 12rpx;
+}
+
+.task-card:active {
+  transform: scale(0.98);
+}
+
+.task-card-title {
+  font-size: 23rpx;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.task-card-desc {
+  margin-top: 4rpx;
+  font-size: 20rpx;
+  color: #64748b;
+  line-height: 1.35;
+}
+
+.task-suggest-row {
+  margin-top: 10rpx;
+  display: flex;
+  gap: 10rpx;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.task-suggest-chip {
+  display: inline-flex;
+  height: 44rpx;
+  padding: 0 14rpx;
+  align-items: center;
+  border-radius: 999rpx;
+  background: #eef2ff;
+  border: 1rpx solid #c7d2fe;
+  color: #3730a3;
+  font-size: 20rpx;
+  flex-shrink: 0;
+}
+
 /* Message List */
 .msg-list {
-  padding: 20rpx 32rpx;
+  padding: 16rpx 32rpx;
   padding-bottom: 200rpx;
 }
 
@@ -315,12 +387,14 @@
 }
 
 .avatar-default {
-  background: transparent;
+  background: #e5e7eb;
 }
 
-.avatar-default-icon {
-  width: 34rpx;
-  height: 34rpx;
+.avatar-text {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #6b7280;
+  line-height: 1;
 }
 
 .bubble {
@@ -340,7 +414,7 @@
   word-break: break-word;
 }
 
-.bubble-ai {
+.bubble-sys {
   background: #ffffff;
   border-radius: 8rpx 32rpx 32rpx 32rpx;
   color: #111827;

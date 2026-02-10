@@ -1,5 +1,5 @@
 {
-  "description": "PAI WeChat Mini Program Client",
+  "description": "Personal Efficiency Tool",
   "packOptions": {
     "ignore": [],
     "include": []
@@ -44,7 +44,7 @@
     "disableSWC": true
   },
   "compileType": "miniprogram",
-  "libVersion": "3.4.5",
+  "libVersion": "3.14.2",
   "appid": "touristappid",
   "projectname": "pai-miniapp",
   "condition": {},

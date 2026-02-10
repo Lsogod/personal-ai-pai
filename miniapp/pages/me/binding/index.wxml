@@ -1,7 +1,6 @@
 <view class="binding-page">
   <view class="card profile" wx:if="{{profile}}">
-    <view class="name">{{profile.ai_name}} {{profile.ai_emoji}}</view>
-    <view class="sub">主人：{{profile.nickname}}</view>
+    <view class="name">{{profile.nickname || '用户'}}</view>
     <view class="sub">平台：{{profile.platform}}</view>
   </view>
 

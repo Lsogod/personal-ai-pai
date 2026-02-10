@@ -106,7 +106,7 @@ Page({
     }
     this.closeSocket();
     this.setData({
-      profile: { ai_name: "PAI", ai_emoji: "" },
+      profile: { nickname: "用户" },
       stats: { total: 0, count: 0 },
       messages: [],
       sidebarOpen: false,
@@ -182,7 +182,7 @@ Page({
       const rows = await fetchConversations();
       const conversations = (rows || []).map((item) => ({
         id: item.id,
-        title: compactText(item.title || `会话 #${item.id}`, 22),
+        title: compactText(item.title || `记录 #${item.id}`, 22),
         summary: compactText(item.summary || "", 88),
         active: !!item.active,
         lastText: fmtDateTime(item.last_message_at || ""),
@@ -219,7 +219,7 @@ Page({
       this.setData({ sidebarOpen: false });
       await this.loadConversations();
       await this.loadInitial();
-      wx.showToast({ title: "已新建会话", icon: "none" });
+      wx.showToast({ title: "已新建记录", icon: "none" });
     } catch (err) {
       wx.showToast({ title: err.message || "新建失败", icon: "none" });
     }
@@ -239,7 +239,7 @@ Page({
       this.setData({ sidebarOpen: false });
       await this.loadConversations();
       await this.loadInitial();
-      wx.showToast({ title: "已切换会话", icon: "none" });
+      wx.showToast({ title: "已切换记录", icon: "none" });
     } catch (err) {
       wx.showToast({ title: err.message || "切换失败", icon: "none" });
     }
@@ -532,6 +532,13 @@ Page({
     this.setData({ inputText: raw });
   },
 
+  onUseTemplate(e) {
+    const text = String(e.currentTarget.dataset.template || "").trim();
+    if (!text) return;
+    this.setData({ inputText: text });
+    this.scrollToBottom();
+  },
+
   onConfirmSend() {
     this.onSend();
   },
@@ -592,7 +599,7 @@ Page({
       image_urls: selectedImagesSnapshot.map((x) => x.path)
     };
     this.appendMessages([userMsg]);
-    const payloadText = text || "请帮我识别这张图片";
+    const payloadText = text || "识别图片";
     this.queuePendingUserEcho(payloadText);
     this.queuePendingUserEcho(text || "[图片]");
 

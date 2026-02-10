@@ -2,7 +2,7 @@
   <view class="logo card">
     <view class="logo-mark">PAI</view>
     <view class="title">微信小程序客户端</view>
-    <view class="subtitle text-muted">登录后可与 Web/IM 端共享同一账号数据</view>
+    <view class="subtitle text-muted">登录后可多端同步数据</view>
   </view>
 
   <view class="form card">
@@ -17,7 +17,7 @@
     <button class="btn-primary login-btn" loading="{{loading}}" disabled="{{loading}}" bindtap="onLogin">
       微信一键登录
     </button>
-    <button class="btn-secondary guest-btn" bindtap="onBackHome">返回聊天页</button>
+    <button class="btn-secondary guest-btn" bindtap="onBackHome">返回首页</button>
 
     <view wx:if="{{error}}" class="error">{{error}}</view>
   </view>

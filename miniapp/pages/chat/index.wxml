@@ -4,7 +4,7 @@
     <view class="conv-header">
       <view class="conv-title-wrap">
         <image class="conv-title-icon" src="/assets/icons/chat.svg" mode="aspectFit" />
-        <text class="conv-title">会话目录</text>
+        <text class="conv-title">任务记录</text>
       </view>
       <view class="conv-add-btn" bindtap="onNewConversation">
         <text>新建</text>
@@ -12,7 +12,7 @@
     </view>
     <scroll-view class="conv-list" scroll-y="true">
       <view wx:if="{{loadingConversations}}" class="conv-empty">加载中...</view>
-      <view wx:elif="{{conversations.length === 0}}" class="conv-empty">暂无历史会话</view>
+      <view wx:elif="{{conversations.length === 0}}" class="conv-empty">暂无历史记录</view>
       <view
         wx:for="{{conversations}}"
         wx:key="id"
@@ -44,15 +44,18 @@
   <view class="header">
     <view class="header-main">
       <view class="ai-info">
-        <text class="ai-name fade-in" user-select="true">{{profile.ai_name || 'PAI Assistant'}} {{profile.ai_emoji || ''}}</text>
+        <text class="ai-name fade-in" user-select="true">任务面板</text>
         <view class="status-dot {{wsOpen ? 'online' : 'offline'}}"></view>
       </view>
       <view class="header-actions">
         <view class="conv-toggle-btn" bindtap="onToggleSidebar">
           <image class="conv-toggle-icon" src="/assets/icons/chat.svg" mode="aspectFit" />
-          <text>会话</text>
+          <text>记录</text>
         </view>
       </view>
+    </view>
+    <view class="assistant-caption" wx:if="{{profile}}">
+      <text>{{profile.nickname || '用户'}} · 个人效率工具</text>
     </view>
     <view class="stats-row" wx:if="{{authed}}">
       <view class="stat-tag">支出 ¥{{stats.total || 0}}</view>
@@ -60,6 +63,33 @@
     </view>
     <view class="guest-banner" wx:else bindtap="onGoLogin">
       <text user-select="true">未登录模式 · 点击同步数据</text>
+    </view>
+  </view>
+
+  <view class="task-board">
+    <view class="task-title">快捷操作</view>
+    <view class="task-grid">
+      <view class="task-card" data-template="今天午饭30元，分类餐饮" bindtap="onUseTemplate">
+        <view class="task-card-title">快速记账</view>
+        <view class="task-card-desc">例如：午饭30</view>
+      </view>
+      <view class="task-card" data-template="明天14:00提醒我开会" bindtap="onUseTemplate">
+        <view class="task-card-title">新增提醒</view>
+        <view class="task-card-desc">例如：30分钟后提醒我喝水</view>
+      </view>
+      <view class="task-card" data-template="查看今天账单" bindtap="onUseTemplate">
+        <view class="task-card-title">查询账单</view>
+        <view class="task-card-desc">按天/周/月汇总</view>
+      </view>
+      <view class="task-card" data-template="查看本周日程，按状态区分已完成和未完成" bindtap="onUseTemplate">
+        <view class="task-card-title">查询日程</view>
+        <view class="task-card-desc">待办 / 已完成 / 已取消</view>
+      </view>
+    </view>
+    <view class="task-suggest-row">
+      <view class="task-suggest-chip" data-template="识别这张支付截图并记账" bindtap="onUseTemplate">截图识别记账</view>
+      <view class="task-suggest-chip" data-template="今天是否有待办提醒" bindtap="onUseTemplate">检查待办</view>
+      <view class="task-suggest-chip" data-template="汇总最近账单" bindtap="onUseTemplate">账单汇总</view>
     </view>
   </view>
 
@@ -71,12 +101,11 @@
       class="msg-row {{item.role === 'user' ? 'right' : 'left'}}"
     >
       <view class="avatar" wx:if="{{item.role !== 'user'}}">
-         <view class="avatar-emoji" wx:if="{{profile && profile.ai_emoji}}">{{profile.ai_emoji}}</view>
-         <view class="avatar-default" wx:else>
-           <image class="avatar-default-icon" src="/assets/icons/bot.svg" mode="aspectFit" />
+         <view class="avatar-default">
+           <text class="avatar-text">P</text>
          </view>
       </view>
-      <view class="bubble {{item.role === 'user' ? 'bubble-user' : 'bubble-ai'}}">
+      <view class="bubble {{item.role === 'user' ? 'bubble-user' : 'bubble-sys'}}">
         <view wx:if="{{item.image_urls && item.image_urls.length > 0}}" class="bubble-images">
           <image
             wx:for="{{item.image_urls}}"
@@ -97,14 +126,13 @@
     </view>
     <view wx:if="{{pendingState}}" class="msg-row left msg-row-pending">
       <view class="avatar">
-        <view class="avatar-emoji" wx:if="{{profile && profile.ai_emoji}}">{{profile.ai_emoji}}</view>
-        <view class="avatar-default" wx:else>
-          <image class="avatar-default-icon" src="/assets/icons/bot.svg" mode="aspectFit" />
+        <view class="avatar-default">
+          <text class="avatar-text">P</text>
         </view>
       </view>
-      <view class="bubble bubble-ai bubble-pending">
+      <view class="bubble bubble-sys bubble-pending">
         <view class="typing-line">
-          <text class="typing-label">思考中</text>
+          <text class="typing-label">处理中</text>
           <view class="typing-dots">
             <text class="typing-dot dot-1">•</text>
             <text class="typing-dot dot-2">•</text>
@@ -137,7 +165,7 @@
       <view class="input-wrapper">
         <textarea
           class="input-box"
-          placeholder="输入消息..."
+          placeholder="输入指令，例如：午饭30；明天14:00提醒开会"
           placeholder-style="color: #9ca3af;"
           auto-height="true"
           maxlength="2000"
