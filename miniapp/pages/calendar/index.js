@@ -94,6 +94,7 @@ Page({
     calendarGrid: [], activeDate: "", activeDay: null,
     monthStats: { totalSpend:0,billCount:0,scheduleTotal:0,scheduleDone:0,schedulePending:0,doneRate:0,dailySpend:[] },
     cats: CATS,
+    expandedId: null,
     // Ledger form
     showLedgerForm: false, ledgerFormMode: "add", ledgerFormId: null,
     lf_amount: "", lf_item: "", lf_category: "其他", lf_date: "",
@@ -159,7 +160,11 @@ Page({
   onPickDay(e) {
     const date = e.currentTarget.dataset.date;
     if (!date) return;
-    this.setData({ activeDate: date, activeDay: this.data.days.find(d => d.date === date) || null });
+    this.setData({ activeDate: date, activeDay: this.data.days.find(d => d.date === date) || null, expandedId: null });
+  },
+  onToggleMore(e) {
+    const id = e.currentTarget.dataset.id;
+    this.setData({ expandedId: this.data.expandedId === id ? null : id });
   },
 
   /* ── Ledger CRUD ── */
@@ -171,7 +176,7 @@ Page({
   onShowEditLedger(e) {
     const item = e.currentTarget.dataset.item; if (!item) return;
     const raw = (item.transaction_date || "").replace("Z","").slice(0,16);
-    this.setData({ showLedgerForm: true, ledgerFormMode: "edit", ledgerFormId: item.id,
+    this.setData({ expandedId: null, showLedgerForm: true, ledgerFormMode: "edit", ledgerFormId: item.id,
       lf_amount: String(item.amount||""), lf_item: item.item||"", lf_category: item.category||"其他", lf_date: raw });
   },
   onCloseLedgerForm() { this.setData({ showLedgerForm: false }, () => { setTimeout(() => { this.drawSpendBar(); this.drawRateRing(); }, 60); }); },
@@ -194,6 +199,7 @@ Page({
   },
   onDeleteLedger(e) {
     const item = e.currentTarget.dataset.item; if (!item) return;
+    this.setData({ expandedId: null });
     wx.showModal({ title: "确认删除", content: `删除「${item.item||"账单"}」¥${item.amount}？`, confirmColor: "#EF4444",
       success: async (res) => { if (!res.confirm) return;
         try { await deleteLedger(item.id); wx.showToast({ title: "已删除", icon: "success" }); this.loadMonth(); }
@@ -211,7 +217,7 @@ Page({
   onShowEditSchedule(e) {
     const item = e.currentTarget.dataset.item; if (!item) return;
     const raw = (item.trigger_time || "").replace("Z","");
-    this.setData({ showScheduleForm: true, scheduleFormMode: "edit", scheduleFormId: item.id,
+    this.setData({ expandedId: null, showScheduleForm: true, scheduleFormMode: "edit", scheduleFormId: item.id,
       sf_content: item.content||"", sf_date: raw.slice(0,10), sf_time: raw.slice(11,16)||"12:00" });
   },
   onCloseScheduleForm() { this.setData({ showScheduleForm: false }, () => { setTimeout(() => { this.drawSpendBar(); this.drawRateRing(); }, 60); }); },
@@ -231,6 +237,7 @@ Page({
   },
   onDeleteSchedule(e) {
     const item = e.currentTarget.dataset.item; if (!item) return;
+    this.setData({ expandedId: null });
     wx.showModal({ title: "确认删除", content: `删除日程「${item.content||""}」？`, confirmColor: "#EF4444",
       success: async (res) => { if (!res.confirm) return;
         try { await deleteSchedule(item.id); wx.showToast({ title: "已删除", icon: "success" }); this.loadMonth(); }

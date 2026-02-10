@@ -83,12 +83,19 @@
           <view class="bill-bottom">
             <text class="bill-meta">{{item._time}}</text>
             <text class="bill-tag">{{item.category || '未分类'}}</text>
-            <view class="bill-actions">
-              <view class="bill-action-btn edit-btn" data-item="{{item}}" bindtap="onShowEdit">
-                <image class="action-icon" src="/assets/icons/ic-edit.svg" mode="aspectFit" />
+            <view class="more-wrap">
+              <view class="more-btn" data-id="{{item.id}}" catchtap="onToggleMore">
+                <image class="more-icon" src="/assets/icons/ic-more.svg" mode="aspectFit" />
               </view>
-              <view class="bill-action-btn del-btn" data-item="{{item}}" bindtap="onDeleteLedger">
-                <image class="action-icon" src="/assets/icons/ic-delete.svg" mode="aspectFit" />
+              <view class="pop-menu" wx:if="{{expandedId === item.id}}">
+                <view class="pop-item" data-item="{{item}}" catchtap="onShowEdit">
+                  <image class="action-icon" src="/assets/icons/ic-edit.svg" mode="aspectFit" />
+                  <text>编辑</text>
+                </view>
+                <view class="pop-item pop-danger" data-item="{{item}}" catchtap="onDeleteLedger">
+                  <image class="action-icon" src="/assets/icons/ic-delete.svg" mode="aspectFit" />
+                  <text>删除</text>
+                </view>
               </view>
             </view>
           </view>

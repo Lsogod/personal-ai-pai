@@ -57,6 +57,7 @@ Page({
     avgDaily:0,maxDay:{label:"-",value:0},
     activeTab:"overview",
     cats:CATS,
+    expandedId:null,
     // form
     showForm:false, formMode:"add", formId:null,
     formAmount:"", formItem:"", formCategory:"其他", formDate:"",
@@ -83,6 +84,10 @@ Page({
     }catch(err){wx.showToast({title:err.message||"加载失败",icon:"none"});}
     finally{this.setData({loading:false});}
   },
+  onToggleMore(e){
+    const id=e.currentTarget.dataset.id;
+    this.setData({expandedId:this.data.expandedId===id?null:id});
+  },
   onSwitchTab(e){
     const tab=e.currentTarget.dataset.tab;
     this.setData({activeTab:tab},()=>{
@@ -98,7 +103,7 @@ Page({
     const item=e.currentTarget.dataset.item;
     if(!item)return;
     const rawDate=(item.transaction_date||"").replace("Z","").slice(0,16);
-    this.setData({showForm:true,formMode:"edit",formId:item.id,formAmount:String(item.amount||""),formItem:item.item||"",formCategory:item.category||"其他",formDate:rawDate||todayISO()});
+    this.setData({expandedId:null,showForm:true,formMode:"edit",formId:item.id,formAmount:String(item.amount||""),formItem:item.item||"",formCategory:item.category||"其他",formDate:rawDate||todayISO()});
   },
   onCloseForm(){this.setData({showForm:false},()=>{if(this.data.activeTab==="overview")setTimeout(()=>{this.drawPie();this.drawTrend();},60);});},
   onFormAmount(e){this.setData({formAmount:e.detail.value});},
@@ -137,6 +142,7 @@ Page({
   onDeleteLedger(e){
     const item=e.currentTarget.dataset.item;
     if(!item)return;
+    this.setData({expandedId:null});
     wx.showModal({
       title:"确认删除",
       content:"删除「"+(item.item||"账单")+"」¥"+item.amount+"？",

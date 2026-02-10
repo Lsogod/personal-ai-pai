@@ -113,16 +113,29 @@
 .detail-content.done-text { text-decoration: line-through; color: var(--c-text-3); }
 .detail-time { margin-top: 4rpx; font-size: 22rpx; color: var(--c-text-3); display: block; }
 .detail-amount { font-size: 26rpx; font-weight: 700; color: var(--c-primary); white-space: nowrap; }
-.detail-actions { display: flex; gap: 8rpx; flex-shrink: 0; align-items: center; }
-.act-btn {
-  width: 48rpx; height: 48rpx; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  transition: opacity 0.15s;
+.more-wrap { position: relative; flex-shrink: 0; }
+.more-btn {
+  width: 48rpx; height: 48rpx; display: flex;
+  align-items: center; justify-content: center;
+  border-radius: 50%; transition: background 0.15s;
 }
+.more-btn:active { background: var(--c-border-light); }
+.more-icon { width: 28rpx; height: 28rpx; }
+.pop-menu {
+  position: absolute; right: 0; top: 52rpx; z-index: 50;
+  background: var(--c-surface); border-radius: var(--r-lg);
+  box-shadow: 0 8rpx 32rpx rgba(0,0,0,0.12);
+  border: 1rpx solid var(--c-border-light);
+  overflow: hidden; min-width: 180rpx;
+}
+.pop-item {
+  display: flex; align-items: center; gap: 12rpx;
+  padding: 18rpx 24rpx; font-size: 24rpx; font-weight: 500;
+  color: var(--c-text); white-space: nowrap;
+}
+.pop-item:active { background: var(--c-bg); }
+.pop-danger { color: #EF4444; }
 .action-icon { width: 28rpx; height: 28rpx; }
-.act-edit { background: var(--c-primary-light); }
-.act-del { background: #FEE2E2; }
-.act-btn:active { opacity: 0.6; }
 
 .detail-status {
   font-size: 20rpx; font-weight: 600; border-radius: var(--r-full);
