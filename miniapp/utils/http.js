@@ -29,7 +29,7 @@ function request(path, options = {}) {
       url: `${config.API_BASE_URL}${path}`,
       method: options.method || "GET",
       data: options.data || undefined,
-      timeout: 20000,
+      timeout: options.timeout || 15000,
       header: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),

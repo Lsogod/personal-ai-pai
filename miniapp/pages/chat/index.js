@@ -266,22 +266,22 @@ Page({
   },
 
   appendMessages(rows) {
-    const next = [...this.data.messages];
+    const newMsgs = [];
     let hasAssistant = false;
     for (const row of rows) {
       const msg = normalizeMessage(row);
-      if (msg.role === "assistant") {
-        hasAssistant = true;
-      }
+      if (msg.role === "assistant") hasAssistant = true;
       const key = this.messageKey(msg);
       if (this._seenKeys.has(key)) continue;
       this._seenKeys.add(key);
-      next.push(msg);
+      newMsgs.push(msg);
     }
-    if (hasAssistant) {
-      this.clearPendingByAssistantSignal();
-    }
-    this.setData({ messages: next }, () => this.scrollToBottom());
+    if (!newMsgs.length) return;
+    if (hasAssistant) this.clearPendingByAssistantSignal();
+    const base = this.data.messages.length;
+    const patch = {};
+    newMsgs.forEach((m, i) => { patch[`messages[${base + i}]`] = m; });
+    this.setData(patch, () => this.scrollToBottom());
   },
 
   clearPendingByAssistantSignal() {
@@ -339,8 +339,7 @@ Page({
       display_content: "",
       content_nodes: markdownToRichNodes(""),
     };
-    const next = [...this.data.messages, placeholder];
-    this.setData({ messages: next }, () => this.scrollToBottom());
+    this.setData({ [`messages[${index}]`]: placeholder }, () => this.scrollToBottom());
 
     this._streamQueue.push({ index, fullText: raw });
     this.runStreamQueue();
@@ -357,25 +356,18 @@ Page({
     const tick = () => {
       cursor = Math.min(fullText.length, cursor + step);
       const partial = fullText.slice(0, cursor);
-      const rows = [...this.data.messages];
-      const row = rows[current.index];
-      if (!row) {
+      const path = `messages[${current.index}]`;
+      this.setData({
+        [`${path}.display_content`]: partial,
+        [`${path}.content_nodes`]: markdownToRichNodes(partial),
+      });
+      if (cursor < fullText.length) {
+        this._streamTimer = setTimeout(tick, 18);
+      } else {
         this._streaming = false;
+        this.scrollToBottom();
         this.runStreamQueue();
-        return;
       }
-      rows[current.index] = {
-        ...row,
-        display_content: partial,
-        content_nodes: markdownToRichNodes(partial),
-      };
-      this.setData({ messages: rows }, () => this.scrollToBottom());
-      if (cursor >= fullText.length) {
-        this._streaming = false;
-        this.runStreamQueue();
-        return;
-      }
-      this._streamTimer = setTimeout(tick, 18);
     };
 
     tick();
@@ -410,7 +402,7 @@ Page({
 
   scrollToBottom(immediate = false) {
     this.clearScrollRetry();
-    const delays = immediate ? [0, 50, 200, 500] : [0, 100, 300];
+    const delays = immediate ? [0, 150, 500] : [50, 300];
     this._scrollTimers = delays.map((delay) =>
       setTimeout(() => {
         wx.pageScrollTo({ scrollTop: 999999, duration: 0 });
@@ -458,10 +450,18 @@ Page({
         this._pingTimer = null;
       }
       this._wsTask = null;
+      // 自动重连（3秒后），避免网络波动导致断连
+      if (this.data.authed && !this._wsReconnectTimer) {
+        this._wsReconnectTimer = setTimeout(() => {
+          this._wsReconnectTimer = null;
+          if (this.data.authed && !this._wsTask) this.connectSocket();
+        }, 3000);
+      }
     });
 
     task.onError(() => {
       this.setData({ wsOpen: false });
+      this._wsTask = null;
     });
 
     task.onMessage((evt) => {
@@ -501,6 +501,10 @@ Page({
   },
 
   closeSocket() {
+    if (this._wsReconnectTimer) {
+      clearTimeout(this._wsReconnectTimer);
+      this._wsReconnectTimer = null;
+    }
     if (this._pingTimer) {
       clearInterval(this._pingTimer);
       this._pingTimer = null;

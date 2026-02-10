@@ -64,9 +64,14 @@ Page({
   },
   onLoad(){this._dpr=wx.getWindowInfo().pixelRatio||2;},
   onShow(){
-    const authed=!!getToken();this.setData({authed});
-    if(!authed){this.setData({stats:{total:0,count:0},ledgers:[],catStats:{total:0,entries:[]},dailyTrend:[]});return;}
-    this.loadData();
+    const authed=!!getToken();
+    if(!authed){
+      this.setData({authed:false,stats:{total:0,count:0},ledgers:[],catStats:{total:0,entries:[]},dailyTrend:[]});
+      return;
+    }
+    this.setData({authed:true});
+    // 有缓存数据时不重复加载，CRUD 操作后会主动调 loadData
+    if(!this._loaded) this.loadData();
   },
   async loadData(){
     this.setData({loading:true});
@@ -82,7 +87,7 @@ Page({
         if(this.data.activeTab==="overview"){this.drawPie();this.drawTrend();}
       });
     }catch(err){wx.showToast({title:err.message||"加载失败",icon:"none"});}
-    finally{this.setData({loading:false});}
+    finally{this.setData({loading:false});this._loaded=true;}
   },
   onToggleMore(e){
     const id=e.currentTarget.dataset.id;

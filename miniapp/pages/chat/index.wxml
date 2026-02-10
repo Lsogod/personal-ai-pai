@@ -97,7 +97,7 @@
   <view class="log-list">
     <view
       wx:for="{{messages}}"
-      wx:key="index"
+      wx:key="created_at"
       id="msg-{{index}}"
       class="log-entry"
     >

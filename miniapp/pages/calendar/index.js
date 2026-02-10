@@ -112,7 +112,7 @@ Page({
     const authed = !!getToken();
     const year = this._cursor.getFullYear(), month = this._cursor.getMonth() + 1;
     this.setData({ authed, monthLabel: `${year}年${month}月` });
-    if (!authed) { this.setData({ days: [], activeDate: "", activeDay: null }); return; }
+    if (!authed) { this.setData({ days: [], calendarGrid: [], activeDate: "", activeDay: null }); return; }
     this.loadMonth();
   },
 
@@ -147,14 +147,10 @@ Page({
 
   onPrevMonth() {
     this._cursor = new Date(this._cursor.getFullYear(), this._cursor.getMonth() - 1, 1);
-    const y = this._cursor.getFullYear(), m = this._cursor.getMonth() + 1;
-    this.setData({ monthLabel: `${y}年${m}月` });
     if (this.data.authed) this.loadMonth();
   },
   onNextMonth() {
     this._cursor = new Date(this._cursor.getFullYear(), this._cursor.getMonth() + 1, 1);
-    const y = this._cursor.getFullYear(), m = this._cursor.getMonth() + 1;
-    this.setData({ monthLabel: `${y}年${m}月` });
     if (this.data.authed) this.loadMonth();
   },
   onPickDay(e) {
