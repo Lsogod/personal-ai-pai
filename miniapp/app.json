@@ -30,6 +30,12 @@
         "selectedIconPath": "assets/icons/tab-chat-active.png"
       },
       {
+        "pagePath": "pages/chat/index",
+        "text": "指令",
+        "iconPath": "assets/icons/tab-ledger.png",
+        "selectedIconPath": "assets/icons/tab-ledger-active.png"
+      },
+      {
         "pagePath": "pages/ledger/index",
         "text": "账单",
         "iconPath": "assets/icons/tab-ledger.png",

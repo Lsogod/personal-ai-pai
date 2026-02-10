@@ -102,6 +102,13 @@ Page({
       this.loadConversations();
       this.connectSocket();
       this.scrollToBottom(true);
+      // 从首页快捷指令跳转过来
+      const app = getApp();
+      if (app.globalData.pendingCmd) {
+        const cmd = app.globalData.pendingCmd;
+        app.globalData.pendingCmd = "";
+        this.setData({ inputText: cmd });
+      }
       return;
     }
     this.closeSocket();

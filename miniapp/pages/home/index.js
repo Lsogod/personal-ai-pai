@@ -5,8 +5,15 @@ Page({
     authed: false
   },
 
-  onOpenChat() {
-    wx.navigateTo({ url: "/pages/chat/index" });
+  onOpenCommand() {
+    wx.switchTab({ url: "/pages/chat/index" });
+  },
+
+  onQuickCmd(e) {
+    const cmd = e.currentTarget.dataset.cmd || "";
+    // 存到 globalData 让 chat 页读取
+    getApp().globalData.pendingCmd = cmd;
+    wx.switchTab({ url: "/pages/chat/index" });
   },
 
   onOpenLedger() {

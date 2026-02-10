@@ -136,6 +136,65 @@
   line-height: 1.5;
 }
 
+/* 快捷指令列表 */
+.cmd-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.cmd-item {
+  display: flex;
+  align-items: center;
+  padding: 24rpx 28rpx;
+  gap: 20rpx;
+}
+
+.cmd-item:active {
+  opacity: 0.85;
+  transform: scale(0.99);
+}
+
+.cmd-icon {
+  font-size: 36rpx;
+  width: 56rpx;
+  height: 56rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f3f4f6;
+  border-radius: 14rpx;
+  flex-shrink: 0;
+}
+
+.cmd-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+  min-width: 0;
+}
+
+.cmd-label {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.cmd-example {
+  font-size: 22rpx;
+  color: #9ca3af;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmd-arrow {
+  font-size: 36rpx;
+  color: #d1d5db;
+  flex-shrink: 0;
+}
+
 .footer {
   margin-top: auto;
   padding: 32rpx 0 16rpx;

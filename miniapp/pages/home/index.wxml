@@ -8,10 +8,10 @@
   <view class="hero card">
     <view class="hero-content">
       <view class="title">你的个人效率工具</view>
-      <view class="subtitle">记账、日程管理与数据同步，帮助你更高效地管理每天任务。</view>
+      <view class="subtitle">输入指令即可记账、管理日程、查询数据，一句话搞定。</view>
       <view class="actions">
-        <button class="btn-primary action-main" bindtap="onOpenLedger">
-          <text>{{authed ? '查看账单' : '开始使用'}}</text>
+        <button class="btn-primary action-main" bindtap="onOpenCommand">
+          <text>打开指令面板</text>
         </button>
         <button class="btn-secondary action-sub" bindtap="onOpenCalendar">
           <text>日程管理</text>
@@ -22,7 +22,47 @@
 
   <view class="section">
     <view class="section-header">
-      <view class="section-title">核心能力</view>
+      <view class="section-title">快捷指令</view>
+    </view>
+    <view class="cmd-list">
+      <view class="cmd-item card" data-cmd="今天午饭30元，分类餐饮" bindtap="onQuickCmd">
+        <text class="cmd-icon">¥</text>
+        <view class="cmd-body">
+          <text class="cmd-label">快速记账</text>
+          <text class="cmd-example">"午饭30" → 自动记录并归类</text>
+        </view>
+        <text class="cmd-arrow">›</text>
+      </view>
+      <view class="cmd-item card" data-cmd="明天14:00提醒我开会" bindtap="onQuickCmd">
+        <text class="cmd-icon">📅</text>
+        <view class="cmd-body">
+          <text class="cmd-label">创建提醒</text>
+          <text class="cmd-example">"明天14:00开会" → 准时推送</text>
+        </view>
+        <text class="cmd-arrow">›</text>
+      </view>
+      <view class="cmd-item card" data-cmd="查看本周账单" bindtap="onQuickCmd">
+        <text class="cmd-icon">📊</text>
+        <view class="cmd-body">
+          <text class="cmd-label">数据查询</text>
+          <text class="cmd-example">"本周账单" → 分类汇总</text>
+        </view>
+        <text class="cmd-arrow">›</text>
+      </view>
+      <view class="cmd-item card" data-cmd="识别这张支付截图并记账" bindtap="onQuickCmd">
+        <text class="cmd-icon">📷</text>
+        <view class="cmd-body">
+          <text class="cmd-label">截图记账</text>
+          <text class="cmd-example">上传截图 → 自动提取金额</text>
+        </view>
+        <text class="cmd-arrow">›</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-header">
+      <view class="section-title">支持的能力</view>
     </view>
     <view class="grid">
       <view class="grid-item card">

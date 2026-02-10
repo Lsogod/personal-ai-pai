@@ -44,7 +44,7 @@
   <view class="header">
     <view class="header-main">
       <view class="ai-info">
-        <text class="ai-name fade-in" user-select="true">任务面板</text>
+        <text class="ai-name fade-in" user-select="true">指令面板</text>
         <view class="status-dot {{wsOpen ? 'online' : 'offline'}}"></view>
       </view>
       <view class="header-actions">
@@ -55,7 +55,7 @@
       </view>
     </view>
     <view class="assistant-caption" wx:if="{{profile}}">
-      <text>{{profile.nickname || '用户'}} · 个人效率工具</text>
+      <text>输入指令 · 自动执行</text>
     </view>
     <view class="stats-row" wx:if="{{authed}}">
       <view class="stat-tag">支出 ¥{{stats.total || 0}}</view>
@@ -67,29 +67,29 @@
   </view>
 
   <view class="task-board">
-    <view class="task-title">快捷操作</view>
+    <view class="task-title">常用指令</view>
     <view class="task-grid">
       <view class="task-card" data-template="今天午饭30元，分类餐饮" bindtap="onUseTemplate">
-        <view class="task-card-title">快速记账</view>
-        <view class="task-card-desc">例如：午饭30</view>
+        <view class="task-card-title">📝 记账</view>
+        <view class="task-card-desc">午饭30 → 自动记录</view>
       </view>
       <view class="task-card" data-template="明天14:00提醒我开会" bindtap="onUseTemplate">
-        <view class="task-card-title">新增提醒</view>
-        <view class="task-card-desc">例如：30分钟后提醒我喝水</view>
+        <view class="task-card-title">⏰ 提醒</view>
+        <view class="task-card-desc">明天14:00开会</view>
       </view>
-      <view class="task-card" data-template="查看今天账单" bindtap="onUseTemplate">
-        <view class="task-card-title">查询账单</view>
-        <view class="task-card-desc">按天/周/月汇总</view>
+      <view class="task-card" data-template="查看本周账单" bindtap="onUseTemplate">
+        <view class="task-card-title">📊 查询</view>
+        <view class="task-card-desc">本周账单汇总</view>
       </view>
-      <view class="task-card" data-template="查看本周日程，按状态区分已完成和未完成" bindtap="onUseTemplate">
-        <view class="task-card-title">查询日程</view>
-        <view class="task-card-desc">待办 / 已完成 / 已取消</view>
+      <view class="task-card" data-template="查看本周日程" bindtap="onUseTemplate">
+        <view class="task-card-title">📋 日程</view>
+        <view class="task-card-desc">待办与已完成</view>
       </view>
     </view>
     <view class="task-suggest-row">
-      <view class="task-suggest-chip" data-template="识别这张支付截图并记账" bindtap="onUseTemplate">截图识别记账</view>
-      <view class="task-suggest-chip" data-template="今天是否有待办提醒" bindtap="onUseTemplate">检查待办</view>
-      <view class="task-suggest-chip" data-template="汇总最近账单" bindtap="onUseTemplate">账单汇总</view>
+      <view class="task-suggest-chip" data-template="识别这张截图并记账" bindtap="onUseTemplate">📷 截图记账</view>
+      <view class="task-suggest-chip" data-template="今天有什么待办" bindtap="onUseTemplate">📌 检查待办</view>
+      <view class="task-suggest-chip" data-template="最近30天消费汇总" bindtap="onUseTemplate">📈 月度汇总</view>
     </view>
   </view>
 
@@ -106,6 +106,7 @@
          </view>
       </view>
       <view class="bubble {{item.role === 'user' ? 'bubble-user' : 'bubble-sys'}}">
+        <view wx:if="{{item.role !== 'user'}}" class="bubble-label">执行结果</view>
         <view wx:if="{{item.image_urls && item.image_urls.length > 0}}" class="bubble-images">
           <image
             wx:for="{{item.image_urls}}"
@@ -165,7 +166,7 @@
       <view class="input-wrapper">
         <textarea
           class="input-box"
-          placeholder="输入指令，例如：午饭30；明天14:00提醒开会"
+          placeholder="输入指令：记账、提醒、查询..."
           placeholder-style="color: #9ca3af;"
           auto-height="true"
           maxlength="2000"
