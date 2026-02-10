@@ -1,13 +1,13 @@
 <view class="login-page">
-  <view class="logo card">
-    <view class="logo-mark">PAI</view>
-    <view class="title">微信小程序客户端</view>
-    <view class="subtitle text-muted">登录后可多端同步数据</view>
+  <view class="brand">
+    <view class="logo-box">PAI</view>
+    <view class="brand-title">微信小程序客户端</view>
+    <view class="brand-sub">登录后可多端同步数据</view>
   </view>
 
-  <view class="form card">
+  <view class="card form-card">
     <input
-      class="input"
+      class="nick-input"
       placeholder="可选昵称（首次登录会写入）"
       value="{{nickname}}"
       maxlength="20"
@@ -17,8 +17,8 @@
     <button class="btn-primary login-btn" loading="{{loading}}" disabled="{{loading}}" bindtap="onLogin">
       微信一键登录
     </button>
-    <button class="btn-secondary guest-btn" bindtap="onBackHome">返回首页</button>
+    <button class="btn-secondary back-btn" bindtap="onBackHome">返回首页</button>
 
-    <view wx:if="{{error}}" class="error">{{error}}</view>
+    <view wx:if="{{error}}" class="error-box">{{error}}</view>
   </view>
 </view>

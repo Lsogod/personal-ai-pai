@@ -1,31 +1,90 @@
-<view class="ledger-page">
-  <view class="guest card" wx:if="{{!authed}}">
-    <view class="guest-title">未登录状态</view>
-    <view class="guest-text">登录后查看你的账单明细、时间与分类统计。</view>
-    <button class="btn-primary guest-btn" bindtap="onGoLogin">微信登录查看账单</button>
+<view class="ledger-page safe-bottom">
+  <!-- Guest -->
+  <view class="guest-card card" wx:if="{{!authed}}">
+    <view class="guest-icon">💳</view>
+    <view class="guest-title">登录查看账单</view>
+    <view class="guest-desc">登录后查看账单明细、分类统计与趋势分析。</view>
+    <button class="btn-primary guest-btn" bindtap="onGoLogin">微信登录</button>
   </view>
 
   <block wx:if="{{authed}}">
-    <view class="summary card">
-      <view class="title">近30天概览</view>
-      <view class="chips">
-        <view class="chip">总支出 ¥{{stats.total || 0}}</view>
-        <view class="chip">记录 {{stats.count || 0}} 笔</view>
-      </view>
+    <!-- Tab Switch -->
+    <view class="tab-bar">
+      <view class="tab-item {{activeTab==='overview'?'active':''}}" data-tab="overview" bindtap="onSwitchTab">概览</view>
+      <view class="tab-item {{activeTab==='list'?'active':''}}" data-tab="list" bindtap="onSwitchTab">明细</view>
     </view>
 
-    <scroll-view class="list" scroll-y="true">
-      <view class="empty card" wx:if="{{ledgers.length === 0}}">暂无账单</view>
-      <view class="item card" wx:for="{{ledgers}}" wx:key="id">
-        <view class="row top">
-          <text class="item-title">{{item.item || '未命名账单'}}</text>
-          <text class="amount">¥{{item.amount}}</text>
+    <!-- Overview Tab -->
+    <block wx:if="{{activeTab==='overview'}}">
+      <!-- Summary Card -->
+      <view class="summary-card">
+        <view class="summary-head">
+          <text class="summary-label">近30天概览</text>
         </view>
-        <view class="row bottom">
-          <text class="meta">{{item._time}}</text>
-          <text class="meta">{{item.category || '未分类'}} · {{item.currency}}</text>
+        <view class="summary-row">
+          <view class="summary-metric">
+            <text class="metric-value">¥{{stats.total || 0}}</text>
+            <text class="metric-label">总支出</text>
+          </view>
+          <view class="summary-divider"></view>
+          <view class="summary-metric">
+            <text class="metric-value">{{stats.count || 0}}</text>
+            <text class="metric-label">笔记录</text>
+          </view>
+          <view class="summary-divider"></view>
+          <view class="summary-metric">
+            <text class="metric-value">¥{{avgDaily}}</text>
+            <text class="metric-label">日均</text>
+          </view>
         </view>
       </view>
-    </scroll-view>
+
+      <!-- Category Donut -->
+      <view class="chart-card card">
+        <view class="chart-title">分类占比</view>
+        <view class="pie-wrap">
+          <canvas id="pieCanvas" type="2d" class="pie-canvas"></canvas>
+          <view class="cat-legend">
+            <view class="cat-row" wx:for="{{catStats.entries}}" wx:key="name">
+              <view class="cat-dot" style="background:{{item.color}}"></view>
+              <text class="cat-name">{{item.name}}</text>
+              <text class="cat-pct">{{item.percent}}%</text>
+              <text class="cat-val">¥{{item.value}}</text>
+            </view>
+            <view wx:if="{{catStats.entries.length===0}}" class="cat-empty">暂无分类数据</view>
+          </view>
+        </view>
+      </view>
+
+      <!-- Daily Trend -->
+      <view class="chart-card card">
+        <view class="chart-head">
+          <text class="chart-title">近14天趋势</text>
+          <text class="chart-sub" wx:if="{{maxDay.value>0}}">峰值 {{maxDay.label}} ¥{{maxDay.value}}</text>
+        </view>
+        <canvas id="trendCanvas" type="2d" class="trend-canvas"></canvas>
+      </view>
+    </block>
+
+    <!-- List Tab -->
+    <block wx:if="{{activeTab==='list'}}">
+      <scroll-view class="bill-list" scroll-y="true">
+        <view class="empty-state" wx:if="{{ledgers.length === 0}}">
+          <text class="empty-icon">📄</text>
+          <text class="empty-text">暂无账单</text>
+        </view>
+        <view class="bill-item card" wx:for="{{ledgers}}" wx:key="id">
+          <view class="bill-top">
+            <view class="bill-cat-dot" style="background:{{item.category ? '' : '#94A3B8'}}; background:{{item.category}}"></view>
+            <text class="bill-name">{{item.item || '未命名'}}</text>
+            <text class="bill-amount">¥{{item.amount}}</text>
+          </view>
+          <view class="bill-bottom">
+            <text class="bill-meta">{{item._time}}</text>
+            <text class="bill-tag">{{item.category || '未分类'}}</text>
+          </view>
+        </view>
+      </scroll-view>
+    </block>
   </block>
 </view>

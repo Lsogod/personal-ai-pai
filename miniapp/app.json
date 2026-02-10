@@ -26,14 +26,14 @@
       {
         "pagePath": "pages/home/index",
         "text": "首页",
-        "iconPath": "assets/icons/tab-chat.png",
-        "selectedIconPath": "assets/icons/tab-chat-active.png"
+        "iconPath": "assets/icons/tab-home.png",
+        "selectedIconPath": "assets/icons/tab-home-active.png"
       },
       {
         "pagePath": "pages/chat/index",
         "text": "指令",
-        "iconPath": "assets/icons/tab-ledger.png",
-        "selectedIconPath": "assets/icons/tab-ledger-active.png"
+        "iconPath": "assets/icons/tab-cmd.png",
+        "selectedIconPath": "assets/icons/tab-cmd-active.png"
       },
       {
         "pagePath": "pages/ledger/index",
