@@ -12,9 +12,16 @@ const {
 const { pickImages } = require("../../utils/image");
 const { markdownToRichNodes } = require("../../utils/markdown");
 
+/**
+ * 解析 ISO 时间字符串并返回本地 HH:MM。
+ * 兼容微信小程序 JS 引擎：手动处理带 "Z" 后缀的 UTC 时间，
+ * 避免某些环境下 new Date("...Z") 不能正确转本地时区的问题。
+ */
 function fmtTime(isoText) {
   if (!isoText) return "";
-  const dt = new Date(isoText);
+  // 统一替换 iOS 不兼容的 "-" (Safari / 小程序引擎)
+  const safe = String(isoText).replace(/-/g, "/").replace("T", " ").replace("Z", " +00:00");
+  const dt = new Date(safe);
   if (Number.isNaN(dt.getTime())) return "";
   const hh = `${dt.getHours()}`.padStart(2, "0");
   const mm = `${dt.getMinutes()}`.padStart(2, "0");
@@ -27,7 +34,8 @@ function nowIso() {
 
 function fmtDateTime(isoText) {
   if (!isoText) return "";
-  const dt = new Date(isoText);
+  const safe = String(isoText).replace(/-/g, "/").replace("T", " ").replace("Z", " +00:00");
+  const dt = new Date(safe);
   if (Number.isNaN(dt.getTime())) return "";
   const mm = `${dt.getMonth() + 1}`.padStart(2, "0");
   const dd = `${dt.getDate()}`.padStart(2, "0");
@@ -56,6 +64,7 @@ function normalizeMessage(item) {
     display_content: content,
     content_nodes: role === "assistant" ? markdownToRichNodes(content) : "",
     created_at: item.created_at || nowIso(),
+    timeText: fmtTime(item.created_at || nowIso()),
     image_urls: Array.isArray(item.image_urls) ? item.image_urls : []
   };
 }
@@ -113,7 +122,7 @@ Page({
     }
     this.closeSocket();
     this.setData({
-      profile: { nickname: "用户" },
+      profile: { ai_name: "PAI", ai_emoji: "" },
       stats: { total: 0, count: 0 },
       messages: [],
       sidebarOpen: false,

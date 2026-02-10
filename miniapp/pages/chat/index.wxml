@@ -93,55 +93,73 @@
     </view>
   </view>
 
-  <view class="msg-list">
+  <view class="log-list">
     <view
       wx:for="{{messages}}"
       wx:key="index"
       id="msg-{{index}}"
-      class="msg-row {{item.role === 'user' ? 'right' : 'left'}}"
+      class="log-entry"
     >
-      <view class="avatar" wx:if="{{item.role !== 'user'}}">
-         <view class="avatar-default">
-           <text class="avatar-text">P</text>
-         </view>
-      </view>
-      <view class="bubble {{item.role === 'user' ? 'bubble-user' : 'bubble-sys'}}">
-        <view wx:if="{{item.role !== 'user'}}" class="bubble-label">执行结果</view>
-        <view wx:if="{{item.image_urls && item.image_urls.length > 0}}" class="bubble-images">
-          <image
-            wx:for="{{item.image_urls}}"
-            wx:for-item="imgUrl"
-            wx:for-index="imgIdx"
-            wx:key="imgIdx"
-            class="bubble-image"
-            src="{{imgUrl}}"
-            mode="aspectFill"
-            bindload="onBubbleMediaLoad"
-            data-src="{{imgUrl}}"
-            bindtap="onPreviewBubbleImage"
-          />
+      <!-- 用户指令 -->
+      <view wx:if="{{item.role === 'user'}}" class="log-cmd">
+        <text class="log-prompt" decode="{{true}}">&gt;</text>
+        <view class="log-cmd-body">
+          <view wx:if="{{item.image_urls && item.image_urls.length > 0}}" class="log-cmd-images">
+            <image
+              wx:for="{{item.image_urls}}"
+              wx:for-item="imgUrl"
+              wx:for-index="imgIdx"
+              wx:key="imgIdx"
+              class="log-cmd-img"
+              src="{{imgUrl}}"
+              mode="aspectFill"
+              data-src="{{imgUrl}}"
+              bindtap="onPreviewBubbleImage"
+            />
+          </view>
+          <text class="log-cmd-text" user-select="true">{{item.content}}</text>
         </view>
-        <rich-text wx:if="{{item.role === 'assistant'}}" class="bubble-rich" nodes="{{item.content_nodes}}"></rich-text>
-        <text wx:else class="bubble-text" user-select="true" selectable="true">{{item.content}}</text>
+        <text class="log-time">{{item.timeText}}</text>
+      </view>
+      <!-- 系统结果 -->
+      <view wx:else class="log-result-wrap">
+        <view class="log-result card">
+          <view wx:if="{{item.image_urls && item.image_urls.length > 0}}" class="log-result-images">
+            <image
+              wx:for="{{item.image_urls}}"
+              wx:for-item="imgUrl"
+              wx:for-index="imgIdx"
+              wx:key="imgIdx"
+              class="bubble-image"
+              src="{{imgUrl}}"
+              mode="aspectFill"
+              bindload="onBubbleMediaLoad"
+              data-src="{{imgUrl}}"
+              bindtap="onPreviewBubbleImage"
+            />
+          </view>
+          <rich-text class="log-result-rich" nodes="{{item.content_nodes}}"></rich-text>
+        </view>
+        <text class="log-time log-time-right">{{item.timeText}}</text>
       </view>
     </view>
-    <view wx:if="{{pendingState}}" class="msg-row left msg-row-pending">
-      <view class="avatar">
-        <view class="avatar-default">
-          <text class="avatar-text">P</text>
-        </view>
-      </view>
-      <view class="bubble bubble-sys bubble-pending">
-        <view class="typing-line">
-          <text class="typing-label">处理中</text>
-          <view class="typing-dots">
-            <text class="typing-dot dot-1">•</text>
-            <text class="typing-dot dot-2">•</text>
-            <text class="typing-dot dot-3">•</text>
+
+    <!-- 处理中 -->
+    <view wx:if="{{pendingState}}" class="log-entry">
+      <view class="log-result-wrap">
+        <view class="log-result card log-result-pending">
+          <view class="typing-line">
+            <text class="typing-label">执行中</text>
+            <view class="typing-dots">
+              <text class="typing-dot dot-1">•</text>
+              <text class="typing-dot dot-2">•</text>
+              <text class="typing-dot dot-3">•</text>
+            </view>
           </view>
         </view>
       </view>
     </view>
+
     <view id="scroll-bottom" style="height: 1rpx;"></view>
   </view>
 

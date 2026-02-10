@@ -322,7 +322,7 @@ async def chat_history(
         {
             "role": msg.role,
             "content": msg.content,
-            "created_at": msg.created_at.isoformat(),
+            "created_at": msg.created_at.isoformat() + "Z",
         }
         for msg in messages
     ]
@@ -333,7 +333,7 @@ def _to_conversation_response(item, active_id: int | None) -> ConversationRespon
         id=item.id,
         title=item.title,
         summary=item.summary,
-        last_message_at=item.last_message_at.isoformat(),
+        last_message_at=item.last_message_at.isoformat() + "Z",
         active=(active_id == item.id),
     )
 
@@ -656,7 +656,7 @@ async def calendar_events(
                 currency=row.currency,
                 category=row.category,
                 item=row.item,
-                transaction_date=row.transaction_date.isoformat(),
+                transaction_date=row.transaction_date.isoformat() + "Z",
             )
         )
 
@@ -670,7 +670,7 @@ async def calendar_events(
             CalendarScheduleItem(
                 id=row.id,
                 content=row.content,
-                trigger_time=row.trigger_time.isoformat(),
+                trigger_time=row.trigger_time.isoformat() + "Z",
                 status=row.status,
             )
         )
@@ -703,8 +703,8 @@ async def ledger_list(
             currency=row.currency,
             category=row.category,
             item=row.item,
-            transaction_date=row.transaction_date.isoformat(),
-            created_at=row.created_at.isoformat(),
+            transaction_date=row.transaction_date.isoformat() + "Z",
+            created_at=row.created_at.isoformat() + "Z",
         )
         for row in rows
     ]
@@ -734,8 +734,8 @@ async def ledger_patch(
         currency=updated.currency,
         category=updated.category,
         item=updated.item,
-        transaction_date=updated.transaction_date.isoformat(),
-        created_at=updated.created_at.isoformat(),
+        transaction_date=updated.transaction_date.isoformat() + "Z",
+        created_at=updated.created_at.isoformat() + "Z",
     )
 
 
