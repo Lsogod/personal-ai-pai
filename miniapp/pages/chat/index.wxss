@@ -27,6 +27,7 @@
   opacity: 0; pointer-events: none;
   box-shadow: 8rpx 0 40rpx rgba(0,0,0,0.08);
   display: flex; flex-direction: column;
+  overflow: hidden;
 }
 .conv-sidebar.open { transform: translateX(0); opacity: 1; pointer-events: auto; }
 
@@ -42,7 +43,12 @@
   display: flex; align-items: center; justify-content: center;
 }
 
-.conv-list { flex: 1; min-height: 0; padding: 12rpx 16rpx 20rpx; overflow: hidden; }
+.conv-list {
+  flex: 1; min-height: 0;
+  padding: 12rpx 20rpx 20rpx 16rpx;
+  overflow: hidden;
+  box-sizing: border-box;
+}
 .conv-empty { padding: 48rpx 20rpx; text-align: center; color: var(--c-text-3); font-size: 24rpx; }
 
 .conv-item {
@@ -52,8 +58,15 @@
   border: 1rpx solid transparent;
   box-sizing: border-box;
   transition: background 0.15s, border-color 0.15s;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
 }
-.conv-item.active { background: var(--c-primary-light); border-color: rgba(79,110,247,0.15); }
+.conv-item.active {
+  background: var(--c-primary-light);
+  border-color: transparent;
+  box-shadow: inset 0 0 0 1rpx rgba(79,110,247,0.18);
+}
 .conv-item-body { flex: 1; min-width: 0; overflow: hidden; }
 .conv-item-title { font-size: 27rpx; font-weight: 600; color: var(--c-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conv-item-meta { margin-top: 8rpx; font-size: 22rpx; color: var(--c-text-3); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -64,9 +77,11 @@
   flex-shrink: 0; width: 56rpx; height: 56rpx;
   display: flex; align-items: center; justify-content: center;
   margin-left: 12rpx; border-radius: 50%;
-  transition: background 0.15s;
+  transition: background 0.15s, opacity 0.15s;
+  opacity: 0.78;
 }
 .conv-item-del:active { background: rgba(0,0,0,0.06); }
+.conv-item.active .conv-item-del { opacity: 1; }
 .conv-del-icon { width: 32rpx; height: 32rpx; }
 
 /* ── Notifications ── */
