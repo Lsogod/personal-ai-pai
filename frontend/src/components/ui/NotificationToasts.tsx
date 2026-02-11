@@ -1,4 +1,5 @@
 import { Calendar, X } from "./icons";
+import { formatHmLocal } from "../../lib/datetime";
 
 export interface ToastItem {
   id: string;
@@ -13,9 +14,7 @@ interface NotificationToastsProps {
 }
 
 function formatTime(iso: string) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "";
-  return `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+  return formatHmLocal(iso);
 }
 
 export function NotificationToasts({ items, onDismiss }: NotificationToastsProps) {

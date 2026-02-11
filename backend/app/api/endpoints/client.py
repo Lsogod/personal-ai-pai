@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import List
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session, AsyncSessionLocal
@@ -16,6 +17,7 @@ from app.models.ledger import Ledger
 from app.models.schedule import Schedule
 from app.models.identity import UserIdentity
 from app.models.feedback import UserFeedback
+from app.models.reminder_delivery import ReminderDelivery
 from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse
 from app.schemas.auth import MiniappLoginRequest, MiniappTokenResponse
 from app.schemas.binding import (
@@ -104,6 +106,69 @@ def _parse_date(value: str | None) -> date | None:
         return date.fromisoformat(text)
     except Exception:
         return None
+
+
+def _to_client_tz_iso(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    settings = get_settings()
+    tz = ZoneInfo(settings.timezone)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=ZoneInfo("UTC"))
+    return value.astimezone(tz).isoformat(timespec="seconds")
+
+
+def _utc_naive_to_client_tz(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    tz = ZoneInfo(get_settings().timezone)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=ZoneInfo("UTC"))
+    return value.astimezone(tz)
+
+
+def _local_naive_to_utc_naive(value: datetime) -> datetime:
+    tz = ZoneInfo(get_settings().timezone)
+    return value.replace(tzinfo=tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+
+def _parse_schedule_trigger_local(value: str) -> datetime:
+    raw = (value or "").strip()
+    if not raw:
+        raise ValueError("empty trigger_time")
+    normalized = raw.replace("Z", "+00:00")
+    dt = datetime.fromisoformat(normalized)
+    tz = ZoneInfo(get_settings().timezone)
+    if dt.tzinfo is not None:
+        return dt.astimezone(tz).replace(tzinfo=None)
+    return dt
+
+
+def _schedule_local_to_client_tz_iso(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    tz = ZoneInfo(get_settings().timezone)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=tz)
+    else:
+        value = value.astimezone(tz)
+    return value.isoformat(timespec="seconds")
+
+
+def _now_local_naive() -> datetime:
+    return datetime.now(ZoneInfo(get_settings().timezone)).replace(tzinfo=None)
+
+
+def _parse_ledger_transaction_utc_naive(value: str) -> datetime:
+    raw = (value or "").strip()
+    if not raw:
+        raise ValueError("empty transaction_date")
+    normalized = raw.replace("Z", "+00:00")
+    dt = datetime.fromisoformat(normalized)
+    if dt.tzinfo is not None:
+        return dt.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+    # Naive client input is treated as user local time and stored as UTC-naive.
+    return _local_naive_to_utc_naive(dt)
 
 
 @router.post("/auth/register", response_model=TokenResponse)
@@ -277,7 +342,7 @@ async def user_feedback_create(
     return FeedbackCreateResponse(
         ok=True,
         id=feedback.id,
-        created_at=feedback.created_at.isoformat() + "Z",
+        created_at=_to_client_tz_iso(feedback.created_at),
     )
 
 
@@ -368,14 +433,14 @@ async def chat_history(
                 role="assistant",
                 content=greeting,
                 platform="web",
-                created_at=datetime.utcnow(),
+                created_at=datetime.now(timezone.utc),
             )
         ]
     return [
         {
             "role": msg.role,
             "content": msg.content,
-            "created_at": msg.created_at.isoformat() + "Z",
+            "created_at": _to_client_tz_iso(msg.created_at),
         }
         for msg in messages
     ]
@@ -386,7 +451,7 @@ def _to_conversation_response(item, active_id: int | None) -> ConversationRespon
         id=item.id,
         title=item.title,
         summary=item.summary,
-        last_message_at=item.last_message_at.isoformat() + "Z",
+        last_message_at=_to_client_tz_iso(item.last_message_at),
         active=(active_id == item.id),
     )
 
@@ -645,7 +710,7 @@ async def calendar_events(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    today = datetime.utcnow().date()
+    today = _now_local_naive().date()
     default_start = today.replace(day=1)
     if default_start.month == 12:
         default_end = date(default_start.year + 1, 1, 1)
@@ -661,13 +726,15 @@ async def calendar_events(
 
     start_at = datetime.combine(start, datetime.min.time())
     end_at = datetime.combine(end, datetime.min.time())
+    ledger_start_at = _local_naive_to_utc_naive(start_at)
+    ledger_end_at = _local_naive_to_utc_naive(end_at)
 
     ledger_result = await session.execute(
         select(Ledger)
         .where(
             Ledger.user_id == user.id,
-            Ledger.transaction_date >= start_at,
-            Ledger.transaction_date < end_at,
+            Ledger.transaction_date >= ledger_start_at,
+            Ledger.transaction_date < ledger_end_at,
         )
         .order_by(Ledger.transaction_date.asc(), Ledger.id.asc())
     )
@@ -696,7 +763,10 @@ async def calendar_events(
         cursor += timedelta(days=1)
 
     for row in ledger_result.scalars().all():
-        key = row.transaction_date.date().isoformat()
+        local_dt = _utc_naive_to_client_tz(row.transaction_date)
+        if not local_dt:
+            continue
+        key = local_dt.date().isoformat()
         if key not in day_map:
             continue
         day = day_map[key]
@@ -709,7 +779,7 @@ async def calendar_events(
                 currency=row.currency,
                 category=row.category,
                 item=row.item,
-                transaction_date=row.transaction_date.isoformat() + "Z",
+                transaction_date=_to_client_tz_iso(row.transaction_date),
             )
         )
 
@@ -723,7 +793,7 @@ async def calendar_events(
             CalendarScheduleItem(
                 id=row.id,
                 content=row.content,
-                trigger_time=row.trigger_time.isoformat() + "Z",
+                trigger_time=_schedule_local_to_client_tz_iso(row.trigger_time),
                 status=row.status,
             )
         )
@@ -761,8 +831,8 @@ async def ledger_list(
             currency=row.currency,
             category=row.category,
             item=row.item,
-            transaction_date=row.transaction_date.isoformat() + "Z",
-            created_at=row.created_at.isoformat() + "Z",
+            transaction_date=_to_client_tz_iso(row.transaction_date),
+            created_at=_to_client_tz_iso(row.created_at),
         )
         for row in rows
     ]
@@ -792,8 +862,8 @@ async def ledger_patch(
         currency=updated.currency,
         category=updated.category,
         item=updated.item,
-        transaction_date=updated.transaction_date.isoformat() + "Z",
-        created_at=updated.created_at.isoformat() + "Z",
+        transaction_date=_to_client_tz_iso(updated.transaction_date),
+        created_at=_to_client_tz_iso(updated.created_at),
     )
 
 
@@ -823,8 +893,7 @@ async def ledger_create(
     txn_date = None
     if payload.transaction_date:
         try:
-            raw = payload.transaction_date.replace("Z", "+00:00")
-            txn_date = datetime.fromisoformat(raw)
+            txn_date = _parse_ledger_transaction_utc_naive(payload.transaction_date)
         except Exception:
             pass
 
@@ -843,8 +912,8 @@ async def ledger_create(
         currency=ledger.currency,
         category=ledger.category,
         item=ledger.item,
-        transaction_date=ledger.transaction_date.isoformat() + "Z",
-        created_at=ledger.created_at.isoformat() + "Z",
+        transaction_date=_to_client_tz_iso(ledger.transaction_date),
+        created_at=_to_client_tz_iso(ledger.created_at),
     )
 
 
@@ -866,9 +935,9 @@ async def schedule_list(
         ScheduleItemResponse(
             id=row.id,
             content=row.content,
-            trigger_time=row.trigger_time.isoformat() + "Z",
+            trigger_time=_schedule_local_to_client_tz_iso(row.trigger_time),
             status=row.status,
-            created_at=row.created_at.isoformat() + "Z",
+            created_at=_to_client_tz_iso(row.created_at),
         )
         for row in result.scalars().all()
     ]
@@ -881,8 +950,7 @@ async def schedule_create(
     user: User = Depends(get_current_user),
 ):
     try:
-        raw = payload.trigger_time.replace("Z", "+00:00")
-        trigger = datetime.fromisoformat(raw)
+        trigger = _parse_schedule_trigger_local(payload.trigger_time)
     except Exception:
         raise HTTPException(status_code=400, detail="invalid trigger_time format")
 
@@ -900,7 +968,7 @@ async def schedule_create(
     await session.refresh(schedule)
 
     # Register APScheduler job if in future
-    if trigger > datetime.utcnow():
+    if trigger > _now_local_naive():
         try:
             scheduler = get_scheduler()
             scheduler.add_job(job_id, trigger, send_reminder_job, schedule.id)
@@ -917,9 +985,9 @@ async def schedule_create(
     return ScheduleItemResponse(
         id=schedule.id,
         content=schedule.content,
-        trigger_time=schedule.trigger_time.isoformat() + "Z",
+        trigger_time=_schedule_local_to_client_tz_iso(schedule.trigger_time),
         status=schedule.status,
-        created_at=schedule.created_at.isoformat() + "Z",
+        created_at=_to_client_tz_iso(schedule.created_at),
     )
 
 
@@ -940,17 +1008,16 @@ async def schedule_patch(
         schedule.status = payload.status.upper()
     if payload.trigger_time is not None:
         try:
-            raw = payload.trigger_time.replace("Z", "+00:00")
-            new_trigger = datetime.fromisoformat(raw)
+            new_trigger = _parse_schedule_trigger_local(payload.trigger_time)
             schedule.trigger_time = new_trigger
             # Reschedule APScheduler job
-            if new_trigger > datetime.utcnow():
-                try:
-                    scheduler = get_scheduler()
-                    scheduler.remove_job(schedule.job_id)
+            try:
+                scheduler = get_scheduler()
+                scheduler.remove_job(schedule.job_id)
+                if new_trigger > _now_local_naive():
                     scheduler.add_job(schedule.job_id, new_trigger, send_reminder_job, schedule.id)
-                except Exception:
-                    pass
+            except Exception:
+                pass
         except Exception:
             raise HTTPException(status_code=400, detail="invalid trigger_time format")
 
@@ -960,9 +1027,9 @@ async def schedule_patch(
     return ScheduleItemResponse(
         id=schedule.id,
         content=schedule.content,
-        trigger_time=schedule.trigger_time.isoformat() + "Z",
+        trigger_time=_schedule_local_to_client_tz_iso(schedule.trigger_time),
         status=schedule.status,
-        created_at=schedule.created_at.isoformat() + "Z",
+        created_at=_to_client_tz_iso(schedule.created_at),
     )
 
 
@@ -984,6 +1051,12 @@ async def schedule_delete(
         pass
 
     snapshot_id = schedule.id
+    snapshot_content = schedule.content
+    # Clean up delivery rows first to satisfy FK constraint:
+    # reminder_deliveries.schedule_id -> schedules.id
+    await session.execute(
+        delete(ReminderDelivery).where(ReminderDelivery.schedule_id == snapshot_id)
+    )
     await session.delete(schedule)
     await session.commit()
     await log_event(
@@ -991,7 +1064,7 @@ async def schedule_delete(
         action="schedule_deleted",
         platform=user.platform,
         user_id=user.id,
-        detail={"schedule_id": snapshot_id, "content": schedule.content, "via": "manual"},
+        detail={"schedule_id": snapshot_id, "content": snapshot_content, "via": "manual"},
     )
     return ScheduleDeleteResponse(ok=True, id=snapshot_id)
 

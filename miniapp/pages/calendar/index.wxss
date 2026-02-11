@@ -184,6 +184,7 @@
   border-radius: var(--r-md); font-size: 28rpx; color: var(--c-text);
 }
 .form-datetime { display: flex; gap: 12rpx; }
+.form-datetime picker { flex: 1; }
 .form-datetime .form-picker { flex: 1; }
 .modal-actions { display: flex; gap: 16rpx; margin-top: 28rpx; }
 .modal-btn {

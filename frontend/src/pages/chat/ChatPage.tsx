@@ -120,7 +120,7 @@ export function ChatPage() {
   const { data: stats = emptyStats } = useQuery<LedgerStats>({
     queryKey: ["stats"],
     enabled: !!token,
-    queryFn: () => apiRequest("/api/stats/ledger", {}, token),
+    queryFn: () => apiRequest("/api/stats/ledger?scope=month", {}, token),
     refetchInterval: token ? 15000 : false,
   });
 

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import Column, DateTime
@@ -21,6 +21,6 @@ class Ledger(SQLModel, table=True):
 
     transaction_date: datetime = Field(description="实际交易时间")
     created_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )

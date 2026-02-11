@@ -749,6 +749,10 @@
   gap: 12rpx;
 }
 
+.form-datetime picker {
+  flex: 1;
+}
+
 .form-datetime .form-picker {
   flex: 1;
 }

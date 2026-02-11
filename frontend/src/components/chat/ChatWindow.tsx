@@ -4,6 +4,7 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
 import { Image, Bot, ArrowUpCircle, X, Copy, Check } from "../ui/icons";
+import { formatHmLocal } from "../../lib/datetime";
 
 export interface ChatMessage {
   role: string;
@@ -107,8 +108,7 @@ function MarkdownPre({
 }
 
 function formatTime(iso: string) {
-  const date = new Date(iso);
-  return `${date.getHours().toString().padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+  return formatHmLocal(iso);
 }
 
 export function ChatWindow({ history, streamingReply, pending, onSend, profile }: ChatWindowProps) {

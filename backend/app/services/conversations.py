@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -112,7 +112,7 @@ async def rename_conversation(
         return None
     clean_title = _trim_text(title or "", 60) or "未命名会话"
     conversation.title = clean_title
-    conversation.updated_at = datetime.utcnow()
+    conversation.updated_at = datetime.now(timezone.utc)
     session.add(conversation)
     await session.commit()
     await session.refresh(conversation)
@@ -157,7 +157,7 @@ async def delete_conversation(
 
 
 def apply_user_message_updates(conversation: Conversation, content: str) -> None:
-    conversation.last_message_at = datetime.utcnow()
+    conversation.last_message_at = datetime.now(timezone.utc)
     if conversation.title in {"新会话", "默认会话"}:
         preview = _trim_text(content, 24)
         if preview and not preview.startswith("/"):
@@ -165,7 +165,7 @@ def apply_user_message_updates(conversation: Conversation, content: str) -> None
 
 
 def apply_assistant_message_updates(conversation: Conversation, content: str) -> None:
-    conversation.last_message_at = datetime.utcnow()
+    conversation.last_message_at = datetime.now(timezone.utc)
     preview = _trim_text(content, 120)
     if preview:
         conversation.summary = preview

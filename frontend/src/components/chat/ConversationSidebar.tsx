@@ -9,6 +9,7 @@ import {
   switchConversation,
   type ConversationItem,
 } from "../../lib/api";
+import { formatMdHmLocal } from "../../lib/datetime";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Plus, Pencil, Trash2, MessageSquare } from "../ui/icons";
@@ -18,12 +19,7 @@ interface ConversationSidebarProps {
 }
 
 function formatTime(iso: string) {
-  const date = new Date(iso);
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  const hour = `${date.getHours()}`.padStart(2, "0");
-  const minute = `${date.getMinutes()}`.padStart(2, "0");
-  return `${month}-${day} ${hour}:${minute}`;
+  return formatMdHmLocal(iso);
 }
 
 export function ConversationSidebar({ token }: ConversationSidebarProps) {

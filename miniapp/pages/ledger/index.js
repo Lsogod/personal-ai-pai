@@ -76,6 +76,24 @@ function todayISO() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function localDateTimeParts(value) {
+  const raw = String(value || "").trim();
+  const fallback = todayISO();
+  const base = raw.includes("T") ? raw : fallback;
+  const date = base.slice(0, 10) || fallback.slice(0, 10);
+  const time = base.slice(11, 16) || fallback.slice(11, 16);
+  return { date, time, value: `${date}T${time}` };
+}
+
+function pickerPartsFromIso(value) {
+  const dt = toDisplayDate(value);
+  if (!dt || Number.isNaN(dt.getTime())) return localDateTimeParts(todayISO());
+  const pad = (n) => `${n}`.padStart(2, "0");
+  const date = `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
+  const time = `${pad(dt.getUTCHours())}:${pad(dt.getUTCMinutes())}`;
+  return { date, time, value: `${date}T${time}` };
+}
+
 function dayStartMs(dt) {
   return Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate(), 0, 0, 0, 0);
 }
@@ -288,6 +306,8 @@ Page({
     formCategory: DEFAULT_CATEGORY,
     formCustomCategory: "",
     formDate: "",
+    formDatePart: "",
+    formTimePart: todayISO().slice(11, 16),
   },
 
   onLoad() {
@@ -665,6 +685,7 @@ Page({
   },
 
   onShowAdd() {
+    const now = localDateTimeParts(todayISO());
     const formCategory = (this.data.formCategories || []).includes(DEFAULT_CATEGORY)
       ? DEFAULT_CATEGORY
       : ((this.data.formCategories || [])[0] || DEFAULT_CATEGORY);
@@ -676,13 +697,15 @@ Page({
       formItem: "",
       formCategory,
       formCustomCategory: "",
-      formDate: todayISO(),
+      formDate: now.value,
+      formDatePart: now.date,
+      formTimePart: now.time,
     });
   },
 
   doEdit(item) {
     if (!item) return;
-    const rawDate = (item.transaction_date || "").replace("Z", "").slice(0, 16);
+    const picked = pickerPartsFromIso(item.transaction_date);
     const category = normalizeCategory(item.category);
     const formCategories = (this.data.formCategories || []).includes(category)
       ? (this.data.formCategories || [])
@@ -696,13 +719,16 @@ Page({
       formCategory: category,
       formCustomCategory: "",
       formCategories,
-      formDate: rawDate || todayISO(),
+      formDate: picked.value,
+      formDatePart: picked.date,
+      formTimePart: picked.time,
     });
   },
 
   onModalInnerTap() {},
 
   onCloseForm() {
+    wx.hideKeyboard({ complete: () => {} });
     this.setData({ showForm: false }, () => {
       if (this.data.activeTab === "overview") {
         setTimeout(() => {
@@ -731,13 +757,15 @@ Page({
   },
 
   onFormDate(e) {
-    this.setData({ formDate: e.detail.value });
+    const date = e.detail.value || localDateTimeParts(todayISO()).date;
+    const time = this.data.formTimePart || localDateTimeParts(todayISO()).time;
+    this.setData({ formDatePart: date, formTimePart: time, formDate: `${date}T${time}` });
   },
 
   onFormTime(e) {
-    const cur = this.data.formDate || "";
-    const datePart = cur.slice(0, 10) || todayISO().slice(0, 10);
-    this.setData({ formDate: `${datePart}T${e.detail.value}` });
+    const date = this.data.formDatePart || localDateTimeParts(todayISO()).date;
+    const time = e.detail.value || localDateTimeParts(todayISO()).time;
+    this.setData({ formDatePart: date, formTimePart: time, formDate: `${date}T${time}` });
   },
 
   async onFormSubmit() {
@@ -753,7 +781,9 @@ Page({
       item: this.data.formItem || "手动记录",
       category: finalCategory,
     };
-    if (this.data.formDate) data.transaction_date = `${this.data.formDate}:00Z`;
+    const date = this.data.formDatePart || localDateTimeParts(todayISO()).date;
+    const time = this.data.formTimePart || localDateTimeParts(todayISO()).time;
+    data.transaction_date = `${date}T${time}:00`;
 
     try {
       if (this.data.formMode === "add") {
@@ -763,6 +793,7 @@ Page({
         await updateLedger(this.data.formId, data);
         wx.showToast({ title: "修改成功", icon: "success" });
       }
+      wx.hideKeyboard({ complete: () => {} });
       this.setData({ showForm: false });
       this.loadData();
     } catch (err) {

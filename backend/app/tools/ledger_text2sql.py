@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import text
@@ -49,10 +49,16 @@ def _normalize_params(params: dict[str, Any]) -> dict[str, Any]:
                 or "time" in key.lower()
             ):
                 try:
-                    normalized[key] = datetime.fromisoformat(candidate)
+                    dt = datetime.fromisoformat(candidate)
+                    if dt.tzinfo is not None:
+                        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+                    normalized[key] = dt
                     continue
                 except Exception:
                     pass
+        if isinstance(value, datetime) and value.tzinfo is not None:
+            normalized[key] = value.astimezone(timezone.utc).replace(tzinfo=None)
+            continue
         normalized[key] = value
     return normalized
 

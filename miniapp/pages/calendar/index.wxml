@@ -126,7 +126,7 @@
 
   <!-- Ledger Form Modal -->
   <view class="modal-mask" wx:if="{{showLedgerForm}}" bindtap="onCloseLedgerForm">
-    <view class="modal-body card" catchtap="">
+    <view class="modal-body card" catchtap="onModalInnerTap">
       <view class="modal-title">{{ledgerFormMode==='add'?'新增账单':'编辑账单'}}</view>
       <view class="form-group">
         <text class="form-label">金额</text>
@@ -145,11 +145,11 @@
       <view class="form-group">
         <text class="form-label">日期时间</text>
         <view class="form-datetime">
-          <picker mode="date" value="{{lf_date}}" bindchange="onLfDate">
-            <view class="form-picker">{{lf_date?lf_date.slice(0,10):'选择'}} ▾</view>
+          <picker mode="date" value="{{lf_date_part}}" bindchange="onLfDate">
+            <view class="form-picker">{{lf_date_part || '选择日期'}} ▾</view>
           </picker>
-          <picker mode="time" value="{{lf_date?lf_date.slice(11,16):'12:00'}}" bindchange="onLfTime">
-            <view class="form-picker">{{lf_date?lf_date.slice(11,16):'12:00'}} ▾</view>
+          <picker mode="time" value="{{lf_time_part}}" bindchange="onLfTime">
+            <view class="form-picker">{{lf_time_part || '选择时间'}} ▾</view>
           </picker>
         </view>
       </view>
@@ -162,7 +162,7 @@
 
   <!-- Schedule Form Modal -->
   <view class="modal-mask" wx:if="{{showScheduleForm}}" bindtap="onCloseScheduleForm">
-    <view class="modal-body card" catchtap="">
+    <view class="modal-body card" catchtap="onModalInnerTap">
       <view class="modal-title">{{scheduleFormMode==='add'?'新增日程':'编辑日程'}}</view>
       <view class="form-group">
         <text class="form-label">内容</text>
@@ -175,7 +175,7 @@
             <view class="form-picker">{{sf_date || '选择日期'}} ▾</view>
           </picker>
           <picker mode="time" value="{{sf_time}}" bindchange="onSfTime">
-            <view class="form-picker">{{sf_time || '12:00'}} ▾</view>
+            <view class="form-picker">{{sf_time || '选择时间'}} ▾</view>
           </picker>
         </view>
       </view>

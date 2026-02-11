@@ -253,11 +253,11 @@
       <view class="form-group">
         <text class="form-label">日期</text>
         <view class="form-datetime">
-          <picker mode="date" value="{{formDate}}" bindchange="onFormDate">
-            <view class="form-picker">{{formDate ? formDate.slice(0,10) : '选择日期'}} ▾</view>
+          <picker mode="date" value="{{formDatePart}}" bindchange="onFormDate">
+            <view class="form-picker">{{formDatePart || '选择日期'}} ▾</view>
           </picker>
-          <picker mode="time" value="{{formDate ? formDate.slice(11,16) : '12:00'}}" bindchange="onFormTime">
-            <view class="form-picker">{{formDate ? formDate.slice(11,16) : '12:00'}} ▾</view>
+          <picker mode="time" value="{{formTimePart}}" bindchange="onFormTime">
+            <view class="form-picker">{{formTimePart || '选择时间'}} ▾</view>
           </picker>
         </view>
       </view>

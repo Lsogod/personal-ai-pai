@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.models.identity import UserIdentity
 from app.models.reminder_delivery import ReminderDelivery
 from app.models.schedule import Schedule
@@ -14,6 +16,27 @@ from app.models.user import User
 from app.services.platforms import miniapp
 from app.services.realtime import get_notification_hub
 from app.services.sender import UnifiedSender
+
+
+def _to_client_tz_iso(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    settings = get_settings()
+    tz = ZoneInfo(settings.timezone)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=ZoneInfo("UTC"))
+    return value.astimezone(tz).isoformat(timespec="seconds")
+
+
+def _schedule_local_to_client_tz_iso(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    tz = ZoneInfo(get_settings().timezone)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=tz)
+    else:
+        value = value.astimezone(tz)
+    return value.isoformat(timespec="seconds")
 
 
 @dataclass(frozen=True)
@@ -138,8 +161,8 @@ async def dispatch_reminder(
                 "type": "reminder",
                 "content": text,
                 "schedule_id": schedule.id,
-                "trigger_time": schedule.trigger_time.isoformat() + "Z",
-                "created_at": datetime.utcnow().isoformat() + "Z",
+                "trigger_time": _schedule_local_to_client_tz_iso(schedule.trigger_time),
+                "created_at": _to_client_tz_iso(datetime.utcnow()),
             },
         )
     except Exception:

@@ -26,7 +26,7 @@ export function LedgerStatsCard({ stats }: LedgerStatsCardProps) {
           </div>
           <div>
             <h2 className="text-sm font-semibold text-content">账单概览</h2>
-            <p className="text-xs text-content-tertiary">近 30 天统计</p>
+            <p className="text-xs text-content-tertiary">本月统计（1号至今）</p>
           </div>
         </div>
       </CardHeader>

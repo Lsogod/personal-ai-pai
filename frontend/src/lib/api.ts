@@ -133,6 +133,14 @@ export interface CalendarScheduleItem {
   status: string;
 }
 
+export interface ScheduleItem {
+  id: number;
+  content: string;
+  trigger_time: string;
+  status: string;
+  created_at: string;
+}
+
 export interface CalendarDay {
   date: string;
   ledger_total: number;
@@ -358,9 +366,25 @@ export function deleteConversation(
 
 export function fetchLedgers(
   token: string | null | undefined,
-  limit = 30
+  limit = 30,
+  beforeId?: number
 ) {
-  return apiRequest(`/api/ledgers?limit=${limit}`, {}, token) as Promise<LedgerItem[]>;
+  let path = `/api/ledgers?limit=${limit}`;
+  if (Number.isFinite(beforeId) && Number(beforeId) > 0) {
+    path += `&before_id=${Math.floor(Number(beforeId))}`;
+  }
+  return apiRequest(path, {}, token) as Promise<LedgerItem[]>;
+}
+
+export function createLedger(
+  payload: { amount: number; category?: string; item?: string; transaction_date?: string },
+  token: string | null | undefined
+) {
+  return apiRequest(
+    "/api/ledgers",
+    { method: "POST", body: JSON.stringify(payload) },
+    token
+  ) as Promise<LedgerItem>;
 }
 
 export function updateLedger(
@@ -396,6 +420,47 @@ export function fetchCalendar(
     {},
     token
   ) as Promise<CalendarResponse>;
+}
+
+export function fetchSchedules(
+  token: string | null | undefined,
+  limit = 50
+) {
+  return apiRequest(`/api/schedules?limit=${limit}`, {}, token) as Promise<ScheduleItem[]>;
+}
+
+export function createSchedule(
+  payload: { content: string; trigger_time: string },
+  token: string | null | undefined
+) {
+  return apiRequest(
+    "/api/schedules",
+    { method: "POST", body: JSON.stringify(payload) },
+    token
+  ) as Promise<ScheduleItem>;
+}
+
+export function updateSchedule(
+  scheduleId: number,
+  payload: { content?: string; trigger_time?: string; status?: string },
+  token: string | null | undefined
+) {
+  return apiRequest(
+    `/api/schedules/${scheduleId}`,
+    { method: "PATCH", body: JSON.stringify(payload) },
+    token
+  ) as Promise<ScheduleItem>;
+}
+
+export function deleteSchedule(
+  scheduleId: number,
+  token: string | null | undefined
+) {
+  return apiRequest(
+    `/api/schedules/${scheduleId}`,
+    { method: "DELETE" },
+    token
+  ) as Promise<{ ok: boolean; id: number }>;
 }
 
 export function fetchIdentities(token: string | null | undefined) {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -85,6 +85,15 @@ def _format_history_lines(current_id: int | None, rows: list) -> str:
         summary = (item.summary or "（暂无摘要）").strip()
         lines.append(f"{marker} #{item.id} | {item.title} | {time_str} | {summary}")
     return "\n".join(lines)
+
+
+def _to_client_tz_iso(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    tz = ZoneInfo(settings.timezone)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=ZoneInfo("UTC"))
+    return value.astimezone(tz).isoformat(timespec="seconds")
 
 
 def _parse_json_object(content: str) -> dict:
@@ -259,7 +268,7 @@ async def _load_context_messages(
             {
                 "role": (row.role or "user").strip().lower(),
                 "content": content,
-                "created_at": (row.created_at.isoformat() + "Z") if row.created_at else "",
+                "created_at": _to_client_tz_iso(row.created_at),
             }
         )
     return context_messages
@@ -303,7 +312,7 @@ async def handle_message(
             user_id=user_id,
             detail={"content": text, "conversation_id": conversation.id, **(extra or {})},
         )
-        conversation.last_message_at = datetime.utcnow()
+        conversation.last_message_at = datetime.now(timezone.utc)
         session.add(conversation)
         session.add(
             Message(
@@ -324,7 +333,7 @@ async def handle_message(
                     "content": text,
                     "platform": platform,
                     "conversation_id": conversation.id,
-                    "created_at": datetime.utcnow().isoformat() + "Z",
+                    "created_at": _to_client_tz_iso(datetime.utcnow()),
                 },
             )
         return {"ok": True, "responses": [text]}
@@ -445,7 +454,7 @@ async def handle_message(
                 "content": message.content,
                 "platform": platform,
                 "conversation_id": conversation.id,
-                "created_at": datetime.utcnow().isoformat() + "Z",
+                "created_at": _to_client_tz_iso(datetime.utcnow()),
             },
         )
 
@@ -518,7 +527,7 @@ async def handle_message(
             detail={"content": text, "conversation_id": conversation.id},
         )
         if skip_summary_update:
-            conversation.last_message_at = datetime.utcnow()
+            conversation.last_message_at = datetime.now(timezone.utc)
         else:
             apply_assistant_message_updates(conversation, text)
         session.add(conversation)
@@ -542,7 +551,7 @@ async def handle_message(
                     "content": text,
                     "platform": platform,
                     "conversation_id": conversation.id,
-                    "created_at": datetime.utcnow().isoformat() + "Z",
+                    "created_at": _to_client_tz_iso(datetime.utcnow()),
                 },
             )
 

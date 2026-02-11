@@ -66,6 +66,17 @@ def _window_start_utc_naive(days: int) -> datetime:
     return start
 
 
+def _local_naive_to_tz_iso(value: datetime | None) -> str:
+    if not value:
+        return ""
+    tz = ZoneInfo(get_settings().timezone)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=tz)
+    else:
+        value = value.astimezone(tz)
+    return value.isoformat(timespec="seconds")
+
+
 def _parse_detail(value: str) -> object:
     raw = (value or "").strip()
     if not raw:
@@ -915,7 +926,7 @@ async def admin_schedules(
                 "user_nickname": user_map.get(row.user_id, ""),
                 "job_id": row.job_id,
                 "content": row.content,
-                "trigger_time": row.trigger_time.isoformat(),
+                "trigger_time": _local_naive_to_tz_iso(row.trigger_time),
                 "status": row.status,
                 "created_at": row.created_at.isoformat(),
             }

@@ -46,6 +46,24 @@ function nowISO() {
   return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+"T"+pad(d.getHours())+":"+pad(d.getMinutes());
 }
 
+function localDateTimeParts(value) {
+  const raw = String(value || "").trim();
+  const fallback = nowISO();
+  const base = raw.includes("T") ? raw : fallback;
+  const date = base.slice(0, 10) || fallback.slice(0, 10);
+  const time = base.slice(11, 16) || fallback.slice(11, 16);
+  return { date, time, value: `${date}T${time}` };
+}
+
+function pickerPartsFromIso(value) {
+  const dt = toDisplayDate(value);
+  if (!dt || Number.isNaN(dt.getTime())) return localDateTimeParts(nowISO());
+  const pad = n => (n+"").padStart(2,"0");
+  const date = `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth()+1)}-${pad(dt.getUTCDate())}`;
+  const time = `${pad(dt.getUTCHours())}:${pad(dt.getUTCMinutes())}`;
+  return { date, time, value: `${date}T${time}` };
+}
+
 const CATS = ["餐饮","交通","购物","居家","娱乐","医疗","教育","其他"];
 
 function scheduleStatusLabel(value) {
@@ -115,10 +133,10 @@ Page({
     popMenu: { show: false, top: 0, left: 0 },
     // Ledger form
     showLedgerForm: false, ledgerFormMode: "add", ledgerFormId: null,
-    lf_amount: "", lf_item: "", lf_category: "其他", lf_date: "",
+    lf_amount: "", lf_item: "", lf_category: "其他", lf_date: "", lf_date_part: "", lf_time_part: nowISO().slice(11,16),
     // Schedule form
     showScheduleForm: false, scheduleFormMode: "add", scheduleFormId: null,
-    sf_content: "", sf_date: "", sf_time: "12:00",
+    sf_content: "", sf_date: "", sf_time: nowISO().slice(11,16),
   },
 
   onLoad() {
@@ -207,34 +225,52 @@ Page({
     if (this._popType === 'ledger') this.onDeleteLedger(this._popItem);
     else this.onDeleteSchedule(this._popItem);
   },
+  onModalInnerTap() {},
 
   /* ── Ledger CRUD ── */
   onShowAddLedger() {
     const base = this.data.activeDate || toISODate(new Date());
+    const now = localDateTimeParts(nowISO());
     this.setData({ showLedgerForm: true, ledgerFormMode: "add", ledgerFormId: null,
-      lf_amount: "", lf_item: "", lf_category: "其他", lf_date: base + "T12:00" });
+      lf_amount: "", lf_item: "", lf_category: "其他",
+      lf_date: `${base}T${now.time}`, lf_date_part: base, lf_time_part: now.time });
   },
   doEditLedger(item) {
     if (!item) return;
-    const raw = (item.transaction_date || "").replace("Z","").slice(0,16);
+    const picked = pickerPartsFromIso(item.transaction_date);
     this.setData({ showLedgerForm: true, ledgerFormMode: "edit", ledgerFormId: item.id,
-      lf_amount: String(item.amount||""), lf_item: item.item||"", lf_category: item.category||"其他", lf_date: raw });
+      lf_amount: String(item.amount||""), lf_item: item.item||"", lf_category: item.category||"其他",
+      lf_date: picked.value, lf_date_part: picked.date, lf_time_part: picked.time });
   },
-  onCloseLedgerForm() { this.setData({ showLedgerForm: false }, () => { setTimeout(() => { this.drawSpendBar(); this.drawRateRing(); }, 60); }); },
+  onCloseLedgerForm() {
+    wx.hideKeyboard({ complete: () => {} });
+    this.setData({ showLedgerForm: false }, () => { setTimeout(() => { this.drawSpendBar(); this.drawRateRing(); }, 60); });
+  },
   onLfAmount(e) { this.setData({ lf_amount: e.detail.value }); },
   onLfItem(e) { this.setData({ lf_item: e.detail.value }); },
   onLfCat(e) { this.setData({ lf_category: CATS[e.detail.value] || "其他" }); },
-  onLfDate(e) { const t = this.data.lf_date.slice(11,16)||"12:00"; this.setData({ lf_date: e.detail.value+"T"+t }); },
-  onLfTime(e) { const d = this.data.lf_date.slice(0,10)||toISODate(new Date()); this.setData({ lf_date: d+"T"+e.detail.value }); },
+  onLfDate(e) {
+    const date = e.detail.value || toISODate(new Date());
+    const time = this.data.lf_time_part || localDateTimeParts(nowISO()).time;
+    this.setData({ lf_date_part: date, lf_time_part: time, lf_date: `${date}T${time}` });
+  },
+  onLfTime(e) {
+    const date = this.data.lf_date_part || toISODate(new Date());
+    const time = e.detail.value || localDateTimeParts(nowISO()).time;
+    this.setData({ lf_date_part: date, lf_time_part: time, lf_date: `${date}T${time}` });
+  },
 
   async onLedgerSubmit() {
     const amt = parseFloat(this.data.lf_amount);
     if (!amt || amt <= 0) { wx.showToast({ title: "请输入金额", icon: "none" }); return; }
     const payload = { amount: amt, item: this.data.lf_item||"手动记录", category: this.data.lf_category||"其他" };
-    if (this.data.lf_date) payload.transaction_date = this.data.lf_date + ":00Z";
+    const date = this.data.lf_date_part || toISODate(new Date());
+    const time = this.data.lf_time_part || localDateTimeParts(nowISO()).time;
+    payload.transaction_date = `${date}T${time}:00`;
     try {
       if (this.data.ledgerFormMode === "add") { await createLedger(payload); wx.showToast({ title: "添加成功", icon: "success" }); }
       else { await updateLedger(this.data.ledgerFormId, payload); wx.showToast({ title: "修改成功", icon: "success" }); }
+      wx.hideKeyboard({ complete: () => {} });
       this.setData({ showLedgerForm: false }); this.loadMonth();
     } catch (err) { wx.showToast({ title: err.message || "操作失败", icon: "none" }); }
   },
@@ -251,27 +287,34 @@ Page({
   /* ── Schedule CRUD ── */
   onShowAddSchedule() {
     const base = this.data.activeDate || toISODate(new Date());
+    const now = localDateTimeParts(nowISO());
     this.setData({ showScheduleForm: true, scheduleFormMode: "add", scheduleFormId: null,
-      sf_content: "", sf_date: base, sf_time: "12:00" });
+      sf_content: "", sf_date: base, sf_time: now.time });
   },
   doEditSchedule(item) {
     if (!item) return;
-    const raw = (item.trigger_time || "").replace("Z","");
+    const picked = pickerPartsFromIso(item.trigger_time);
     this.setData({ showScheduleForm: true, scheduleFormMode: "edit", scheduleFormId: item.id,
-      sf_content: item.content||"", sf_date: raw.slice(0,10), sf_time: raw.slice(11,16)||"12:00" });
+      sf_content: item.content||"", sf_date: picked.date, sf_time: picked.time });
   },
-  onCloseScheduleForm() { this.setData({ showScheduleForm: false }, () => { setTimeout(() => { this.drawSpendBar(); this.drawRateRing(); }, 60); }); },
+  onCloseScheduleForm() {
+    wx.hideKeyboard({ complete: () => {} });
+    this.setData({ showScheduleForm: false }, () => { setTimeout(() => { this.drawSpendBar(); this.drawRateRing(); }, 60); });
+  },
   onSfContent(e) { this.setData({ sf_content: e.detail.value }); },
   onSfDate(e) { this.setData({ sf_date: e.detail.value }); },
   onSfTime(e) { this.setData({ sf_time: e.detail.value }); },
 
   async onScheduleSubmit() {
     if (!this.data.sf_content.trim()) { wx.showToast({ title: "请输入日程内容", icon: "none" }); return; }
-    const trigger = this.data.sf_date + "T" + this.data.sf_time + ":00Z";
+    const date = this.data.sf_date || this.data.activeDate || toISODate(new Date());
+    const time = this.data.sf_time || localDateTimeParts(nowISO()).time;
+    const trigger = date + "T" + time + ":00";
     const payload = { content: this.data.sf_content.trim(), trigger_time: trigger };
     try {
       if (this.data.scheduleFormMode === "add") { await createSchedule(payload); wx.showToast({ title: "添加成功", icon: "success" }); }
       else { await updateSchedule(this.data.scheduleFormId, payload); wx.showToast({ title: "修改成功", icon: "success" }); }
+      wx.hideKeyboard({ complete: () => {} });
       this.setData({ showScheduleForm: false }); this.loadMonth();
     } catch (err) { wx.showToast({ title: err.message || "操作失败", icon: "none" }); }
   },
