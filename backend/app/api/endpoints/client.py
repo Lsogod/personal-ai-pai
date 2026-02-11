@@ -15,6 +15,7 @@ from app.models.message import Message
 from app.models.ledger import Ledger
 from app.models.schedule import Schedule
 from app.models.identity import UserIdentity
+from app.models.feedback import UserFeedback
 from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse
 from app.schemas.auth import MiniappLoginRequest, MiniappTokenResponse
 from app.schemas.binding import (
@@ -30,6 +31,7 @@ from app.schemas.calendar import (
     CalendarScheduleItem,
 )
 from app.schemas.chat import ChatSendRequest, ChatSendResponse, ProfileResponse
+from app.schemas.feedback import FeedbackCreateRequest, FeedbackCreateResponse
 from app.schemas.conversation import ConversationCreateRequest, ConversationResponse
 from app.schemas.conversation import ConversationDeleteResponse, ConversationUpdateRequest
 from app.schemas.ledger import LedgerCreateRequest, LedgerDeleteResponse, LedgerItemResponse, LedgerUpdateRequest
@@ -234,6 +236,49 @@ async def user_identities(
 ):
     rows = await list_identities(session, user.id)
     return rows
+
+
+@router.post("/user/feedback", response_model=FeedbackCreateResponse)
+async def user_feedback_create(
+    payload: FeedbackCreateRequest,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    content = (payload.content or "").strip()
+    if len(content) < 4:
+        raise HTTPException(status_code=400, detail="feedback content too short")
+
+    feedback = UserFeedback(
+        user_id=user.id,
+        platform=user.platform,
+        content=content,
+        app_version=(payload.app_version or "").strip(),
+        env_version=(payload.env_version or "").strip(),
+        client_page=(payload.client_page or "").strip(),
+    )
+    session.add(feedback)
+    await session.flush()
+
+    await log_event(
+        session,
+        action="feedback_created",
+        platform=user.platform,
+        user_id=user.id,
+        detail={
+            "feedback_id": feedback.id,
+            "app_version": feedback.app_version,
+            "env_version": feedback.env_version,
+            "client_page": feedback.client_page,
+        },
+    )
+    await session.commit()
+    await session.refresh(feedback)
+
+    return FeedbackCreateResponse(
+        ok=True,
+        id=feedback.id,
+        created_at=feedback.created_at.isoformat() + "Z",
+    )
 
 
 @router.post("/user/bind-code", response_model=BindCodeCreateResponse)
@@ -694,15 +739,20 @@ async def calendar_events(
 @router.get("/ledgers", response_model=List[LedgerItemResponse])
 async def ledger_list(
     limit: int = Query(default=30, ge=1, le=200),
+    before_id: int | None = Query(default=None, ge=1),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    result = await session.execute(
+    stmt = (
         select(Ledger)
         .where(Ledger.user_id == user.id)
         .order_by(Ledger.id.desc())
         .limit(limit)
     )
+    if before_id is not None:
+        stmt = stmt.where(Ledger.id < before_id)
+
+    result = await session.execute(stmt)
     rows = result.scalars().all()
     return [
         LedgerItemResponse(

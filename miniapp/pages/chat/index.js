@@ -4,6 +4,7 @@ const {
   fetchConversations,
   createConversation,
   switchConversation,
+  deleteConversation,
   fetchProfile,
   fetchLedgerStats,
   sendChat,
@@ -11,6 +12,7 @@ const {
 } = require("../../utils/http");
 const { pickImages } = require("../../utils/image");
 const { markdownToRichNodes } = require("../../utils/markdown");
+const DISPLAY_TZ_OFFSET_MINUTES = 8 * 60; // Asia/Shanghai
 
 /**
  * 解析 ISO 时间字符串并返回本地 HH:MM。
@@ -19,11 +21,10 @@ const { markdownToRichNodes } = require("../../utils/markdown");
  */
 function fmtTime(isoText) {
   if (!isoText) return "";
-  const safe = String(isoText).replace(/-/g, "/").replace("T", " ").replace("Z", " +00:00");
-  const dt = new Date(safe);
-  if (Number.isNaN(dt.getTime())) return "";
-  const hh = `${dt.getHours()}`.padStart(2, "0");
-  const mm = `${dt.getMinutes()}`.padStart(2, "0");
+  const dt = toDisplayDate(isoText);
+  if (!dt) return "";
+  const hh = `${dt.getUTCHours()}`.padStart(2, "0");
+  const mm = `${dt.getUTCMinutes()}`.padStart(2, "0");
   return `${hh}:${mm}`;
 }
 
@@ -33,14 +34,36 @@ function nowIso() {
 
 function fmtDateTime(isoText) {
   if (!isoText) return "";
-  const safe = String(isoText).replace(/-/g, "/").replace("T", " ").replace("Z", " +00:00");
-  const dt = new Date(safe);
-  if (Number.isNaN(dt.getTime())) return "";
-  const mm = `${dt.getMonth() + 1}`.padStart(2, "0");
-  const dd = `${dt.getDate()}`.padStart(2, "0");
-  const hh = `${dt.getHours()}`.padStart(2, "0");
-  const mi = `${dt.getMinutes()}`.padStart(2, "0");
+  const dt = toDisplayDate(isoText);
+  if (!dt) return "";
+  const mm = `${dt.getUTCMonth() + 1}`.padStart(2, "0");
+  const dd = `${dt.getUTCDate()}`.padStart(2, "0");
+  const hh = `${dt.getUTCHours()}`.padStart(2, "0");
+  const mi = `${dt.getUTCMinutes()}`.padStart(2, "0");
   return `${mm}-${dd} ${hh}:${mi}`;
+}
+
+function toDisplayDate(value) {
+  const dt = parseDateTime(value);
+  if (Number.isNaN(dt.getTime())) return "";
+  return new Date(dt.getTime() + DISPLAY_TZ_OFFSET_MINUTES * 60 * 1000);
+}
+
+function parseDateTime(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return new Date("");
+
+  // Keep timezone info when present (e.g. trailing "Z") so local conversion is correct.
+  let dt = new Date(raw);
+  if (!Number.isNaN(dt.getTime())) return dt;
+
+  // Fallback for engines that dislike "T" with timezone.
+  dt = new Date(raw.replace("T", " "));
+  if (!Number.isNaN(dt.getTime())) return dt;
+
+  // Last fallback for older parsers.
+  dt = new Date(raw.replace(/-/g, "/").replace("T", " ").replace(/Z$/, ""));
+  return dt;
 }
 
 function compactText(value, maxLen = 80) {
@@ -63,6 +86,7 @@ function normalizeMessage(item) {
     display_content: content,
     content_nodes: role === "assistant" ? markdownToRichNodes(content) : "",
     created_at: item.created_at || nowIso(),
+    timeText: fmtTime(item.created_at || nowIso()),
     image_urls: Array.isArray(item.image_urls) ? item.image_urls : []
   };
 }
@@ -92,6 +116,7 @@ Page({
     this._wsTask = null;
     this._pingTimer = null;
     this._seenKeys = new Set();
+    this._seenReminderKeys = new Set();
     this._sendingLock = false;
     this._pendingUserEcho = [];
     this._streamQueue = [];
@@ -109,6 +134,13 @@ Page({
       this.loadConversations();
       this.connectSocket();
       this.scrollToBottom(true);
+      // 从首页快捷指令跳转过来
+      const app = getApp();
+      if (app.globalData.pendingCmd) {
+        const cmd = app.globalData.pendingCmd;
+        app.globalData.pendingCmd = "";
+        this.setData({ inputText: cmd });
+      }
       return;
     }
     this.closeSocket();
@@ -189,7 +221,7 @@ Page({
       const rows = await fetchConversations();
       const conversations = (rows || []).map((item) => ({
         id: item.id,
-        title: compactText(item.title || `会话 #${item.id}`, 22),
+        title: compactText(item.title || `记录 #${item.id}`, 22),
         summary: compactText(item.summary || "", 88),
         active: !!item.active,
         lastText: fmtDateTime(item.last_message_at || ""),
@@ -226,7 +258,7 @@ Page({
       this.setData({ sidebarOpen: false });
       await this.loadConversations();
       await this.loadInitial();
-      wx.showToast({ title: "已新建会话", icon: "none" });
+      wx.showToast({ title: "已新建记录", icon: "none" });
     } catch (err) {
       wx.showToast({ title: err.message || "新建失败", icon: "none" });
     }
@@ -246,9 +278,39 @@ Page({
       this.setData({ sidebarOpen: false });
       await this.loadConversations();
       await this.loadInitial();
-      wx.showToast({ title: "已切换会话", icon: "none" });
+      wx.showToast({ title: "已切换记录", icon: "none" });
     } catch (err) {
       wx.showToast({ title: err.message || "切换失败", icon: "none" });
+    }
+  },
+
+  /* ── 删除会话 ── */
+  async onDeleteConversation(e) {
+    const id = Number(e.currentTarget.dataset.id);
+    if (!id) return;
+    const { confirm } = await new Promise(resolve =>
+      wx.showModal({
+        title: "删除记录",
+        content: "删除后无法恢复，是否继续？",
+        confirmText: "删除",
+        confirmColor: "#e74c3c",
+        success: resolve,
+        fail: () => resolve({ confirm: false })
+      })
+    );
+    if (!confirm) return;
+    try {
+      await deleteConversation(id);
+      wx.showToast({ title: "已删除", icon: "none" });
+      await this.loadConversations();
+      // 如果删的是当前活跃会话，重新加载消息
+      const active = this.data.conversations.find(x => x.active);
+      if (!active) {
+        this.setData({ messages: [] });
+        this._seenKeys.clear();
+      }
+    } catch (err) {
+      wx.showToast({ title: err.message || "删除失败", icon: "none" });
     }
   },
 
@@ -256,23 +318,46 @@ Page({
     return `${msg.role}|${msg.created_at}|${msg.content}`;
   },
 
+  reminderEventKey(payload) {
+    if (!payload || typeof payload !== "object") return "";
+    if (payload.schedule_id !== undefined && payload.schedule_id !== null) {
+      return `schedule:${payload.schedule_id}`;
+    }
+    const trigger = String(payload.trigger_time || "");
+    const content = String(payload.content || "");
+    if (!trigger && !content) return "";
+    return `fallback:${trigger}|${content}`;
+  },
+
+  seenReminder(payload) {
+    const key = this.reminderEventKey(payload);
+    if (!key) return false;
+    if (this._seenReminderKeys.has(key)) return true;
+    this._seenReminderKeys.add(key);
+    if (this._seenReminderKeys.size > 200) {
+      const oldest = this._seenReminderKeys.values().next().value;
+      this._seenReminderKeys.delete(oldest);
+    }
+    return false;
+  },
+
   appendMessages(rows) {
-    const next = [...this.data.messages];
+    const newMsgs = [];
     let hasAssistant = false;
     for (const row of rows) {
       const msg = normalizeMessage(row);
-      if (msg.role === "assistant") {
-        hasAssistant = true;
-      }
+      if (msg.role === "assistant") hasAssistant = true;
       const key = this.messageKey(msg);
       if (this._seenKeys.has(key)) continue;
       this._seenKeys.add(key);
-      next.push(msg);
+      newMsgs.push(msg);
     }
-    if (hasAssistant) {
-      this.clearPendingByAssistantSignal();
-    }
-    this.setData({ messages: next }, () => this.scrollToBottom());
+    if (!newMsgs.length) return;
+    if (hasAssistant) this.clearPendingByAssistantSignal();
+    const base = this.data.messages.length;
+    const patch = {};
+    newMsgs.forEach((m, i) => { patch[`messages[${base + i}]`] = m; });
+    this.setData(patch, () => this.scrollToBottom());
   },
 
   clearPendingByAssistantSignal() {
@@ -330,8 +415,7 @@ Page({
       display_content: "",
       content_nodes: markdownToRichNodes(""),
     };
-    const next = [...this.data.messages, placeholder];
-    this.setData({ messages: next }, () => this.scrollToBottom());
+    this.setData({ [`messages[${index}]`]: placeholder }, () => this.scrollToBottom());
 
     this._streamQueue.push({ index, fullText: raw });
     this.runStreamQueue();
@@ -348,25 +432,18 @@ Page({
     const tick = () => {
       cursor = Math.min(fullText.length, cursor + step);
       const partial = fullText.slice(0, cursor);
-      const rows = [...this.data.messages];
-      const row = rows[current.index];
-      if (!row) {
+      const path = `messages[${current.index}]`;
+      this.setData({
+        [`${path}.display_content`]: partial,
+        [`${path}.content_nodes`]: markdownToRichNodes(partial),
+      });
+      if (cursor < fullText.length) {
+        this._streamTimer = setTimeout(tick, 18);
+      } else {
         this._streaming = false;
+        this.scrollToBottom();
         this.runStreamQueue();
-        return;
       }
-      rows[current.index] = {
-        ...row,
-        display_content: partial,
-        content_nodes: markdownToRichNodes(partial),
-      };
-      this.setData({ messages: rows }, () => this.scrollToBottom());
-      if (cursor >= fullText.length) {
-        this._streaming = false;
-        this.runStreamQueue();
-        return;
-      }
-      this._streamTimer = setTimeout(tick, 18);
     };
 
     tick();
@@ -401,7 +478,7 @@ Page({
 
   scrollToBottom(immediate = false) {
     this.clearScrollRetry();
-    const delays = immediate ? [0, 50, 200, 500] : [0, 100, 300];
+    const delays = immediate ? [0, 150, 500] : [50, 300];
     this._scrollTimers = delays.map((delay) =>
       setTimeout(() => {
         wx.pageScrollTo({ scrollTop: 999999, duration: 0 });
@@ -449,10 +526,18 @@ Page({
         this._pingTimer = null;
       }
       this._wsTask = null;
+      // 自动重连（3秒后），避免网络波动导致断连
+      if (this.data.authed && !this._wsReconnectTimer) {
+        this._wsReconnectTimer = setTimeout(() => {
+          this._wsReconnectTimer = null;
+          if (this.data.authed && !this._wsTask) this.connectSocket();
+        }, 3000);
+      }
     });
 
     task.onError(() => {
       this.setData({ wsOpen: false });
+      this._wsTask = null;
     });
 
     task.onMessage((evt) => {
@@ -465,6 +550,7 @@ Page({
       if (!payload || !payload.type) return;
 
       if (payload.type === "reminder") {
+        if (this.seenReminder(payload)) return;
         this.setPendingState("");
         const content = payload.content || "提醒";
         const createdAt = payload.created_at || nowIso();
@@ -492,6 +578,10 @@ Page({
   },
 
   closeSocket() {
+    if (this._wsReconnectTimer) {
+      clearTimeout(this._wsReconnectTimer);
+      this._wsReconnectTimer = null;
+    }
     if (this._pingTimer) {
       clearInterval(this._pingTimer);
       this._pingTimer = null;
@@ -537,6 +627,13 @@ Page({
       return;
     }
     this.setData({ inputText: raw });
+  },
+
+  onUseTemplate(e) {
+    const text = String(e.currentTarget.dataset.template || "").trim();
+    if (!text) return;
+    this.setData({ inputText: text });
+    this.scrollToBottom();
   },
 
   onConfirmSend() {
@@ -599,7 +696,7 @@ Page({
       image_urls: selectedImagesSnapshot.map((x) => x.path)
     };
     this.appendMessages([userMsg]);
-    const payloadText = text || "请帮我识别这张图片";
+    const payloadText = text || "识别图片";
     this.queuePendingUserEcho(payloadText);
     this.queuePendingUserEcho(text || "[图片]");
 
@@ -649,5 +746,12 @@ Page({
     this.setData({ sidebarOpen: false });
     const redirect = encodeURIComponent("/pages/chat/index");
     wx.navigateTo({ url: `/pages/login/index?redirect=${redirect}` });
+  },
+
+  onShareAppMessage() {
+    return { title: '效率工具 — 记账·提醒·日程', path: '/pages/home/index' };
+  },
+  onShareTimeline() {
+    return { title: '效率工具 — 记账·提醒·日程' };
   }
 });

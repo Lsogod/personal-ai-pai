@@ -1,16 +1,17 @@
 {
   "pages": [
-    "pages/chat/index",
+    "pages/home/index",
     "pages/ledger/index",
     "pages/calendar/index",
     "pages/me/index",
+    "pages/chat/index",
     "pages/me/skills/index",
     "pages/me/binding/index",
-    "pages/login/index",
-    "pages/home/index"
+    "pages/me/feedback/index",
+    "pages/login/index"
   ],
   "window": {
-    "navigationBarTitleText": "PAI",
+    "navigationBarTitleText": "效率工具",
     "navigationBarBackgroundColor": "#ffffff",
     "navigationBarTextStyle": "black",
     "backgroundColor": "#f5f7fa",
@@ -24,10 +25,16 @@
     "borderStyle": "black",
     "list": [
       {
+        "pagePath": "pages/home/index",
+        "text": "首页",
+        "iconPath": "assets/icons/tab-home.png",
+        "selectedIconPath": "assets/icons/tab-home-active.png"
+      },
+      {
         "pagePath": "pages/chat/index",
-        "text": "聊天",
-        "iconPath": "assets/icons/tab-chat.png",
-        "selectedIconPath": "assets/icons/tab-chat-active.png"
+        "text": "指令",
+        "iconPath": "assets/icons/tab-cmd.png",
+        "selectedIconPath": "assets/icons/tab-cmd-active.png"
       },
       {
         "pagePath": "pages/ledger/index",

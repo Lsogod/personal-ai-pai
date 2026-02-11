@@ -472,11 +472,14 @@ def _resolve_schedule_status_filter(parsed: dict) -> str:
     return _normalize_schedule_status_filter(str(parsed.get("schedule_status_filter") or "all"))
 
 
-def _fmt_dt(value: datetime | None, pattern: str = "%m-%d %H:%M") -> str:
+def _fmt_dt(value: datetime | None, pattern: str = "%m-%d %H:%M", assume_utc: bool = False) -> str:
     if not value:
         return "-"
+    tz = ZoneInfo(get_settings().timezone)
     if value.tzinfo is not None:
-        value = value.astimezone(ZoneInfo(get_settings().timezone))
+        value = value.astimezone(tz)
+    elif assume_utc:
+        value = value.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz)
     return value.strftime(pattern)
 
 
@@ -516,7 +519,7 @@ def _build_calendar_payload(ledgers: list[Ledger], schedules: list[Schedule]) ->
         "ledgers": [
             {
                 "id": item.id,
-                "datetime": _fmt_dt(item.transaction_date, "%Y-%m-%d %H:%M"),
+                "datetime": _fmt_dt(item.transaction_date, "%Y-%m-%d %H:%M", assume_utc=True),
                 "amount": round(float(item.amount), 2),
                 "currency": item.currency,
                 "category": item.category,
@@ -591,7 +594,7 @@ def _render_calendar_text(ledgers: list[Ledger], schedules: list[Schedule], labe
         lines.append("账单：")
         for row in ledgers[:8]:
             lines.append(
-                f"- {_fmt_dt(row.transaction_date)} #{row.id} {row.item} {row.amount:.2f} {row.currency} ({row.category})"
+                f"- {_fmt_dt(row.transaction_date, assume_utc=True)} #{row.id} {row.item} {row.amount:.2f} {row.currency} ({row.category})"
             )
         if len(ledgers) > 8:
             lines.append(f"- ... 其余 {len(ledgers) - 8} 笔")

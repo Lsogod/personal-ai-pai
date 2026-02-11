@@ -10,6 +10,35 @@ except ImportError:
     print("需要安装 Pillow: pip3 install Pillow")
     exit(1)
 
+def create_home_icon(active=False):
+    """首页 — 房子图标"""
+    img = Image.new('RGBA', (81, 81), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(img)
+    color = (59, 130, 246, 255) if active else (125, 133, 144, 255)
+    # 屋顶三角
+    draw.polygon([(40, 12), (12, 38), (68, 38)], outline=color, width=3)
+    # 房身
+    draw.rectangle([20, 38, 60, 68], outline=color, width=3)
+    # 门
+    draw.rectangle([34, 48, 46, 68], outline=color, width=2)
+    return img
+
+def create_command_icon(active=False):
+    """指令 — 终端图标"""
+    img = Image.new('RGBA', (81, 81), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(img)
+    color = (59, 130, 246, 255) if active else (125, 133, 144, 255)
+    # 终端外框
+    draw.rounded_rectangle([10, 14, 71, 67], radius=6, outline=color, width=3)
+    # 顶部栏
+    draw.line([10, 28, 71, 28], fill=color, width=3)
+    # > 提示符
+    draw.line([22, 40, 32, 47], fill=color, width=3)
+    draw.line([32, 47, 22, 54], fill=color, width=3)
+    # 光标线
+    draw.line([38, 54, 54, 54], fill=color, width=3)
+    return img
+
 def create_chat_icon(active=False):
     """聊天气泡图标"""
     img = Image.new('RGBA', (81, 81), (255, 255, 255, 0))
@@ -62,6 +91,10 @@ def create_me_icon(active=False):
 
 if __name__ == '__main__':
     # 生成所有图标
+    create_home_icon(False).save('tab-home.png')
+    create_home_icon(True).save('tab-home-active.png')
+    create_command_icon(False).save('tab-cmd.png')
+    create_command_icon(True).save('tab-cmd-active.png')
     create_chat_icon(False).save('tab-chat.png')
     create_chat_icon(True).save('tab-chat-active.png')
     create_ledger_icon(False).save('tab-ledger.png')

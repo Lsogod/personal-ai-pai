@@ -143,7 +143,12 @@ MAX_IMAGES = 6
 def _fmt_dt(dt: datetime | None) -> str:
     if not dt:
         return ""
-    return dt.strftime("%Y-%m-%d %H:%M")
+    tz = ZoneInfo(get_settings().timezone)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    else:
+        dt = dt.astimezone(ZoneInfo("UTC"))
+    return dt.astimezone(tz).strftime("%Y-%m-%d %H:%M")
 
 
 def _normalize_category(text: str | None) -> str:

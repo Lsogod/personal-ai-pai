@@ -1,70 +1,102 @@
 <view class="home-page safe-bottom">
-  <view class="header">
-    <view class="greeting">
-      <view class="logo">PAI</view>
+  <!-- Hero -->
+  <view class="hero">
+    <view class="hero-badge">
+      <text class="hero-badge-dot"></text>
+      <text class="hero-badge-text">PAI</text>
+    </view>
+    <view class="hero-title">你的个人效率工具</view>
+    <view class="hero-desc">一句话搞定记账、日程、查询。</view>
+    <view class="hero-actions">
+      <button class="btn-primary hero-btn" bindtap="onOpenCommand">
+        <text>打开指令面板</text>
+      </button>
+      <button class="btn-secondary hero-btn" bindtap="onOpenCalendar">
+        <text>日程管理</text>
+      </button>
     </view>
   </view>
 
-  <view class="hero card">
-    <view class="hero-content">
-      <view class="title">你的私人 AI 助手</view>
-      <view class="subtitle">全能助手，支持记账、日程管理与跨端同步。一键开启你的智能生活。</view>
-      <view class="actions">
-        <button class="btn-primary action-main" bindtap="onOpenChat">
-          <text>{{authed ? '继续对话' : '开始使用'}}</text>
-        </button>
-        <button class="btn-secondary action-sub" bindtap="onOpenCalendar">
-          <text>日程管理</text>
-        </button>
-      </view>
-    </view>
-  </view>
-
+  <!-- Quick Commands -->
   <view class="section">
-    <view class="section-header">
-      <view class="section-title">核心能力</view>
+    <view class="section-head">
+      <text class="section-title">快捷指令</text>
+      <text class="section-sub">点击即可执行</text>
     </view>
-    <view class="grid">
-      <view class="grid-item card">
-        <view class="icon-box funding">
-          <text class="emoji">¥</text>
+    <view class="cmd-list">
+      <view class="cmd-item card" data-cmd="今天午饭30元，分类餐饮" bindtap="onQuickCmd">
+        <view class="cmd-icon-wrap cmd-icon-blue">
+          <text class="cmd-icon-text">¥</text>
         </view>
-        <view class="item-content">
-          <view class="item-title">智能记账</view>
-          <view class="item-text">拍照或文本，自动归类统计</view>
+        <view class="cmd-body">
+          <text class="cmd-label">快速记账</text>
+          <text class="cmd-example">"午饭30" → 自动归类记录</text>
         </view>
+        <text class="cmd-arrow">›</text>
       </view>
-      <view class="grid-item card">
-        <view class="icon-box schedule">
-           <text class="emoji">📅</text>
+      <view class="cmd-item card" data-cmd="明天14:00提醒我开会" bindtap="onQuickCmd">
+        <view class="cmd-icon-wrap cmd-icon-pink">
+          <text class="cmd-icon-text">📅</text>
         </view>
-        <view class="item-content">
-          <view class="item-title">日程提醒</view>
-          <view class="item-text">自然语言创建，准时推送</view>
+        <view class="cmd-body">
+          <text class="cmd-label">创建提醒</text>
+          <text class="cmd-example">"明天14:00开会" → 准时推送</text>
         </view>
+        <text class="cmd-arrow">›</text>
       </view>
-      <view class="grid-item card">
-        <view class="icon-box sync">
-           <text class="emoji">☁️</text>
+      <view class="cmd-item card" data-cmd="查看本周账单" bindtap="onQuickCmd">
+        <view class="cmd-icon-wrap cmd-icon-green">
+          <text class="cmd-icon-text">📊</text>
         </view>
-        <view class="item-content">
-          <view class="item-title">跨端同步</view>
-          <view class="item-text">Web / Telegram 多端互通</view>
+        <view class="cmd-body">
+          <text class="cmd-label">数据查询</text>
+          <text class="cmd-example">"本周账单" → 分类汇总</text>
         </view>
+        <text class="cmd-arrow">›</text>
       </view>
-      <view class="grid-item card">
-        <view class="icon-box skill">
-           <text class="emoji">⚡️</text>
+      <view class="cmd-item card" data-cmd="识别这张支付截图并记账" bindtap="onQuickCmd">
+        <view class="cmd-icon-wrap cmd-icon-amber">
+          <text class="cmd-icon-text">📷</text>
         </view>
-        <view class="item-content">
-          <view class="item-title">技能无限</view>
-          <view class="item-text">自定义技能，无限扩展</view>
+        <view class="cmd-body">
+          <text class="cmd-label">截图记账</text>
+          <text class="cmd-example">上传截图 → 自动提取金额</text>
         </view>
+        <text class="cmd-arrow">›</text>
       </view>
     </view>
   </view>
-  
+
+  <!-- Capabilities -->
+  <view class="section">
+    <view class="section-head">
+      <text class="section-title">核心能力</text>
+    </view>
+    <view class="cap-grid">
+      <view class="cap-card card">
+        <view class="cap-icon cap-icon-blue">¥</view>
+        <text class="cap-name">快捷记账</text>
+        <text class="cap-desc">拍照或文本，快速归类统计</text>
+      </view>
+      <view class="cap-card card">
+        <view class="cap-icon cap-icon-pink">📅</view>
+        <text class="cap-name">日程提醒</text>
+        <text class="cap-desc">快速创建，准时推送</text>
+      </view>
+      <view class="cap-card card">
+        <view class="cap-icon cap-icon-green">☁️</view>
+        <text class="cap-name">多端同步</text>
+        <text class="cap-desc">小程序、Web 数据互通</text>
+      </view>
+      <view class="cap-card card">
+        <view class="cap-icon cap-icon-amber">⚡️</view>
+        <text class="cap-name">功能扩展</text>
+        <text class="cap-desc">自定义模板，按需扩展</text>
+      </view>
+    </view>
+  </view>
+
   <view class="footer">
-    <text class="footer-text">Powered by AI · Designed for You</text>
+    <text class="footer-text">PAI · 个人效率工具</text>
   </view>
 </view>

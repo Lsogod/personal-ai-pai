@@ -29,7 +29,7 @@ function request(path, options = {}) {
       url: `${config.API_BASE_URL}${path}`,
       method: options.method || "GET",
       data: options.data || undefined,
-      timeout: 20000,
+      timeout: options.timeout || 15000,
       header: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -89,6 +89,12 @@ function switchConversation(conversationId) {
   });
 }
 
+function deleteConversation(conversationId) {
+  return request(`/api/conversations/${conversationId}`, {
+    method: "DELETE"
+  });
+}
+
 function sendChat(content, imageUrls) {
   return request("/api/chat/send", {
     method: "POST",
@@ -110,8 +116,52 @@ function fetchLedgerStats(days = 30) {
   return request(`/api/stats/ledger?days=${days}`);
 }
 
-function fetchLedgers(limit = 30) {
-  return request(`/api/ledgers?limit=${limit}`);
+function clampLimit(limit, fallback = 30, max = 200) {
+  const n = Number(limit);
+  if (!Number.isFinite(n)) return fallback;
+  const i = Math.floor(n);
+  if (i < 1) return 1;
+  if (i > max) return max;
+  return i;
+}
+
+function fetchLedgers(limit = 30, beforeId) {
+  const safeLimit = clampLimit(limit, 30, 200);
+  let path = `/api/ledgers?limit=${safeLimit}`;
+  const cursor = Number(beforeId);
+  if (Number.isFinite(cursor) && cursor > 0) {
+    path += `&before_id=${Math.floor(cursor)}`;
+  }
+  return request(path);
+}
+
+function createLedger(data) {
+  return request("/api/ledgers", { method: "POST", data });
+}
+
+function updateLedger(id, data) {
+  return request(`/api/ledgers/${id}`, { method: "PATCH", data });
+}
+
+function deleteLedger(id) {
+  return request(`/api/ledgers/${id}`, { method: "DELETE" });
+}
+
+function fetchSchedules(limit = 50) {
+  const safeLimit = clampLimit(limit, 50, 200);
+  return request(`/api/schedules?limit=${safeLimit}`);
+}
+
+function createSchedule(data) {
+  return request("/api/schedules", { method: "POST", data });
+}
+
+function updateSchedule(id, data) {
+  return request(`/api/schedules/${id}`, { method: "PATCH", data });
+}
+
+function deleteSchedule(id) {
+  return request(`/api/schedules/${id}`, { method: "DELETE" });
 }
 
 function fetchSkills() {
@@ -136,6 +186,13 @@ function consumeBindCode(code) {
   });
 }
 
+function submitUserFeedback(data) {
+  return request("/api/user/feedback", {
+    method: "POST",
+    data: data || {}
+  });
+}
+
 module.exports = {
   request,
   getWsUrl,
@@ -145,12 +202,21 @@ module.exports = {
   fetchConversations,
   createConversation,
   switchConversation,
+  deleteConversation,
   sendChat,
   fetchCalendar,
   fetchLedgerStats,
   fetchLedgers,
+  createLedger,
+  updateLedger,
+  deleteLedger,
+  fetchSchedules,
+  createSchedule,
+  updateSchedule,
+  deleteSchedule,
   fetchSkills,
   fetchIdentities,
   createBindCode,
-  consumeBindCode
+  consumeBindCode,
+  submitUserFeedback
 };

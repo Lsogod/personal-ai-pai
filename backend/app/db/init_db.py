@@ -16,6 +16,7 @@ from app.models.memory import LongTermMemory
 from app.models.admin_tool import AdminToolSwitch
 from app.models.llm_usage import LLMUsageLog
 from app.models.tool_usage import ToolUsageLog
+from app.models.feedback import UserFeedback
 
 
 async def init_db() -> None:

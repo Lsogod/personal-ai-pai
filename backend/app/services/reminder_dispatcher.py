@@ -80,29 +80,10 @@ async def _send_target_once(
 ) -> tuple[bool, str]:
     try:
         if target.platform == "web":
-            await get_notification_hub().send_to_user(
-                user.id,
-                {
-                    "type": "reminder",
-                    "content": text,
-                    "schedule_id": schedule.id,
-                    "trigger_time": schedule.trigger_time.isoformat() + "Z",
-                    "created_at": datetime.utcnow().isoformat() + "Z",
-                },
-            )
+            # Web reminder is delivered through realtime channel once per schedule.
             return True, ""
 
         if target.platform == "miniapp":
-            await get_notification_hub().send_to_user(
-                user.id,
-                {
-                    "type": "reminder",
-                    "content": text,
-                    "schedule_id": schedule.id,
-                    "trigger_time": schedule.trigger_time.isoformat() + "Z",
-                    "created_at": datetime.utcnow().isoformat() + "Z",
-                },
-            )
             ok, err = await miniapp.send_subscribe_reminder(
                 openid=target.platform_id,
                 content=schedule.content,
@@ -148,6 +129,21 @@ async def dispatch_reminder(
     targets = await _load_targets(session, user)
     if not targets:
         return False, 0, 0
+
+    # Push realtime reminder once to connected clients, independent from per-target retry.
+    try:
+        await get_notification_hub().send_to_user(
+            user.id,
+            {
+                "type": "reminder",
+                "content": text,
+                "schedule_id": schedule.id,
+                "trigger_time": schedule.trigger_time.isoformat() + "Z",
+                "created_at": datetime.utcnow().isoformat() + "Z",
+            },
+        )
+    except Exception:
+        pass
 
     success_count = 0
     total_count = len(targets)
