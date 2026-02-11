@@ -646,27 +646,53 @@ Page({
     const id = e.currentTarget.dataset.id;
     this._popItem = this.findListItemById(id);
     if (!this._popItem) return;
+    this._popAnchorId = id;
+    this.updatePopMenuPosition(true);
+  },
+
+  updatePopMenuPosition(forceShow = false) {
+    const id = this._popAnchorId;
+    if (!id) return;
     const sysInfo = wx.getWindowInfo();
     this.createSelectorQuery()
       .select(`#more-${id}`)
       .boundingClientRect((rect) => {
-        if (!rect) return;
-        const right = sysInfo.windowWidth - rect.right;
-        this.setData({ popMenu: { show: true, top: rect.bottom + 2, right } });
+        if (!rect) {
+          if (this.data.popMenu.show) this.setData({ "popMenu.show": false });
+          return;
+        }
+        const right = Math.max(8, sysInfo.windowWidth - rect.right);
+        const maxTop = Math.max(8, sysInfo.windowHeight - 180);
+        const top = Math.min(maxTop, Math.max(8, rect.bottom + 2));
+        this.setData({
+          popMenu: {
+            show: forceShow || this.data.popMenu.show,
+            top,
+            right,
+          },
+        });
       })
       .exec();
   },
 
+  onListScroll() {
+    if (!this.data.popMenu.show) return;
+    this.onCloseMore();
+  },
+
   onCloseMore() {
+    this._popAnchorId = null;
     this.setData({ "popMenu.show": false });
   },
 
   onPopEdit() {
+    this._popAnchorId = null;
     this.setData({ "popMenu.show": false });
     if (this._popItem) this.doEdit(this._popItem);
   },
 
   onPopDelete() {
+    this._popAnchorId = null;
     this.setData({ "popMenu.show": false });
     if (this._popItem) this.doDelete(this._popItem);
   },

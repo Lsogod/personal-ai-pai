@@ -10,7 +10,7 @@
   <view class="guest-card card" wx:if="{{!authed}}">
     <view class="guest-icon">👤</view>
     <view class="guest-title">我的</view>
-    <view class="guest-desc">登录后可查看技能、绑定账号和问题反馈。</view>
+    <view class="guest-desc">登录后可查看技能、绑定账号、订阅提醒和问题反馈。</view>
     <button class="btn-primary action-btn" bindtap="onGoLogin">微信登录</button>
   </view>
 
@@ -25,6 +25,13 @@
     <view class="menu-row" bindtap="onOpenBinding">
       <view class="menu-icon-wrap menu-icon-blue">🔗</view>
       <text class="menu-label">账号绑定</text>
+      <text class="menu-chevron">›</text>
+    </view>
+    <view class="menu-line"></view>
+
+    <view class="menu-row" bindtap="onEnableReminderSubscribe">
+      <view class="menu-icon-wrap menu-icon-orange">🔔</view>
+      <text class="menu-label">提醒订阅</text>
       <text class="menu-chevron">›</text>
     </view>
     <view class="menu-line"></view>

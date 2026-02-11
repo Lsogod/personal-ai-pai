@@ -111,7 +111,7 @@
 
   <!-- Pop Menu (fixed at page level) -->
   <block wx:if="{{popMenu.show}}">
-    <view class="pop-overlay" catchtap="onCloseMore"></view>
+    <view class="pop-overlay" catchtap="onCloseMore" catchtouchmove="onCloseMore"></view>
     <view class="pop-menu" style="top:{{popMenu.top}}px;right:{{popMenu.right}}px;">
       <view class="pop-item" catchtap="onPopEdit">
         <image class="action-icon" src="/assets/icons/ic-edit.svg" mode="aspectFit" />

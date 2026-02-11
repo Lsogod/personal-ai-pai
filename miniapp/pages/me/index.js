@@ -1,3 +1,4 @@
+const config = require("../../config");
 const { clearToken, getToken } = require("../../utils/auth");
 const { fetchProfile } = require("../../utils/http");
 
@@ -55,6 +56,32 @@ Page({
 
   onOpenFeedback() {
     this.requireLoginThen(() => wx.navigateTo({ url: "/pages/me/feedback/index" }));
+  },
+
+  onEnableReminderSubscribe() {
+    this.requireLoginThen(() => {
+      const tid = String(config.SUBSCRIBE_TEMPLATE_ID || "").trim();
+      if (!tid) {
+        wx.showToast({
+          title: "未配置模板ID，请先在 miniapp/config.local.js 设置",
+          icon: "none",
+        });
+        return;
+      }
+      wx.requestSubscribeMessage({
+        tmplIds: [tid],
+        success: (res) => {
+          if (res && res[tid] === "accept") {
+            wx.showToast({ title: "订阅授权成功", icon: "none" });
+            return;
+          }
+          wx.showToast({ title: "你未勾选该订阅模板", icon: "none" });
+        },
+        fail: (err) => {
+          wx.showToast({ title: err.errMsg || "订阅请求失败", icon: "none" });
+        },
+      });
+    });
   },
 
   onLogout() {

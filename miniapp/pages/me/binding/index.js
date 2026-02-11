@@ -1,4 +1,3 @@
-const config = require("../../../config");
 const { getToken, setToken } = require("../../../utils/auth");
 const {
   fetchProfile,
@@ -78,22 +77,5 @@ Page({
   onCopyCode() {
     if (!this.data.generatedCode) return;
     wx.setClipboardData({ data: this.data.generatedCode });
-  },
-
-  onEnableReminderSubscribe() {
-    const tid = config.SUBSCRIBE_TEMPLATE_ID;
-    if (!tid) {
-      wx.showToast({ title: "请先配置模板ID", icon: "none" });
-      return;
-    }
-    wx.requestSubscribeMessage({
-      tmplIds: [tid],
-      success: () => {
-        wx.showToast({ title: "订阅请求已发起", icon: "none" });
-      },
-      fail: (err) => {
-        wx.showToast({ title: err.errMsg || "订阅失败", icon: "none" });
-      },
-    });
   },
 });

@@ -14,6 +14,7 @@ from app.db.session import get_session
 from app.models.admin_tool import AdminToolSwitch
 from app.models.audit import AuditLog
 from app.models.conversation import Conversation
+from app.models.feedback import UserFeedback
 from app.models.identity import UserIdentity
 from app.models.ledger import Ledger
 from app.models.llm_usage import LLMUsageLog
@@ -1009,6 +1010,68 @@ async def admin_audit(
                 "platform": row.platform,
                 "action": row.action,
                 "detail": _parse_detail(row.detail),
+                "created_at": row.created_at.isoformat(),
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.get("/feedbacks")
+async def admin_feedbacks(
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=30, ge=1, le=300),
+    user_id: int | None = Query(default=None),
+    platform: str | None = Query(default=None),
+    q: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_session),
+):
+    stmt = select(UserFeedback)
+    if user_id is not None:
+        stmt = stmt.where(UserFeedback.user_id == user_id)
+    if platform and platform.strip():
+        stmt = stmt.where(UserFeedback.platform == platform.strip())
+    if q and q.strip():
+        keyword = f"%{q.strip()}%"
+        stmt = stmt.where(
+            or_(
+                UserFeedback.content.ilike(keyword),
+                UserFeedback.client_page.ilike(keyword),
+                UserFeedback.app_version.ilike(keyword),
+                UserFeedback.env_version.ilike(keyword),
+            )
+        )
+
+    total = int((await session.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one() or 0)
+    rows = (
+        (
+            await session.execute(
+                stmt.order_by(UserFeedback.id.desc()).offset(_page_offset(page, size)).limit(size)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    user_ids = [row.user_id for row in rows if row.user_id]
+    user_map: dict[int, str] = {}
+    if user_ids:
+        users = await session.execute(select(User.id, User.nickname).where(User.id.in_(user_ids)))
+        user_map = {int(uid): str(name or "") for uid, name in users.all()}
+
+    return {
+        "page": page,
+        "size": size,
+        "total": total,
+        "items": [
+            {
+                "id": row.id,
+                "user_id": row.user_id,
+                "user_nickname": user_map.get(row.user_id, ""),
+                "platform": row.platform,
+                "content": row.content,
+                "app_version": row.app_version,
+                "env_version": row.env_version,
+                "client_page": row.client_page,
                 "created_at": row.created_at.isoformat(),
             }
             for row in rows

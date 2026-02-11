@@ -29,9 +29,4 @@
     <button class="btn-primary action-btn" bindtap="onConsumeBindCode">执行绑定</button>
   </view>
 
-  <view class="card section">
-    <view class="title">提醒订阅</view>
-    <view class="text-muted">用于离线接收小程序提醒通知</view>
-    <button class="btn-secondary action-btn" bindtap="onEnableReminderSubscribe">请求订阅授权</button>
-  </view>
 </view>

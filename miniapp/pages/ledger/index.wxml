@@ -171,7 +171,7 @@
         </block>
       </view>
 
-      <scroll-view class="bill-list" scroll-y="true" show-scrollbar="false" lower-threshold="120" bindscrolltolower="onListScrollToLower">
+      <scroll-view class="bill-list" scroll-y="true" show-scrollbar="false" lower-threshold="120" bindscroll="onListScroll" bindscrolltolower="onListScrollToLower">
         <view class="empty-state" wx:if="{{filteredCount===0}}">
           <text class="empty-icon">🧾</text>
           <text class="empty-text">暂无符合条件的账单</text>
@@ -212,7 +212,7 @@
   </block>
 
   <block wx:if="{{popMenu.show}}">
-    <view class="pop-overlay" catchtap="onCloseMore"></view>
+    <view class="pop-overlay" catchtap="onCloseMore" catchtouchmove="onCloseMore"></view>
     <view class="pop-menu" style="top:{{popMenu.top}}px;right:{{popMenu.right}}px;">
       <view class="pop-item" catchtap="onPopEdit">
         <image class="action-icon" src="/assets/icons/ic-edit.svg" mode="aspectFit" />

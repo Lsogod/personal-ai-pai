@@ -26,6 +26,7 @@ import {
   fetchAdminConversations,
   fetchAdminConversationStats,
   fetchAdminDashboard,
+  fetchAdminFeedbacks,
   fetchAdminScheduleDelivery,
   fetchAdminSkills,
   fetchAdminTools,
@@ -33,6 +34,7 @@ import {
   type AdminAuditItem,
   type AdminConversationItem,
   type AdminConversationMessageItem,
+  type AdminFeedbackItem,
   type AdminSkillsItem,
   type AdminToolItem,
   type AdminUserItem,
@@ -78,6 +80,7 @@ type SectionKey =
   | "skills"
   | "tools"
   | "delivery"
+  | "feedback"
   | "audit";
 
 const SECTION_ITEMS: Array<{ key: SectionKey; label: string }> = [
@@ -87,6 +90,7 @@ const SECTION_ITEMS: Array<{ key: SectionKey; label: string }> = [
   { key: "skills", label: "技能管理" },
   { key: "tools", label: "工具管理" },
   { key: "delivery", label: "提醒投递" },
+  { key: "feedback", label: "问题反馈" },
   { key: "audit", label: "审计日志" },
 ];
 
@@ -170,6 +174,12 @@ export function AdminPage() {
   const [auditUserId, setAuditUserId] = useState("");
   const [auditPage, setAuditPage] = useState(1);
   const auditSize = 30;
+
+  const [feedbackKeyword, setFeedbackKeyword] = useState("");
+  const [feedbackPlatform, setFeedbackPlatform] = useState("");
+  const [feedbackUserId, setFeedbackUserId] = useState("");
+  const [feedbackPage, setFeedbackPage] = useState(1);
+  const feedbackSize = 30;
 
   const dashboard = useQuery({
     queryKey: ["admin", "dashboard", token, days],
@@ -261,6 +271,28 @@ export function AdminPage() {
         q: auditKeyword || undefined,
         action: auditAction || undefined,
         user_id: auditUserId ? Number(auditUserId) : undefined,
+      }),
+    enabled: !!token,
+  });
+
+  const feedbacks = useQuery({
+    queryKey: [
+      "admin",
+      "feedbacks",
+      token,
+      feedbackPage,
+      feedbackSize,
+      feedbackKeyword,
+      feedbackPlatform,
+      feedbackUserId,
+    ],
+    queryFn: () =>
+      fetchAdminFeedbacks(token, {
+        page: feedbackPage,
+        size: feedbackSize,
+        q: feedbackKeyword || undefined,
+        platform: feedbackPlatform || undefined,
+        user_id: feedbackUserId ? Number(feedbackUserId) : undefined,
       }),
     enabled: !!token,
   });
@@ -861,6 +893,85 @@ export function AdminPage() {
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {activeSection === "feedback" ? (
+            <Card>
+              <CardHeader className="text-lg font-semibold">问题反馈</CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid md:grid-cols-3 gap-2">
+                  <Input
+                    placeholder="反馈内容/版本/页面搜索"
+                    value={feedbackKeyword}
+                    onChange={(e) => {
+                      setFeedbackKeyword(e.target.value);
+                      setFeedbackPage(1);
+                    }}
+                  />
+                  <Input
+                    placeholder="user_id 筛选"
+                    value={feedbackUserId}
+                    onChange={(e) => {
+                      setFeedbackUserId(e.target.value);
+                      setFeedbackPage(1);
+                    }}
+                  />
+                  <select
+                    className="h-10 rounded-xl border border-border bg-surface-card px-3 text-sm"
+                    value={feedbackPlatform}
+                    onChange={(e) => {
+                      setFeedbackPlatform(e.target.value);
+                      setFeedbackPage(1);
+                    }}
+                  >
+                    <option value="">全部平台</option>
+                    {USER_PLATFORM_OPTIONS.map((platform) => (
+                      <option key={`feedback-${platform}`} value={platform}>
+                        {platform}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-content-secondary border-b border-border">
+                        <th className="py-2 pr-2">ID</th>
+                        <th className="py-2 pr-2">用户</th>
+                        <th className="py-2 pr-2">平台</th>
+                        <th className="py-2 pr-2">版本</th>
+                        <th className="py-2 pr-2">页面</th>
+                        <th className="py-2 pr-2">反馈内容</th>
+                        <th className="py-2 pr-2">时间</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(feedbacks.data?.items || []).map((row: AdminFeedbackItem) => (
+                        <tr key={row.id} className="border-b border-border/60 align-top">
+                          <td className="py-2 pr-2">#{row.id}</td>
+                          <td className="py-2 pr-2 whitespace-nowrap">{row.user_nickname || row.user_id}</td>
+                          <td className="py-2 pr-2 whitespace-nowrap">{row.platform || "-"}</td>
+                          <td className="py-2 pr-2 whitespace-nowrap">
+                            {row.app_version || "-"} / {row.env_version || "-"}
+                          </td>
+                          <td className="py-2 pr-2 max-w-[200px] truncate" title={row.client_page || ""}>
+                            {row.client_page || "-"}
+                          </td>
+                          <td className="py-2 pr-2 max-w-[480px] whitespace-pre-wrap break-words">{row.content}</td>
+                          <td className="py-2 pr-2 whitespace-nowrap">{new Date(row.created_at).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Pager
+                  page={feedbacks.data?.page || 1}
+                  size={feedbacks.data?.size || feedbackSize}
+                  total={feedbacks.data?.total || 0}
+                  onPageChange={setFeedbackPage}
+                />
               </CardContent>
             </Card>
           ) : null}

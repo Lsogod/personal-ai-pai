@@ -130,7 +130,7 @@ Page({
     calendarGrid: [], activeDate: "", activeDay: null,
     monthStats: { totalSpend:0,billCount:0,scheduleTotal:0,scheduleDone:0,schedulePending:0,doneRate:0,dailySpend:[] },
     cats: CATS,
-    popMenu: { show: false, top: 0, left: 0 },
+    popMenu: { show: false, top: 0, right: 0 },
     // Ledger form
     showLedgerForm: false, ledgerFormMode: "add", ledgerFormId: null,
     lf_amount: "", lf_item: "", lf_category: "其他", lf_date: "", lf_date_part: "", lf_time_part: nowISO().slice(11,16),
@@ -204,22 +204,41 @@ Page({
     this._popItem = list[idx];
     this._popType = type;
     if (!this._popItem) return;
-    const elId = `#more-${type === 'ledger' ? 'l' : 's'}-${idx}`;
+    this._popAnchorSelector = `#more-${type === 'ledger' ? 'l' : 's'}-${idx}`;
+    this.updatePopMenuPosition(true);
+  },
+  updatePopMenuPosition(forceShow = false) {
+    const selector = this._popAnchorSelector;
+    if (!selector) return;
     const sysInfo = wx.getWindowInfo();
-    this.createSelectorQuery().select(elId).boundingClientRect(rect => {
-      if (!rect) return;
-      const right = sysInfo.windowWidth - rect.right;
-      this.setData({ popMenu: { show: true, top: rect.bottom + 2, right: right } });
+    this.createSelectorQuery().select(selector).boundingClientRect(rect => {
+      if (!rect) {
+        if (this.data.popMenu.show) this.setData({ "popMenu.show": false });
+        return;
+      }
+      const right = Math.max(8, sysInfo.windowWidth - rect.right);
+      const maxTop = Math.max(8, sysInfo.windowHeight - 180);
+      const top = Math.min(maxTop, Math.max(8, rect.bottom + 2));
+      this.setData({ popMenu: { show: forceShow || this.data.popMenu.show, top, right } });
     }).exec();
   },
-  onCloseMore() { this.setData({ 'popMenu.show': false }); },
+  onPageScroll() {
+    if (!this.data.popMenu.show) return;
+    this.onCloseMore();
+  },
+  onCloseMore() {
+    this._popAnchorSelector = "";
+    this.setData({ 'popMenu.show': false });
+  },
   onPopEdit() {
+    this._popAnchorSelector = "";
     this.setData({ 'popMenu.show': false });
     if (!this._popItem) return;
     if (this._popType === 'ledger') this.doEditLedger(this._popItem);
     else this.doEditSchedule(this._popItem);
   },
   onPopDelete() {
+    this._popAnchorSelector = "";
     this.setData({ 'popMenu.show': false });
     if (!this._popItem) return;
     if (this._popType === 'ledger') this.onDeleteLedger(this._popItem);

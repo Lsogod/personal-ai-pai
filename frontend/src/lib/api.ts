@@ -611,6 +611,18 @@ export interface AdminAuditItem {
   created_at: string;
 }
 
+export interface AdminFeedbackItem {
+  id: number;
+  user_id: number;
+  user_nickname: string;
+  platform: string;
+  content: string;
+  app_version: string;
+  env_version: string;
+  client_page: string;
+  created_at: string;
+}
+
 export interface AdminConversationItem {
   id: number;
   user_id: number;
@@ -787,5 +799,23 @@ export function fetchAdminAudit(
     size: number;
     total: number;
     items: AdminAuditItem[];
+  }>;
+}
+
+export function fetchAdminFeedbacks(
+  adminToken: string,
+  params: { page?: number; size?: number; user_id?: number; platform?: string; q?: string } = {}
+) {
+  const search = new URLSearchParams();
+  if (params.page) search.set("page", String(params.page));
+  if (params.size) search.set("size", String(params.size));
+  if (params.user_id) search.set("user_id", String(params.user_id));
+  if (params.platform) search.set("platform", params.platform);
+  if (params.q) search.set("q", params.q);
+  return adminRequest(`/api/admin/v1/feedbacks?${search.toString()}`, {}, adminToken) as Promise<{
+    page: number;
+    size: number;
+    total: number;
+    items: AdminFeedbackItem[];
   }>;
 }

@@ -129,6 +129,10 @@
   background: var(--c-primary-light);
 }
 
+.menu-icon-orange {
+  background: #fff4e5;
+}
+
 .menu-icon-green {
   background: #e8fbf0;
 }
