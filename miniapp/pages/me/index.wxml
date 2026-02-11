@@ -1,32 +1,37 @@
 <view class="me-page safe-bottom">
-  <!-- Profile -->
   <view class="profile-hero" wx:if="{{authed && profile}}">
     <view class="avatar-ring">
-      <text class="avatar-emoji">📋</text>
+      <text class="avatar-emoji">🧑</text>
     </view>
     <view class="profile-name">{{profile.nickname || '用户'}}</view>
     <view class="profile-sub">{{profile.platform || 'miniapp'}} · 阶段 {{profile.setup_stage}}</view>
   </view>
 
-  <!-- Guest -->
   <view class="guest-card card" wx:if="{{!authed}}">
     <view class="guest-icon">👤</view>
     <view class="guest-title">我的</view>
-    <view class="guest-desc">登录后可查看技能、绑定账号和订阅提醒。</view>
+    <view class="guest-desc">登录后可查看技能、绑定账号和问题反馈。</view>
     <button class="btn-primary action-btn" bindtap="onGoLogin">微信登录</button>
   </view>
 
-  <!-- Menu -->
   <view class="card menu-card">
     <view class="menu-row" bindtap="onOpenSkills">
-      <view class="menu-icon-wrap menu-icon-purple">🧩</view>
+      <view class="menu-icon-wrap menu-icon-purple">🧠</view>
       <text class="menu-label">技能管理</text>
       <text class="menu-chevron">›</text>
     </view>
     <view class="menu-line"></view>
+
     <view class="menu-row" bindtap="onOpenBinding">
       <view class="menu-icon-wrap menu-icon-blue">🔗</view>
       <text class="menu-label">账号绑定</text>
+      <text class="menu-chevron">›</text>
+    </view>
+    <view class="menu-line"></view>
+
+    <view class="menu-row" bindtap="onOpenFeedback">
+      <view class="menu-icon-wrap menu-icon-green">💬</view>
+      <text class="menu-label">问题反馈</text>
       <text class="menu-chevron">›</text>
     </view>
   </view>

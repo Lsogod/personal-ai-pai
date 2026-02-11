@@ -53,17 +53,22 @@ Page({
     this.requireLoginThen(() => wx.navigateTo({ url: "/pages/me/binding/index" }));
   },
 
+  onOpenFeedback() {
+    this.requireLoginThen(() => wx.navigateTo({ url: "/pages/me/feedback/index" }));
+  },
+
   onLogout() {
     clearToken();
     getApp().globalData.token = "";
     this.setData({ authed: false, profile: null });
-    wx.showToast({ title: "已退出", icon: "none" });
+    wx.showToast({ title: "已退出登录", icon: "none" });
   },
 
   onShareAppMessage() {
-    return { title: '效率工具 — 记账·提醒·日程', path: '/pages/home/index' };
+    return { title: "效率工具 - 记账 提醒 日程", path: "/pages/home/index" };
   },
+
   onShareTimeline() {
-    return { title: '效率工具 — 记账·提醒·日程' };
-  }
+    return { title: "效率工具 - 记账 提醒 日程" };
+  },
 });

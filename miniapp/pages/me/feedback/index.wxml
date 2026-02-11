@@ -1,0 +1,31 @@
+<view class="feedback-page safe-bottom">
+  <view class="card head-card">
+    <view class="title">版本与建议</view>
+    <view class="sub">当前版本 {{versionInfo.display}}</view>
+    <button class="btn-secondary mini-btn" bindtap="onCopyVersion">复制版本信息</button>
+  </view>
+
+  <view class="card form-card">
+    <view class="label">使用建议</view>
+    <textarea
+      class="textarea"
+      maxlength="1000"
+      placeholder="例如：我希望账单筛选可以按金额区间；或者我遇到了某个页面闪退问题。"
+      value="{{suggestion}}"
+      bindinput="onInputSuggestion"
+    />
+    <view class="helper">
+      提交后将复制“建议+版本+账号信息”模板，便于你一键粘贴发送给系统。
+    </view>
+    <button class="btn-primary submit-btn" bindtap="onSubmitSuggestion" loading="{{submitting}}" disabled="{{submitting}}">
+      {{submitting ? '提交中...' : '提交建议'}}
+    </button>
+  </view>
+
+  <view class="card tips-card">
+    <view class="tips-title">说明</view>
+    <view class="tips-item">1. 建议越具体越好，最好包含操作步骤。</view>
+    <view class="tips-item">2. 如果是问题反馈，请描述出现时间和现象。</view>
+    <view class="tips-item">3. 技能与绑定管理入口在“我的 > 账号与技能”。</view>
+  </view>
+</view>

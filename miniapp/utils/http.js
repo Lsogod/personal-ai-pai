@@ -116,8 +116,23 @@ function fetchLedgerStats(days = 30) {
   return request(`/api/stats/ledger?days=${days}`);
 }
 
-function fetchLedgers(limit = 30) {
-  return request(`/api/ledgers?limit=${limit}`);
+function clampLimit(limit, fallback = 30, max = 200) {
+  const n = Number(limit);
+  if (!Number.isFinite(n)) return fallback;
+  const i = Math.floor(n);
+  if (i < 1) return 1;
+  if (i > max) return max;
+  return i;
+}
+
+function fetchLedgers(limit = 30, beforeId) {
+  const safeLimit = clampLimit(limit, 30, 200);
+  let path = `/api/ledgers?limit=${safeLimit}`;
+  const cursor = Number(beforeId);
+  if (Number.isFinite(cursor) && cursor > 0) {
+    path += `&before_id=${Math.floor(cursor)}`;
+  }
+  return request(path);
 }
 
 function createLedger(data) {
@@ -133,7 +148,8 @@ function deleteLedger(id) {
 }
 
 function fetchSchedules(limit = 50) {
-  return request(`/api/schedules?limit=${limit}`);
+  const safeLimit = clampLimit(limit, 50, 200);
+  return request(`/api/schedules?limit=${safeLimit}`);
 }
 
 function createSchedule(data) {
@@ -170,6 +186,13 @@ function consumeBindCode(code) {
   });
 }
 
+function submitUserFeedback(data) {
+  return request("/api/user/feedback", {
+    method: "POST",
+    data: data || {}
+  });
+}
+
 module.exports = {
   request,
   getWsUrl,
@@ -194,5 +217,6 @@ module.exports = {
   fetchSkills,
   fetchIdentities,
   createBindCode,
-  consumeBindCode
+  consumeBindCode,
+  submitUserFeedback
 };

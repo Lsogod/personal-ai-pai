@@ -1,24 +1,21 @@
 <view class="ledger-page safe-bottom">
-  <!-- Guest -->
   <view class="guest-card card" wx:if="{{!authed}}">
-    <view class="guest-icon">💳</view>
+    <view class="guest-icon">💸</view>
     <view class="guest-title">登录查看账单</view>
     <view class="guest-desc">登录后查看账单明细、分类统计与趋势分析。</view>
     <button class="btn-primary guest-btn" bindtap="onGoLogin">微信登录</button>
   </view>
 
   <block wx:if="{{authed}}">
-    <!-- Tab Switch -->
     <view class="tab-bar">
       <view class="tab-item {{activeTab==='overview'?'active':''}}" data-tab="overview" bindtap="onSwitchTab">概览</view>
       <view class="tab-item {{activeTab==='list'?'active':''}}" data-tab="list" bindtap="onSwitchTab">明细</view>
     </view>
 
-    <!-- Overview Tab -->
     <block wx:if="{{activeTab==='overview'}}">
       <view class="summary-card">
         <view class="summary-head">
-          <text class="summary-label">近30天概览</text>
+          <text class="summary-label">本月概览</text>
         </view>
         <view class="summary-row">
           <view class="summary-metric">
@@ -28,7 +25,7 @@
           <view class="summary-divider"></view>
           <view class="summary-metric">
             <text class="metric-value">{{stats.count || 0}}</text>
-            <text class="metric-label">笔记录</text>
+            <text class="metric-label">笔数</text>
           </view>
           <view class="summary-divider"></view>
           <view class="summary-metric">
@@ -36,6 +33,48 @@
             <text class="metric-label">日均</text>
           </view>
         </view>
+      </view>
+
+      <view class="income-card card">
+        <view class="income-head">
+          <view class="income-title">收入与本月富余</view>
+          <switch
+            color="#4F6EF7"
+            checked="{{incomeFeatureEnabled}}"
+            bindchange="onIncomeToggle"
+          />
+        </view>
+        <view class="income-disabled" wx:if="{{!incomeFeatureEnabled}}">
+          已关闭。开启后可填写本月收入，系统会自动计算本月富余。
+        </view>
+        <block wx:if="{{incomeFeatureEnabled}}">
+          <view class="income-input-row">
+            <text class="income-label">本月收入</text>
+            <input
+              class="income-input"
+              type="digit"
+              value="{{monthlyIncomeInput}}"
+              placeholder="请输入本月收入"
+              bindinput="onIncomeInput"
+            />
+          </view>
+          <view class="income-metrics">
+            <view class="income-metric">
+              <text class="income-metric-label">收入</text>
+              <text class="income-metric-value">¥{{monthlyIncomeValue}}</text>
+            </view>
+            <view class="income-metric">
+              <text class="income-metric-label">支出</text>
+              <text class="income-metric-value">¥{{stats.total || 0}}</text>
+            </view>
+            <view class="income-metric">
+              <text class="income-metric-label">富余</text>
+              <text class="income-metric-value {{monthlySurplus>=0?'surplus-pos':'surplus-neg'}}">
+                ¥{{monthlySurplus}}
+              </text>
+            </view>
+          </view>
+        </block>
       </view>
 
       <view class="chart-card card">
@@ -56,43 +95,122 @@
 
       <view class="chart-card card">
         <view class="chart-head">
-          <text class="chart-title">近14天趋势</text>
+          <text class="chart-title">本月趋势（1号至今）</text>
           <text class="chart-sub" wx:if="{{maxDay.value>0}}">峰值 {{maxDay.label}} ¥{{maxDay.value}}</text>
         </view>
         <canvas id="trendCanvas" type="2d" class="trend-canvas" wx:if="{{!showForm}}"></canvas>
       </view>
     </block>
 
-    <!-- List Tab -->
     <block wx:if="{{activeTab==='list'}}">
       <view class="list-toolbar">
-        <view class="list-toolbar-title">账单明细</view>
+        <view>
+          <view class="list-toolbar-title">账单明细</view>
+          <view class="list-toolbar-meta">共 {{filteredCount}} 条</view>
+        </view>
         <view class="fab-btn" bindtap="onShowAdd">+ 记一笔</view>
       </view>
-      <scroll-view class="bill-list" scroll-y="true">
-        <view class="empty-state" wx:if="{{ledgers.length === 0}}">
-          <text class="empty-icon">📄</text>
-          <text class="empty-text">暂无账单，点击右上角添加</text>
-        </view>
-        <view class="bill-item card" wx:for="{{ledgers}}" wx:key="id">
-          <view class="bill-top">
-            <view class="bill-cat-dot" style="background:{{item._catClr}}"></view>
-            <text class="bill-name">{{item.item || '未命名'}}</text>
-            <text class="bill-amount">¥{{item.amount}}</text>
-          </view>
-          <view class="bill-bottom">
-            <text class="bill-meta">{{item._time}}</text>
-            <text class="bill-tag">{{item.category || '未分类'}}</text>
-            <view class="more-btn" id="more-{{index}}" data-index="{{index}}" catchtap="onShowMore">
-              <image class="more-icon" src="/assets/icons/ic-more.svg" mode="aspectFit" />
+
+      <view class="filter-panel card">
+        <view class="filter-head">
+          <view class="filter-head-title">筛选条件</view>
+          <view class="filter-head-actions">
+            <view class="filter-head-btn" bindtap="onResetFilters">重置</view>
+            <view class="filter-head-btn filter-head-btn-primary" bindtap="onToggleFilters">
+              {{filtersExpanded ? '收起' : '更多'}}
             </view>
           </view>
+        </view>
+
+        <view class="filter-collapsed" wx:if="{{!filtersExpanded}}">
+          <text>{{filterSummary}}</text>
+        </view>
+
+        <block wx:if="{{filtersExpanded}}">
+          <view class="filter-search">
+            <input
+              class="filter-search-input"
+              value="{{filterKeyword}}"
+              placeholder="搜索摘要、分类、金额"
+              placeholder-class="filter-placeholder"
+              bindinput="onFilterKeyword"
+            />
+            <view class="filter-clear" wx:if="{{filterKeyword}}" bindtap="onResetFilters">清空</view>
+          </view>
+
+          <view class="filter-row">
+            <text class="filter-label">分类</text>
+            <scroll-view class="chip-scroll" scroll-x="true" show-scrollbar="false">
+              <view class="chip-wrap">
+                <view class="chip {{filterCategory==='all'?'active':''}}" data-category="all" bindtap="onFilterCategory">全部</view>
+                <view class="chip {{filterCategory===item?'active':''}}" wx:for="{{filterCategories}}" wx:key="*this" data-category="{{item}}" bindtap="onFilterCategory">{{item}}</view>
+              </view>
+            </scroll-view>
+          </view>
+
+          <view class="filter-row">
+            <text class="filter-label">时间</text>
+            <view class="chip-wrap">
+              <view class="chip {{filterRange==='all'?'active':''}}" data-range="all" bindtap="onFilterRange">全部</view>
+              <view class="chip {{filterRange==='today'?'active':''}}" data-range="today" bindtap="onFilterRange">今天</view>
+              <view class="chip {{filterRange==='7d'?'active':''}}" data-range="7d" bindtap="onFilterRange">7天</view>
+              <view class="chip {{filterRange==='30d'?'active':''}}" data-range="30d" bindtap="onFilterRange">30天</view>
+              <view class="chip {{filterRange==='month'?'active':''}}" data-range="month" bindtap="onFilterRange">本月</view>
+            </view>
+          </view>
+
+          <view class="filter-row">
+            <text class="filter-label">排序</text>
+            <view class="chip-wrap">
+              <view class="chip {{sortMode==='time_desc'?'active':''}}" data-sort="time_desc" bindtap="onFilterSort">最新优先</view>
+              <view class="chip {{sortMode==='time_asc'?'active':''}}" data-sort="time_asc" bindtap="onFilterSort">最早优先</view>
+              <view class="chip {{sortMode==='amount_desc'?'active':''}}" data-sort="amount_desc" bindtap="onFilterSort">金额从高到低</view>
+              <view class="chip {{sortMode==='amount_asc'?'active':''}}" data-sort="amount_asc" bindtap="onFilterSort">金额从低到高</view>
+            </view>
+          </view>
+        </block>
+      </view>
+
+      <scroll-view class="bill-list" scroll-y="true" show-scrollbar="false" lower-threshold="120" bindscrolltolower="onListScrollToLower">
+        <view class="empty-state" wx:if="{{filteredCount===0}}">
+          <text class="empty-icon">🧾</text>
+          <text class="empty-text">暂无符合条件的账单</text>
+          <view class="empty-action" bindtap="onResetFilters">清空筛选</view>
+        </view>
+
+        <block wx:for="{{listGroups}}" wx:key="key">
+          <view class="bill-group">
+            <view class="bill-group-head">
+              <view class="bill-group-title">{{item.label}}</view>
+              <view class="bill-group-meta">{{item.count}} 笔 · ¥{{item.total}}</view>
+            </view>
+
+            <view class="bill-item card" wx:for="{{item.rows}}" wx:for-item="row" wx:key="id">
+              <view class="bill-top">
+                <view class="bill-cat-dot" style="background:{{row._catClr}}"></view>
+                <text class="bill-name">{{row.item || '未命名'}}</text>
+                <text class="bill-amount">¥{{row.amount}}</text>
+              </view>
+              <view class="bill-bottom">
+                <text class="bill-meta">{{row._time}}</text>
+                <text class="bill-tag">{{row.category || '未分类'}}</text>
+                <view class="more-btn" id="more-{{row.id}}" data-id="{{row.id}}" catchtap="onShowMore">
+                  <image class="more-icon" src="/assets/icons/ic-more.svg" mode="aspectFit" />
+                </view>
+              </view>
+            </view>
+          </view>
+        </block>
+
+        <view class="list-load-status" wx:if="{{loadingMore || hasMore || filteredCount>0}}" bindtap="onListScrollToLower">
+          <text wx:if="{{loadingMore}}">加载中...</text>
+          <text wx:elif="{{hasMore}}">上滑加载更多</text>
+          <text wx:else>没有更多了</text>
         </view>
       </scroll-view>
     </block>
   </block>
 
-  <!-- Pop Menu (fixed at page level) -->
   <block wx:if="{{popMenu.show}}">
     <view class="pop-overlay" catchtap="onCloseMore"></view>
     <view class="pop-menu" style="top:{{popMenu.top}}px;right:{{popMenu.right}}px;">
@@ -107,9 +225,8 @@
     </view>
   </block>
 
-  <!-- Add/Edit Form Modal -->
   <view class="modal-mask" wx:if="{{showForm}}" bindtap="onCloseForm">
-    <view class="modal-body card" catchtap="">
+    <view class="modal-body card" catchtap="onModalInnerTap">
       <view class="modal-title">{{formMode==='add' ? '新增账单' : '编辑账单'}}</view>
 
       <view class="form-group">
@@ -122,9 +239,16 @@
       </view>
       <view class="form-group">
         <text class="form-label">分类</text>
-        <picker mode="selector" range="{{cats}}" value="{{cats.indexOf(formCategory)}}" bindchange="onFormCat">
+        <picker mode="selector" range="{{formCategories}}" value="{{formCategories.indexOf(formCategory)}}" bindchange="onFormCat">
           <view class="form-picker">{{formCategory}} ▾</view>
         </picker>
+        <input
+          class="form-input form-input-sub"
+          placeholder="可输入自定义分类（可选）"
+          value="{{formCustomCategory}}"
+          maxlength="20"
+          bindinput="onFormCustomCategory"
+        />
       </view>
       <view class="form-group">
         <text class="form-label">日期</text>

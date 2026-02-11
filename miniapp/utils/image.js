@@ -8,6 +8,10 @@ function extToMime(path) {
 
 function filePathToDataUrl(filePath) {
   return new Promise((resolve, reject) => {
+    if (typeof filePath !== "string" || !filePath.trim()) {
+      reject(new Error("invalid image file path"));
+      return;
+    }
     const fs = wx.getFileSystemManager();
     fs.readFile({
       filePath,
@@ -23,6 +27,40 @@ function filePathToDataUrl(filePath) {
   });
 }
 
+function collectCandidatePaths(chooseRes) {
+  const paths = [];
+  const pushPath = (value) => {
+    if (typeof value !== "string") return;
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    paths.push(trimmed);
+  };
+
+  if (chooseRes && Array.isArray(chooseRes.tempFilePaths)) {
+    chooseRes.tempFilePaths.forEach(pushPath);
+  }
+  if (chooseRes && Array.isArray(chooseRes.apFilePaths)) {
+    chooseRes.apFilePaths.forEach(pushPath);
+  }
+  if (chooseRes && Array.isArray(chooseRes.filePaths)) {
+    chooseRes.filePaths.forEach(pushPath);
+  }
+
+  const files = chooseRes && Array.isArray(chooseRes.tempFiles) ? chooseRes.tempFiles : [];
+  for (const item of files) {
+    if (typeof item === "string") {
+      pushPath(item);
+      continue;
+    }
+    if (!item || typeof item !== "object") continue;
+    pushPath(item.tempFilePath);
+    pushPath(item.path);
+    pushPath(item.filePath);
+  }
+
+  return [...new Set(paths)];
+}
+
 async function pickImages(count = 6) {
   const chooseRes = await new Promise((resolve, reject) => {
     wx.chooseImage({
@@ -34,12 +72,24 @@ async function pickImages(count = 6) {
     });
   });
 
-  const files = chooseRes.tempFiles || [];
+  const candidatePaths = collectCandidatePaths(chooseRes).slice(0, Math.max(1, count));
+  if (candidatePaths.length === 0) {
+    throw new Error("no valid image file selected");
+  }
+
   const output = [];
-  for (const item of files) {
-    const path = item.tempFilePath;
-    const dataUrl = await filePathToDataUrl(path);
-    output.push({ path, dataUrl });
+  let lastErr = null;
+  for (const path of candidatePaths) {
+    try {
+      const dataUrl = await filePathToDataUrl(path);
+      output.push({ path, dataUrl });
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+
+  if (output.length === 0) {
+    throw lastErr || new Error("failed to read selected image");
   }
   return output;
 }

@@ -12,6 +12,7 @@ const {
 } = require("../../utils/http");
 const { pickImages } = require("../../utils/image");
 const { markdownToRichNodes } = require("../../utils/markdown");
+const DISPLAY_TZ_OFFSET_MINUTES = 8 * 60; // Asia/Shanghai
 
 /**
  * 解析 ISO 时间字符串并返回本地 HH:MM。
@@ -20,11 +21,10 @@ const { markdownToRichNodes } = require("../../utils/markdown");
  */
 function fmtTime(isoText) {
   if (!isoText) return "";
-  const safe = String(isoText).replace(/-/g, "/").replace("T", " ").replace(/Z.*$/, "");
-  const dt = new Date(safe);
-  if (Number.isNaN(dt.getTime())) return "";
-  const hh = `${dt.getHours()}`.padStart(2, "0");
-  const mm = `${dt.getMinutes()}`.padStart(2, "0");
+  const dt = toDisplayDate(isoText);
+  if (!dt) return "";
+  const hh = `${dt.getUTCHours()}`.padStart(2, "0");
+  const mm = `${dt.getUTCMinutes()}`.padStart(2, "0");
   return `${hh}:${mm}`;
 }
 
@@ -34,14 +34,36 @@ function nowIso() {
 
 function fmtDateTime(isoText) {
   if (!isoText) return "";
-  const safe = String(isoText).replace(/-/g, "/").replace("T", " ").replace(/Z.*$/, "");
-  const dt = new Date(safe);
-  if (Number.isNaN(dt.getTime())) return "";
-  const mm = `${dt.getMonth() + 1}`.padStart(2, "0");
-  const dd = `${dt.getDate()}`.padStart(2, "0");
-  const hh = `${dt.getHours()}`.padStart(2, "0");
-  const mi = `${dt.getMinutes()}`.padStart(2, "0");
+  const dt = toDisplayDate(isoText);
+  if (!dt) return "";
+  const mm = `${dt.getUTCMonth() + 1}`.padStart(2, "0");
+  const dd = `${dt.getUTCDate()}`.padStart(2, "0");
+  const hh = `${dt.getUTCHours()}`.padStart(2, "0");
+  const mi = `${dt.getUTCMinutes()}`.padStart(2, "0");
   return `${mm}-${dd} ${hh}:${mi}`;
+}
+
+function toDisplayDate(value) {
+  const dt = parseDateTime(value);
+  if (Number.isNaN(dt.getTime())) return "";
+  return new Date(dt.getTime() + DISPLAY_TZ_OFFSET_MINUTES * 60 * 1000);
+}
+
+function parseDateTime(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return new Date("");
+
+  // Keep timezone info when present (e.g. trailing "Z") so local conversion is correct.
+  let dt = new Date(raw);
+  if (!Number.isNaN(dt.getTime())) return dt;
+
+  // Fallback for engines that dislike "T" with timezone.
+  dt = new Date(raw.replace("T", " "));
+  if (!Number.isNaN(dt.getTime())) return dt;
+
+  // Last fallback for older parsers.
+  dt = new Date(raw.replace(/-/g, "/").replace("T", " ").replace(/Z$/, ""));
+  return dt;
 }
 
 function compactText(value, maxLen = 80) {
@@ -94,6 +116,7 @@ Page({
     this._wsTask = null;
     this._pingTimer = null;
     this._seenKeys = new Set();
+    this._seenReminderKeys = new Set();
     this._sendingLock = false;
     this._pendingUserEcho = [];
     this._streamQueue = [];
@@ -293,6 +316,29 @@ Page({
 
   messageKey(msg) {
     return `${msg.role}|${msg.created_at}|${msg.content}`;
+  },
+
+  reminderEventKey(payload) {
+    if (!payload || typeof payload !== "object") return "";
+    if (payload.schedule_id !== undefined && payload.schedule_id !== null) {
+      return `schedule:${payload.schedule_id}`;
+    }
+    const trigger = String(payload.trigger_time || "");
+    const content = String(payload.content || "");
+    if (!trigger && !content) return "";
+    return `fallback:${trigger}|${content}`;
+  },
+
+  seenReminder(payload) {
+    const key = this.reminderEventKey(payload);
+    if (!key) return false;
+    if (this._seenReminderKeys.has(key)) return true;
+    this._seenReminderKeys.add(key);
+    if (this._seenReminderKeys.size > 200) {
+      const oldest = this._seenReminderKeys.values().next().value;
+      this._seenReminderKeys.delete(oldest);
+    }
+    return false;
   },
 
   appendMessages(rows) {
@@ -504,6 +550,7 @@ Page({
       if (!payload || !payload.type) return;
 
       if (payload.type === "reminder") {
+        if (this.seenReminder(payload)) return;
         this.setPendingState("");
         const content = payload.content || "提醒";
         const createdAt = payload.created_at || nowIso();

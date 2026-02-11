@@ -1,5 +1,6 @@
 const { getToken } = require("../../utils/auth");
 const { fetchCalendar, createLedger, updateLedger, deleteLedger, createSchedule, updateSchedule, deleteSchedule } = require("../../utils/http");
+const DISPLAY_TZ_OFFSET_MINUTES = 8 * 60; // Asia/Shanghai
 
 function toISODate(dt) {
   const y = dt.getFullYear();
@@ -14,14 +15,31 @@ function monthRange(anchor) {
   return { start: toISODate(start), end: toISODate(end) };
 }
 
-function fmtSafe(iso) {
-  return String(iso || "").replace(/-/g, "/").replace("T", " ").replace(/Z.*$/, "");
+function parseDateTime(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return new Date("");
+
+  // Keep timezone info when present (e.g. trailing "Z") so local conversion is correct.
+  let dt = new Date(raw);
+  if (!Number.isNaN(dt.getTime())) return dt;
+
+  dt = new Date(raw.replace("T", " "));
+  if (!Number.isNaN(dt.getTime())) return dt;
+
+  dt = new Date(raw.replace(/-/g, "/").replace("T", " ").replace(/Z$/, ""));
+  return dt;
+}
+
+function toDisplayDate(value) {
+  const dt = parseDateTime(value);
+  if (Number.isNaN(dt.getTime())) return null;
+  return new Date(dt.getTime() + DISPLAY_TZ_OFFSET_MINUTES * 60 * 1000);
 }
 function fmtTime(isoText) {
   if (!isoText) return "";
-  const dt = new Date(fmtSafe(isoText));
-  if (Number.isNaN(dt.getTime())) return "";
-  return `${dt.getHours()}`.padStart(2,"0") + ":" + `${dt.getMinutes()}`.padStart(2,"0");
+  const dt = toDisplayDate(isoText);
+  if (!dt) return "";
+  return `${dt.getUTCHours()}`.padStart(2,"0") + ":" + `${dt.getUTCMinutes()}`.padStart(2,"0");
 }
 function nowISO() {
   const d = new Date(), pad = n => (n+"").padStart(2,"0");
