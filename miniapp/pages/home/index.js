@@ -29,5 +29,12 @@ Page({
     const token = getToken() || "";
     app.globalData.token = token;
     this.setData({ authed: !!token });
+  },
+
+  onShareAppMessage() {
+    return { title: '效率工具 — 记账·提醒·日程', path: '/pages/home/index' };
+  },
+  onShareTimeline() {
+    return { title: '效率工具 — 记账·提醒·日程' };
   }
 });

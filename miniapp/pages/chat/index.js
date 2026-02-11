@@ -4,6 +4,7 @@ const {
   fetchConversations,
   createConversation,
   switchConversation,
+  deleteConversation,
   fetchProfile,
   fetchLedgerStats,
   sendChat,
@@ -19,8 +20,7 @@ const { markdownToRichNodes } = require("../../utils/markdown");
  */
 function fmtTime(isoText) {
   if (!isoText) return "";
-  // 统一替换 iOS 不兼容的 "-" (Safari / 小程序引擎)
-  const safe = String(isoText).replace(/-/g, "/").replace("T", " ").replace("Z", " +00:00");
+  const safe = String(isoText).replace(/-/g, "/").replace("T", " ").replace(/Z.*$/, "");
   const dt = new Date(safe);
   if (Number.isNaN(dt.getTime())) return "";
   const hh = `${dt.getHours()}`.padStart(2, "0");
@@ -34,7 +34,7 @@ function nowIso() {
 
 function fmtDateTime(isoText) {
   if (!isoText) return "";
-  const safe = String(isoText).replace(/-/g, "/").replace("T", " ").replace("Z", " +00:00");
+  const safe = String(isoText).replace(/-/g, "/").replace("T", " ").replace(/Z.*$/, "");
   const dt = new Date(safe);
   if (Number.isNaN(dt.getTime())) return "";
   const mm = `${dt.getMonth() + 1}`.padStart(2, "0");
@@ -258,6 +258,36 @@ Page({
       wx.showToast({ title: "已切换记录", icon: "none" });
     } catch (err) {
       wx.showToast({ title: err.message || "切换失败", icon: "none" });
+    }
+  },
+
+  /* ── 删除会话 ── */
+  async onDeleteConversation(e) {
+    const id = Number(e.currentTarget.dataset.id);
+    if (!id) return;
+    const { confirm } = await new Promise(resolve =>
+      wx.showModal({
+        title: "删除记录",
+        content: "删除后无法恢复，是否继续？",
+        confirmText: "删除",
+        confirmColor: "#e74c3c",
+        success: resolve,
+        fail: () => resolve({ confirm: false })
+      })
+    );
+    if (!confirm) return;
+    try {
+      await deleteConversation(id);
+      wx.showToast({ title: "已删除", icon: "none" });
+      await this.loadConversations();
+      // 如果删的是当前活跃会话，重新加载消息
+      const active = this.data.conversations.find(x => x.active);
+      if (!active) {
+        this.setData({ messages: [] });
+        this._seenKeys.clear();
+      }
+    } catch (err) {
+      wx.showToast({ title: err.message || "删除失败", icon: "none" });
     }
   },
 
@@ -669,5 +699,12 @@ Page({
     this.setData({ sidebarOpen: false });
     const redirect = encodeURIComponent("/pages/chat/index");
     wx.navigateTo({ url: `/pages/login/index?redirect=${redirect}` });
+  },
+
+  onShareAppMessage() {
+    return { title: '效率工具 — 记账·提醒·日程', path: '/pages/home/index' };
+  },
+  onShareTimeline() {
+    return { title: '效率工具 — 记账·提醒·日程' };
   }
 });

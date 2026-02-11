@@ -83,25 +83,28 @@
           <view class="bill-bottom">
             <text class="bill-meta">{{item._time}}</text>
             <text class="bill-tag">{{item.category || '未分类'}}</text>
-            <view class="more-wrap">
-              <view class="more-btn" data-id="{{item.id}}" catchtap="onToggleMore">
-                <image class="more-icon" src="/assets/icons/ic-more.svg" mode="aspectFit" />
-              </view>
-              <view class="pop-menu" wx:if="{{expandedId === item.id}}">
-                <view class="pop-item" data-item="{{item}}" catchtap="onShowEdit">
-                  <image class="action-icon" src="/assets/icons/ic-edit.svg" mode="aspectFit" />
-                  <text>编辑</text>
-                </view>
-                <view class="pop-item pop-danger" data-item="{{item}}" catchtap="onDeleteLedger">
-                  <image class="action-icon" src="/assets/icons/ic-delete.svg" mode="aspectFit" />
-                  <text>删除</text>
-                </view>
-              </view>
+            <view class="more-btn" id="more-{{index}}" data-index="{{index}}" catchtap="onShowMore">
+              <image class="more-icon" src="/assets/icons/ic-more.svg" mode="aspectFit" />
             </view>
           </view>
         </view>
       </scroll-view>
     </block>
+  </block>
+
+  <!-- Pop Menu (fixed at page level) -->
+  <block wx:if="{{popMenu.show}}">
+    <view class="pop-overlay" catchtap="onCloseMore"></view>
+    <view class="pop-menu" style="top:{{popMenu.top}}px;right:{{popMenu.right}}px;">
+      <view class="pop-item" catchtap="onPopEdit">
+        <image class="action-icon" src="/assets/icons/ic-edit.svg" mode="aspectFit" />
+        <text>编辑</text>
+      </view>
+      <view class="pop-item pop-danger" catchtap="onPopDelete">
+        <image class="action-icon" src="/assets/icons/ic-delete.svg" mode="aspectFit" />
+        <text>删除</text>
+      </view>
+    </view>
   </block>
 
   <!-- Add/Edit Form Modal -->

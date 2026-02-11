@@ -15,7 +15,7 @@ function monthRange(anchor) {
 }
 
 function fmtSafe(iso) {
-  return String(iso || "").replace(/-/g, "/").replace("T", " ").replace("Z", " +00:00");
+  return String(iso || "").replace(/-/g, "/").replace("T", " ").replace(/Z.*$/, "");
 }
 function fmtTime(isoText) {
   if (!isoText) return "";
@@ -94,7 +94,7 @@ Page({
     calendarGrid: [], activeDate: "", activeDay: null,
     monthStats: { totalSpend:0,billCount:0,scheduleTotal:0,scheduleDone:0,schedulePending:0,doneRate:0,dailySpend:[] },
     cats: CATS,
-    expandedId: null,
+    popMenu: { show: false, top: 0, left: 0 },
     // Ledger form
     showLedgerForm: false, ledgerFormMode: "add", ledgerFormId: null,
     lf_amount: "", lf_item: "", lf_category: "其他", lf_date: "",
@@ -140,7 +140,7 @@ Page({
         monthLabel: `${year}年${month}月`, days, calendarGrid,
         activeDate: defaultDay ? defaultDay.date : "", activeDay: defaultDay,
         monthStats,
-      }, () => { this.drawSpendBar(); this.drawRateRing(); });
+      }, () => { setTimeout(() => { this.drawSpendBar(); this.drawRateRing(); }, 100); });
     } catch (err) { wx.showToast({ title: err.message || "加载失败", icon: "none" }); }
     finally { this.setData({ loading: false }); }
   },
@@ -156,11 +156,38 @@ Page({
   onPickDay(e) {
     const date = e.currentTarget.dataset.date;
     if (!date) return;
-    this.setData({ activeDate: date, activeDay: this.data.days.find(d => d.date === date) || null, expandedId: null });
+    this.setData({ activeDate: date, activeDay: this.data.days.find(d => d.date === date) || null });
   },
-  onToggleMore(e) {
-    const id = e.currentTarget.dataset.id;
-    this.setData({ expandedId: this.data.expandedId === id ? null : id });
+
+  onShowMore(e) {
+    const idx = e.currentTarget.dataset.index;
+    const type = e.currentTarget.dataset.type;
+    const list = type === 'ledger'
+      ? (this.data.activeDay && this.data.activeDay.ledgers || [])
+      : (this.data.activeDay && this.data.activeDay.schedules || []);
+    this._popItem = list[idx];
+    this._popType = type;
+    if (!this._popItem) return;
+    const elId = `#more-${type === 'ledger' ? 'l' : 's'}-${idx}`;
+    const sysInfo = wx.getWindowInfo();
+    this.createSelectorQuery().select(elId).boundingClientRect(rect => {
+      if (!rect) return;
+      const right = sysInfo.windowWidth - rect.right;
+      this.setData({ popMenu: { show: true, top: rect.bottom + 2, right: right } });
+    }).exec();
+  },
+  onCloseMore() { this.setData({ 'popMenu.show': false }); },
+  onPopEdit() {
+    this.setData({ 'popMenu.show': false });
+    if (!this._popItem) return;
+    if (this._popType === 'ledger') this.doEditLedger(this._popItem);
+    else this.doEditSchedule(this._popItem);
+  },
+  onPopDelete() {
+    this.setData({ 'popMenu.show': false });
+    if (!this._popItem) return;
+    if (this._popType === 'ledger') this.onDeleteLedger(this._popItem);
+    else this.onDeleteSchedule(this._popItem);
   },
 
   /* ── Ledger CRUD ── */
@@ -169,10 +196,10 @@ Page({
     this.setData({ showLedgerForm: true, ledgerFormMode: "add", ledgerFormId: null,
       lf_amount: "", lf_item: "", lf_category: "其他", lf_date: base + "T12:00" });
   },
-  onShowEditLedger(e) {
-    const item = e.currentTarget.dataset.item; if (!item) return;
+  doEditLedger(item) {
+    if (!item) return;
     const raw = (item.transaction_date || "").replace("Z","").slice(0,16);
-    this.setData({ expandedId: null, showLedgerForm: true, ledgerFormMode: "edit", ledgerFormId: item.id,
+    this.setData({ showLedgerForm: true, ledgerFormMode: "edit", ledgerFormId: item.id,
       lf_amount: String(item.amount||""), lf_item: item.item||"", lf_category: item.category||"其他", lf_date: raw });
   },
   onCloseLedgerForm() { this.setData({ showLedgerForm: false }, () => { setTimeout(() => { this.drawSpendBar(); this.drawRateRing(); }, 60); }); },
@@ -193,9 +220,8 @@ Page({
       this.setData({ showLedgerForm: false }); this.loadMonth();
     } catch (err) { wx.showToast({ title: err.message || "操作失败", icon: "none" }); }
   },
-  onDeleteLedger(e) {
-    const item = e.currentTarget.dataset.item; if (!item) return;
-    this.setData({ expandedId: null });
+  onDeleteLedger(item) {
+    if (!item) return;
     wx.showModal({ title: "确认删除", content: `删除「${item.item||"账单"}」¥${item.amount}？`, confirmColor: "#EF4444",
       success: async (res) => { if (!res.confirm) return;
         try { await deleteLedger(item.id); wx.showToast({ title: "已删除", icon: "success" }); this.loadMonth(); }
@@ -210,10 +236,10 @@ Page({
     this.setData({ showScheduleForm: true, scheduleFormMode: "add", scheduleFormId: null,
       sf_content: "", sf_date: base, sf_time: "12:00" });
   },
-  onShowEditSchedule(e) {
-    const item = e.currentTarget.dataset.item; if (!item) return;
+  doEditSchedule(item) {
+    if (!item) return;
     const raw = (item.trigger_time || "").replace("Z","");
-    this.setData({ expandedId: null, showScheduleForm: true, scheduleFormMode: "edit", scheduleFormId: item.id,
+    this.setData({ showScheduleForm: true, scheduleFormMode: "edit", scheduleFormId: item.id,
       sf_content: item.content||"", sf_date: raw.slice(0,10), sf_time: raw.slice(11,16)||"12:00" });
   },
   onCloseScheduleForm() { this.setData({ showScheduleForm: false }, () => { setTimeout(() => { this.drawSpendBar(); this.drawRateRing(); }, 60); }); },
@@ -231,9 +257,8 @@ Page({
       this.setData({ showScheduleForm: false }); this.loadMonth();
     } catch (err) { wx.showToast({ title: err.message || "操作失败", icon: "none" }); }
   },
-  onDeleteSchedule(e) {
-    const item = e.currentTarget.dataset.item; if (!item) return;
-    this.setData({ expandedId: null });
+  onDeleteSchedule(item) {
+    if (!item) return;
     wx.showModal({ title: "确认删除", content: `删除日程「${item.content||""}」？`, confirmColor: "#EF4444",
       success: async (res) => { if (!res.confirm) return;
         try { await deleteSchedule(item.id); wx.showToast({ title: "已删除", icon: "success" }); this.loadMonth(); }
@@ -254,11 +279,20 @@ Page({
     wx.navigateTo({ url: `/pages/login/index?redirect=${encodeURIComponent("/pages/calendar/index")}` });
   },
 
+  onShareAppMessage() {
+    return { title: '效率工具 — 记账·提醒·日程', path: '/pages/home/index' };
+  },
+  onShareTimeline() {
+    return { title: '效率工具 — 记账·提醒·日程' };
+  },
+
   /* ── Charts ── */
   drawSpendBar() {
-    this.createSelectorQuery().select("#spendBarCanvas").fields({ node: true, size: true }).exec(res => {
+    this.createSelectorQuery().select("#spendBarCanvas").fields({ node: true, rect: true }).exec(res => {
       if (!res || !res[0] || !res[0].node) return;
-      const c = res[0].node, ctx = c.getContext("2d"), dpr = this._dpr, w = res[0].width, h = res[0].height;
+      const c = res[0].node, ctx = c.getContext("2d"), dpr = this._dpr;
+      const w = res[0].width || 300;
+      const h = res[0].height || 90;
       c.width = w * dpr; c.height = h * dpr; ctx.scale(dpr, dpr); this._drawBars(ctx, w, h);
     });
   },
@@ -286,9 +320,11 @@ Page({
     }
   },
   drawRateRing() {
-    this.createSelectorQuery().select("#rateRingCanvas").fields({ node: true, size: true }).exec(res => {
+    this.createSelectorQuery().select("#rateRingCanvas").fields({ node: true, rect: true }).exec(res => {
       if (!res || !res[0] || !res[0].node) return;
-      const c = res[0].node, ctx = c.getContext("2d"), dpr = this._dpr, w = res[0].width, h = res[0].height;
+      const c = res[0].node, ctx = c.getContext("2d"), dpr = this._dpr;
+      const w = res[0].width || 80;
+      const h = res[0].height || 80;
       c.width = w * dpr; c.height = h * dpr; ctx.scale(dpr, dpr); this._drawRing(ctx, w, h);
     });
   },

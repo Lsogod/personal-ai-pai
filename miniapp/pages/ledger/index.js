@@ -2,8 +2,23 @@ const { getToken } = require("../../utils/auth");
 const { fetchLedgers, fetchLedgerStats, createLedger, updateLedger, deleteLedger } = require("../../utils/http");
 
 function fmtSafe(iso) {
-  return String(iso || "").replace(/-/g, "/").replace("T", " ").replace("Z", " +00:00");
+  return String(iso || "").replace(/-/g, "/").replace("T", " ").replace(/Z.*$/, "");
 }
+
+/**
+ * 从 ISO 日期字符串中提取本地月/日（用于折线图 key）。
+ * 不依赖 new Date() 解析时区格式，手动提取年月日后构造。
+ */
+function parseLocalDate(iso) {
+  if (!iso) return null;
+  // 匹配 "2026-02-11T19:27:00Z" 或 "2026-02-11 19:27:00"
+  const s = String(iso);
+  const m = s.match(/(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  if (!m) return null;
+  // 用 "/" 分隔的纯数字格式，iOS 一定能解析
+  return new Date(m[1] + "/" + m[2] + "/" + m[3] + " " + m[4] + ":" + m[5]);
+}
+
 function fmtDateTime(iso) {
   if (!iso) return "";
   const d = new Date(fmtSafe(iso));
@@ -35,8 +50,8 @@ function buildCatStats(rows){
 function buildDailyTrend(rows){
   const m={};
   for(const r of rows){
-    const dt=new Date(fmtSafe(r.transaction_date));
-    if(Number.isNaN(dt.getTime()))continue;
+    const dt=parseLocalDate(r.transaction_date);
+    if(!dt||Number.isNaN(dt.getTime()))continue;
     const k=(dt.getMonth()+1)+"/"+dt.getDate();
     m[k]=(m[k]||0)+(parseFloat(r.amount)||0);
   }
@@ -57,7 +72,7 @@ Page({
     avgDaily:0,maxDay:{label:"-",value:0},
     activeTab:"overview",
     cats:CATS,
-    expandedId:null,
+    popMenu:{ show:false, top:0, left:0 },
     // form
     showForm:false, formMode:"add", formId:null,
     formAmount:"", formItem:"", formCategory:"其他", formDate:"",
@@ -84,14 +99,32 @@ Page({
       const avgDaily=vals.length?Math.round(vals.reduce((a,b)=>a+b,0)/14*100)/100:0;
       const maxDay=dailyTrend.reduce((a,b)=>b.value>a.value?b:a,{label:"-",value:0});
       this.setData({stats:stats||{total:0,count:0},ledgers:rows,catStats,dailyTrend,avgDaily,maxDay},()=>{
-        if(this.data.activeTab==="overview"){this.drawPie();this.drawTrend();}
+        if(this.data.activeTab==="overview"){
+          setTimeout(()=>{this.drawPie();this.drawTrend();},100);
+        }
       });
     }catch(err){wx.showToast({title:err.message||"加载失败",icon:"none"});}
     finally{this.setData({loading:false});this._loaded=true;}
   },
-  onToggleMore(e){
-    const id=e.currentTarget.dataset.id;
-    this.setData({expandedId:this.data.expandedId===id?null:id});
+  onShowMore(e){
+    const idx=e.currentTarget.dataset.index;
+    this._popItem=this.data.ledgers[idx];
+    if(!this._popItem)return;
+    const sysInfo=wx.getWindowInfo();
+    this.createSelectorQuery().select(`#more-${idx}`).boundingClientRect(rect=>{
+      if(!rect)return;
+      const right=sysInfo.windowWidth-rect.right;
+      this.setData({ popMenu:{ show:true, top:rect.bottom+2, right:right } });
+    }).exec();
+  },
+  onCloseMore(){ this.setData({ 'popMenu.show':false }); },
+  onPopEdit(){
+    this.setData({ 'popMenu.show':false });
+    if(this._popItem) this.doEdit(this._popItem);
+  },
+  onPopDelete(){
+    this.setData({ 'popMenu.show':false });
+    if(this._popItem) this.doDelete(this._popItem);
   },
   onSwitchTab(e){
     const tab=e.currentTarget.dataset.tab;
@@ -104,11 +137,10 @@ Page({
   onShowAdd(){
     this.setData({showForm:true,formMode:"add",formId:null,formAmount:"",formItem:"",formCategory:"其他",formDate:todayISO()});
   },
-  onShowEdit(e){
-    const item=e.currentTarget.dataset.item;
+  doEdit(item){
     if(!item)return;
     const rawDate=(item.transaction_date||"").replace("Z","").slice(0,16);
-    this.setData({expandedId:null,showForm:true,formMode:"edit",formId:item.id,formAmount:String(item.amount||""),formItem:item.item||"",formCategory:item.category||"其他",formDate:rawDate||todayISO()});
+    this.setData({showForm:true,formMode:"edit",formId:item.id,formAmount:String(item.amount||""),formItem:item.item||"",formCategory:item.category||"其他",formDate:rawDate||todayISO()});
   },
   onCloseForm(){this.setData({showForm:false},()=>{if(this.data.activeTab==="overview")setTimeout(()=>{this.drawPie();this.drawTrend();},60);});},
   onFormAmount(e){this.setData({formAmount:e.detail.value});},
@@ -144,10 +176,8 @@ Page({
     }catch(err){wx.showToast({title:err.message||"操作失败",icon:"none"});}
   },
 
-  onDeleteLedger(e){
-    const item=e.currentTarget.dataset.item;
+  doDelete(item){
     if(!item)return;
-    this.setData({expandedId:null});
     wx.showModal({
       title:"确认删除",
       content:"删除「"+(item.item||"账单")+"」¥"+item.amount+"？",
@@ -165,9 +195,11 @@ Page({
 
   /* ── Charts ── */
   drawPie(){
-    this.createSelectorQuery().select("#pieCanvas").fields({node:true,size:true}).exec(res=>{
+    this.createSelectorQuery().select("#pieCanvas").fields({node:true,rect:true}).exec(res=>{
       if(!res||!res[0]||!res[0].node)return;
-      const c=res[0].node,ctx=c.getContext("2d"),dpr=this._dpr,w=res[0].width,h=res[0].height;
+      const c=res[0].node,ctx=c.getContext("2d"),dpr=this._dpr;
+      const w=res[0].width||120;
+      const h=res[0].height||120;
       c.width=w*dpr;c.height=h*dpr;ctx.scale(dpr,dpr);this._pie(ctx,w,h);
     });
   },
@@ -188,9 +220,11 @@ Page({
     ctx.fillStyle="#6b7280";ctx.font="11px -apple-system,sans-serif";ctx.fillText("总支出",cx,cy+12);
   },
   drawTrend(){
-    this.createSelectorQuery().select("#trendCanvas").fields({node:true,size:true}).exec(res=>{
+    this.createSelectorQuery().select("#trendCanvas").fields({node:true,rect:true}).exec(res=>{
       if(!res||!res[0]||!res[0].node)return;
-      const c=res[0].node,ctx=c.getContext("2d"),dpr=this._dpr,w=res[0].width,h=res[0].height;
+      const c=res[0].node,ctx=c.getContext("2d"),dpr=this._dpr;
+      const w=res[0].width||300;
+      const h=res[0].height||160;
       c.width=w*dpr;c.height=h*dpr;ctx.scale(dpr,dpr);this._trend(ctx,w,h);
     });
   },
@@ -216,5 +250,12 @@ Page({
     ctx.fillStyle="#9ca3af";ctx.font="9px -apple-system,sans-serif";ctx.textAlign="center";ctx.textBaseline="top";
     for(let i=0;i<data.length;i++){if(i%3===0||i===data.length-1)ctx.fillText(data[i].label,pts[i].x,pT+cH+6);}
   },
-  onGoLogin(){wx.navigateTo({url:"/pages/login/index?redirect="+encodeURIComponent("/pages/ledger/index")});}
+  onGoLogin(){wx.navigateTo({url:"/pages/login/index?redirect="+encodeURIComponent("/pages/ledger/index")});},
+
+  onShareAppMessage(){
+    return{title:'效率工具 — 记账·提醒·日程',path:'/pages/home/index'};
+  },
+  onShareTimeline(){
+    return{title:'效率工具 — 记账·提醒·日程'};
+  }
 });

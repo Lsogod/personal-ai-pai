@@ -89,6 +89,12 @@ function switchConversation(conversationId) {
   });
 }
 
+function deleteConversation(conversationId) {
+  return request(`/api/conversations/${conversationId}`, {
+    method: "DELETE"
+  });
+}
+
 function sendChat(content, imageUrls) {
   return request("/api/chat/send", {
     method: "POST",
@@ -173,6 +179,7 @@ module.exports = {
   fetchConversations,
   createConversation,
   switchConversation,
+  deleteConversation,
   sendChat,
   fetchCalendar,
   fetchLedgerStats,

@@ -113,20 +113,25 @@
 .detail-content.done-text { text-decoration: line-through; color: var(--c-text-3); }
 .detail-time { margin-top: 4rpx; font-size: 22rpx; color: var(--c-text-3); display: block; }
 .detail-amount { font-size: 26rpx; font-weight: 700; color: var(--c-primary); white-space: nowrap; }
-.more-wrap { position: relative; flex-shrink: 0; }
 .more-btn {
   width: 48rpx; height: 48rpx; display: flex;
   align-items: center; justify-content: center;
   border-radius: 50%; transition: background 0.15s;
+  flex-shrink: 0;
 }
 .more-btn:active { background: var(--c-border-light); }
 .more-icon { width: 28rpx; height: 28rpx; }
+
+.pop-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 900; background: transparent;
+}
 .pop-menu {
-  position: absolute; right: 0; top: 52rpx; z-index: 50;
+  position: fixed; z-index: 910;
   background: var(--c-surface); border-radius: var(--r-lg);
-  box-shadow: 0 8rpx 32rpx rgba(0,0,0,0.12);
+  box-shadow: 0 8rpx 32rpx rgba(0,0,0,0.14);
   border: 1rpx solid var(--c-border-light);
-  overflow: hidden; min-width: 180rpx;
+  min-width: 180rpx;
 }
 .pop-item {
   display: flex; align-items: center; gap: 12rpx;
