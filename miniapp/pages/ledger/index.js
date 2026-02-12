@@ -336,6 +336,12 @@ Page({
     }
     this.setData({ authed: true });
     this.loadData();
+    const app = getApp();
+    if (app.globalData.homeQuickAction === "ledger_add") {
+      app.globalData.homeQuickAction = "";
+      this.setData({ activeTab: "list" });
+      setTimeout(() => this.onShowAdd(), 0);
+    }
   },
 
   restoreIncomeSettings() {

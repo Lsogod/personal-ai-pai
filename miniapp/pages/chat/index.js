@@ -95,6 +95,61 @@ function normText(value) {
   return String(value || "").trim();
 }
 
+function toInt(value, fallback = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.trunc(n);
+}
+
+function buildOnboardingView(profile) {
+  const setupStage = toInt(profile && profile.setup_stage, 0);
+  const bindingStage = toInt(profile && profile.binding_stage, 0);
+  if (setupStage >= 3) {
+    return {
+      guideVisible: false,
+      onboardingTitle: "",
+      onboardingHint: "",
+      onboardingPlaceholder: "",
+      onboardingSuggestions: [],
+    };
+  }
+
+  if (setupStage === 0 && bindingStage <= 1) {
+    return {
+      guideVisible: true,
+      onboardingTitle: "账号绑定引导",
+      onboardingHint: "请先确认你在其他客户端是否已有账号，也可以直接输入绑定命令。",
+      onboardingPlaceholder: "输入 有 / 没有 / 继续 / /bind ...",
+      onboardingSuggestions: [
+        { label: "有", text: "有" },
+        { label: "没有", text: "没有" },
+        { label: "继续", text: "继续" },
+        { label: "生成绑定码", text: "/bind new" },
+      ],
+    };
+  }
+
+  if (setupStage <= 1) {
+    return {
+      guideVisible: true,
+      onboardingTitle: "设置你的称呼",
+      onboardingHint: "完成这个步骤后，我会按你设定的名字来称呼你。",
+      onboardingPlaceholder: "输入你的称呼",
+    };
+  }
+
+  return {
+    guideVisible: true,
+    onboardingTitle: "给助手起名",
+    onboardingHint: "再完成一步后将打开完整输入框，你可以开始正常使用指令面板。",
+    onboardingPlaceholder: "例如：贾维斯 🤖",
+    onboardingSuggestions: [
+      { label: "贾维斯 🤖", text: "贾维斯 🤖" },
+      { label: "PAI 🤖", text: "PAI 🤖" },
+    ],
+  };
+}
+
 Page({
   data: {
     authed: false,
@@ -106,6 +161,15 @@ Page({
     loadingConversations: false,
     pendingState: "",
     inputText: "",
+    guideVisible: true,
+    onboardingTitle: "",
+    onboardingHint: "",
+    onboardingPlaceholder: "",
+    onboardingSuggestions: [],
+    onboardingInput: "",
+    onboardingDefaultPlaceholder: "\u8bf7\u8f93\u5165",
+    onboardingConfirmText: "\u786e\u8ba4",
+    onboardingWaitingText: "\u6b63\u5728\u7b49\u5f85\u540e\u53f0\u56de\u590d...",
     selectedImages: [],
     sending: false,
     wsOpen: false,
@@ -135,12 +199,6 @@ Page({
       this.connectSocket();
       this.scrollToBottom(true);
       // 从首页快捷指令跳转过来
-      const app = getApp();
-      if (app.globalData.pendingCmd) {
-        const cmd = app.globalData.pendingCmd;
-        app.globalData.pendingCmd = "";
-        this.setData({ inputText: cmd });
-      }
       return;
     }
     this.closeSocket();
@@ -152,6 +210,12 @@ Page({
       conversations: [],
       loadingConversations: false,
       pendingState: "",
+      guideVisible: false,
+      onboardingTitle: "",
+      onboardingHint: "",
+      onboardingPlaceholder: "",
+      onboardingSuggestions: [],
+      onboardingInput: "",
       notifyCards: []
     });
   },
@@ -191,6 +255,41 @@ Page({
     return true;
   },
 
+  applyProfile(profile, extraPatch = {}) {
+    const onboarding = buildOnboardingView(profile);
+    this.setData({
+      profile,
+      guideVisible: onboarding.guideVisible,
+      sidebarOpen: onboarding.guideVisible ? false : this.data.sidebarOpen,
+      onboardingTitle: onboarding.onboardingTitle,
+      onboardingHint: onboarding.onboardingHint,
+      onboardingPlaceholder: onboarding.onboardingPlaceholder,
+      onboardingSuggestions: onboarding.onboardingSuggestions,
+      ...extraPatch,
+    });
+  },
+
+  consumePendingCmd(profile) {
+    const onboarding = buildOnboardingView(profile);
+    if (onboarding.guideVisible) return;
+    const app = getApp();
+    const cmd = String(app.globalData.pendingCmd || "").trim();
+    if (!cmd) return;
+    app.globalData.pendingCmd = "";
+    this.setData({ inputText: cmd });
+  },
+
+  async refreshProfileState() {
+    if (!this.data.authed) return;
+    try {
+      const profile = await fetchProfile();
+      this.applyProfile(profile);
+      this.consumePendingCmd(profile);
+    } catch (err) {
+      // ignore profile refresh errors
+    }
+  },
+
   async loadInitial() {
     if (!this.data.authed) return;
     try {
@@ -202,13 +301,12 @@ Page({
       const messages = (history || []).map(normalizeMessage);
       this._seenKeys.clear();
       messages.forEach((m) => this._seenKeys.add(this.messageKey(m)));
-      this.setData({
-        profile,
+      this.applyProfile(profile, {
         stats: stats || { total: 0, count: 0 },
-        messages
-      }, () => {
-        this.scrollToBottom(true);
+        messages,
       });
+      this.consumePendingCmd(profile);
+      this.scrollToBottom(true);
     } catch (err) {
       wx.showToast({ title: err.message || "加载失败", icon: "none" });
     }
@@ -235,6 +333,10 @@ Page({
   onToggleSidebar() {
     if (!this.data.authed) {
       this.onGoLogin();
+      return;
+    }
+    if (this.data.guideVisible) {
+      wx.showToast({ title: "\u8bf7\u5148\u5b8c\u6210\u5f15\u5bfc", icon: "none" });
       return;
     }
     const next = !this.data.sidebarOpen;
@@ -629,11 +731,23 @@ Page({
     this.setData({ inputText: raw });
   },
 
-  onUseTemplate(e) {
-    const text = String(e.currentTarget.dataset.template || "").trim();
+  onOnboardingInput(e) {
+    if (this.data.sending || this.data.pendingState) return;
+    this.setData({ onboardingInput: e.detail.value || "" });
+  },
+
+  onOnboardingUseSuggestion(e) {
+    if (this.data.sending || this.data.pendingState) return;
+    const text = String(e.currentTarget.dataset.text || "").trim();
     if (!text) return;
-    this.setData({ inputText: text });
-    this.scrollToBottom();
+    this.setData({ onboardingInput: "", inputText: text }, () => this.onSend());
+  },
+
+  onOnboardingSubmit() {
+    if (this.data.sending || this.data.pendingState) return;
+    const text = String(this.data.onboardingInput || "").trim();
+    if (!text) return;
+    this.setData({ onboardingInput: "", inputText: text }, () => this.onSend());
   },
 
   onConfirmSend() {
@@ -717,6 +831,7 @@ Page({
         });
       }
       this.refreshStats();
+      this.refreshProfileState();
     } catch (err) {
       this.setPendingState("");
       // Rollback input on failure to prevent user text loss.

@@ -17,6 +17,7 @@ from app.models.admin_tool import AdminToolSwitch
 from app.models.llm_usage import LLMUsageLog
 from app.models.tool_usage import ToolUsageLog
 from app.models.feedback import UserFeedback
+from app.models.app_setting import AppSetting
 
 
 async def init_db() -> None:

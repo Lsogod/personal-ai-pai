@@ -33,7 +33,7 @@
   </view>
 
   <!-- Notifications -->
-  <view class="notify-stack" wx:if="{{notifyCards.length > 0}}">
+  <view class="notify-stack" wx:if="{{notifyCards.length > 0 && !guideVisible}}">
     <view class="notify-card" wx:for="{{notifyCards}}" wx:key="id">
       <view class="notify-head">
         <text class="notify-title">⏰ 日程提醒</text>
@@ -69,37 +69,47 @@
     </view>
   </view>
 
-  <!-- Quick templates -->
-  <view class="tpl-board">
-    <view class="tpl-grid">
-      <view class="tpl-card" data-template="今天午饭30元，分类餐饮" bindtap="onUseTemplate">
-        <text class="tpl-emoji">📝</text>
-        <text class="tpl-name">记账</text>
-      </view>
-      <view class="tpl-card" data-template="明天14:00提醒我开会" bindtap="onUseTemplate">
-        <text class="tpl-emoji">⏰</text>
-        <text class="tpl-name">提醒</text>
-      </view>
-      <view class="tpl-card" data-template="查看本周账单" bindtap="onUseTemplate">
-        <text class="tpl-emoji">📊</text>
-        <text class="tpl-name">查询</text>
-      </view>
-      <view class="tpl-card" data-template="查看本周日程" bindtap="onUseTemplate">
-        <text class="tpl-emoji">📋</text>
-        <text class="tpl-name">日程</text>
+  <!-- Onboarding -->
+  <view class="guide-board card {{(sending || pendingState) ? 'is-waiting' : ''}}" wx:if="{{authed && guideVisible}}">
+    <view class="guide-title">{{onboardingTitle || '首次引导'}}</view>
+    <view class="guide-sub">{{onboardingHint}}</view>
+    <view class="onboarding-chip-list" wx:if="{{onboardingSuggestions.length > 0}}">
+      <view
+        class="onboarding-chip {{(sending || pendingState) ? 'disabled' : ''}}"
+        wx:for="{{onboardingSuggestions}}"
+        wx:key="label"
+        data-text="{{item.text}}"
+        bindtap="onOnboardingUseSuggestion"
+      >
+        {{item.label}}
       </view>
     </view>
-    <scroll-view class="tpl-chip-row" scroll-x="true" enhanced="{{true}}" show-scrollbar="{{false}}">
-      <view class="tpl-chip-inner">
-        <view class="tpl-chip" data-template="识别这张截图并记账" bindtap="onUseTemplate">📷 截图记账</view>
-        <view class="tpl-chip" data-template="今天有什么待办" bindtap="onUseTemplate">📌 检查待办</view>
-        <view class="tpl-chip" data-template="最近30天消费汇总" bindtap="onUseTemplate">📈 月度汇总</view>
-      </view>
-    </scroll-view>
+    <view class="onboarding-input-row">
+      <input
+        class="onboarding-input {{(sending || pendingState) ? 'disabled' : ''}}"
+        value="{{onboardingInput}}"
+        placeholder="{{onboardingPlaceholder || onboardingDefaultPlaceholder}}"
+        placeholder-class="onboarding-placeholder"
+        confirm-type="send"
+        disabled="{{sending || pendingState}}"
+        bindinput="onOnboardingInput"
+        bindconfirm="onOnboardingSubmit"
+      />
+      <button
+        class="btn-primary onboarding-send-btn {{(sending || pendingState) ? 'disabled' : ''}}"
+        bindtap="onOnboardingSubmit"
+        disabled="{{sending || pendingState}}"
+        loading="{{sending || pendingState}}"
+      >{{onboardingConfirmText}}</button>
+    </view>
+    <view class="onboarding-waiting" wx:if="{{sending || pendingState}}">
+      <view class="wait-dot"></view>
+      <text class="onboarding-waiting-text">{{onboardingWaitingText}}</text>
+    </view>
   </view>
 
   <!-- Log stream -->
-  <view class="log-list">
+  <view class="log-list" wx:if="{{!guideVisible}}">
     <view
       wx:for="{{messages}}"
       wx:key="created_at"
@@ -170,7 +180,7 @@
   </view>
 
   <!-- Composer -->
-  <view class="composer safe-bottom">
+  <view class="composer safe-bottom" wx:if="{{authed && !guideVisible}}">
     <view class="preview-area" wx:if="{{selectedImages.length > 0}}">
       <scroll-view class="preview-list" scroll-x="true">
         <view class="preview-inner">

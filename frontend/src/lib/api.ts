@@ -623,6 +623,17 @@ export interface AdminFeedbackItem {
   created_at: string;
 }
 
+export interface AdminMiniappHomePopupConfig {
+  enabled: boolean;
+  title: string;
+  content: string;
+  show_mode: "always" | "once_per_day" | "once_per_version";
+  start_at: string;
+  end_at: string;
+  version: number;
+  primary_button_text: string;
+}
+
 export interface AdminConversationItem {
   id: number;
   user_id: number;
@@ -818,4 +829,19 @@ export function fetchAdminFeedbacks(
     total: number;
     items: AdminFeedbackItem[];
   }>;
+}
+
+export function fetchAdminMiniappHomePopup(adminToken: string) {
+  return adminRequest("/api/admin/v1/miniapp/home-popup", {}, adminToken) as Promise<AdminMiniappHomePopupConfig>;
+}
+
+export function saveAdminMiniappHomePopup(
+  adminToken: string,
+  payload: AdminMiniappHomePopupConfig
+) {
+  return adminRequest(
+    "/api/admin/v1/miniapp/home-popup",
+    { method: "PUT", body: JSON.stringify(payload) },
+    adminToken
+  ) as Promise<{ ok: boolean; updated_at: string; config: AdminMiniappHomePopupConfig }>;
 }

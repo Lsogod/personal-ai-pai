@@ -150,6 +150,11 @@ Page({
     this.setData({ authed, monthLabel: `${year}年${month}月` });
     if (!authed) { this.setData({ days: [], calendarGrid: [], activeDate: "", activeDay: null }); return; }
     this.loadMonth();
+    const app = getApp();
+    if (app.globalData.homeQuickAction === "schedule_add") {
+      app.globalData.homeQuickAction = "";
+      setTimeout(() => this.onShowAddSchedule(), 0);
+    }
   },
 
   async loadMonth() {

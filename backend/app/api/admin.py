@@ -15,6 +15,7 @@ from app.models.admin_tool import AdminToolSwitch
 from app.models.audit import AuditLog
 from app.models.conversation import Conversation
 from app.models.feedback import UserFeedback
+from app.models.app_setting import AppSetting
 from app.models.identity import UserIdentity
 from app.models.ledger import Ledger
 from app.models.llm_usage import LLMUsageLog
@@ -51,7 +52,32 @@ class ToolSwitchPayload(BaseModel):
     enabled: bool
 
 
+class MiniappHomePopupPayload(BaseModel):
+    enabled: bool = False
+    title: str = "系统公告"
+    content: str = ""
+    show_mode: str = "once_per_day"
+    start_at: str | None = ""
+    end_at: str | None = ""
+    version: int = Field(default=1, ge=1, le=100000)
+    primary_button_text: str = "我知道了"
+
+
 router = APIRouter(prefix="/api/admin/v1", dependencies=[Depends(require_admin)])
+MINIAPP_HOME_POPUP_KEY = "miniapp_home_popup"
+
+
+def _default_miniapp_home_popup() -> dict:
+    return {
+        "enabled": False,
+        "title": "系统公告",
+        "content": "",
+        "show_mode": "once_per_day",
+        "start_at": "",
+        "end_at": "",
+        "version": 1,
+        "primary_button_text": "我知道了",
+    }
 
 
 def _today_start_utc_naive() -> datetime:
@@ -1076,4 +1102,77 @@ async def admin_feedbacks(
             }
             for row in rows
         ],
+    }
+
+
+@router.get("/miniapp/home-popup")
+async def admin_miniapp_home_popup(
+    session: AsyncSession = Depends(get_session),
+):
+    data = _default_miniapp_home_popup()
+    row = (
+        (
+            await session.execute(
+                select(AppSetting).where(AppSetting.key == MINIAPP_HOME_POPUP_KEY).limit(1)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if row:
+        try:
+            payload = json.loads(row.value or "{}")
+            if isinstance(payload, dict):
+                data.update(payload)
+        except Exception:
+            pass
+    return data
+
+
+@router.put("/miniapp/home-popup")
+async def admin_miniapp_home_popup_upsert(
+    payload: MiniappHomePopupPayload,
+    session: AsyncSession = Depends(get_session),
+):
+    mode = str(payload.show_mode or "").strip().lower()
+    if mode not in {"always", "once_per_day", "once_per_version"}:
+        raise HTTPException(status_code=400, detail="invalid show_mode")
+    for field_name in ("start_at", "end_at"):
+        raw = str(getattr(payload, field_name) or "").strip()
+        if not raw:
+            continue
+        try:
+            datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"{field_name} invalid datetime format")
+    data = {
+        "enabled": bool(payload.enabled),
+        "title": str(payload.title or "").strip()[:80],
+        "content": str(payload.content or "").strip()[:1000],
+        "show_mode": mode,
+        "start_at": str(payload.start_at or "").strip(),
+        "end_at": str(payload.end_at or "").strip(),
+        "version": int(payload.version or 1),
+        "primary_button_text": str(payload.primary_button_text or "我知道了").strip()[:20] or "我知道了",
+    }
+    row = (
+        (
+            await session.execute(
+                select(AppSetting).where(AppSetting.key == MINIAPP_HOME_POPUP_KEY).limit(1)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if not row:
+        row = AppSetting(key=MINIAPP_HOME_POPUP_KEY, value=json.dumps(data, ensure_ascii=False))
+    else:
+        row.value = json.dumps(data, ensure_ascii=False)
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return {
+        "ok": True,
+        "updated_at": row.updated_at.isoformat(),
+        "config": data,
     }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import date, datetime, timedelta, timezone
 from typing import List
 from zoneinfo import ZoneInfo
@@ -18,6 +19,7 @@ from app.models.schedule import Schedule
 from app.models.identity import UserIdentity
 from app.models.feedback import UserFeedback
 from app.models.reminder_delivery import ReminderDelivery
+from app.models.app_setting import AppSetting
 from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse
 from app.schemas.auth import MiniappLoginRequest, MiniappTokenResponse
 from app.schemas.binding import (
@@ -94,6 +96,34 @@ from app.services.scheduler_tasks import send_reminder_job
 
 
 router = APIRouter(prefix="/api")
+MINIAPP_HOME_POPUP_KEY = "miniapp_home_popup"
+
+
+def _default_miniapp_home_popup() -> dict:
+    return {
+        "enabled": False,
+        "title": "系统公告",
+        "content": "",
+        "show_mode": "once_per_day",
+        "start_at": "",
+        "end_at": "",
+        "version": 1,
+        "primary_button_text": "我知道了",
+    }
+
+
+def _normalize_popup_datetime(value: str | None) -> datetime | None:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception:
+        return None
+    tz = ZoneInfo(get_settings().timezone)
+    if dt.tzinfo is not None:
+        return dt.astimezone(tz).replace(tzinfo=None)
+    return dt
 
 
 def _parse_date(value: str | None) -> date | None:
@@ -291,7 +321,49 @@ async def profile(
         platform=user.platform,
         email=user.email,
         setup_stage=user.setup_stage,
+        binding_stage=int(user.binding_stage or 0),
     )
+
+
+@router.get("/config/miniapp/home-popup")
+async def miniapp_home_popup_config(
+    session: AsyncSession = Depends(get_session),
+):
+    data = _default_miniapp_home_popup()
+    row = (
+        (
+            await session.execute(
+                select(AppSetting).where(AppSetting.key == MINIAPP_HOME_POPUP_KEY).limit(1)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if row:
+        try:
+            payload = json.loads(row.value or "{}")
+            if isinstance(payload, dict):
+                data.update(payload)
+        except Exception:
+            pass
+
+    now_local = _now_local_naive()
+    start_at = _normalize_popup_datetime(str(data.get("start_at") or ""))
+    end_at = _normalize_popup_datetime(str(data.get("end_at") or ""))
+    enabled = bool(data.get("enabled"))
+    active = enabled
+    if start_at and now_local < start_at:
+        active = False
+    if end_at and now_local > end_at:
+        active = False
+
+    return {
+        **data,
+        "show_mode": str(data.get("show_mode") or "once_per_day"),
+        "version": int(data.get("version") or 1),
+        "active": active,
+        "server_time": datetime.now(ZoneInfo(get_settings().timezone)).isoformat(timespec="seconds"),
+    }
 
 
 @router.get("/user/identities")

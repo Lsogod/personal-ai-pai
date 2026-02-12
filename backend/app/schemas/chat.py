@@ -26,3 +26,4 @@ class ProfileResponse(BaseModel):
     platform: str
     email: Optional[str] = None
     setup_stage: int
+    binding_stage: int = 0

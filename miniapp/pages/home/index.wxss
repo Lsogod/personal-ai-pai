@@ -8,7 +8,6 @@
   gap: 36rpx;
 }
 
-/* ── Hero ── */
 .hero {
   margin-top: calc(env(safe-area-inset-top) + 56rpx);
   padding: 48rpx 36rpx 44rpx;
@@ -20,25 +19,24 @@
 }
 
 .hero::after {
-  content: '';
+  content: "";
   position: absolute;
   right: -60rpx;
   top: -60rpx;
   width: 260rpx;
   height: 260rpx;
   border-radius: 50%;
-  background: rgba(255,255,255,0.08);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .hero-badge {
   display: inline-flex;
   align-items: center;
   gap: 10rpx;
-  background: rgba(255,255,255,0.18);
+  background: rgba(255, 255, 255, 0.18);
   border-radius: var(--r-full);
   padding: 8rpx 20rpx;
   margin-bottom: 24rpx;
-  backdrop-filter: blur(4px);
 }
 
 .hero-badge-dot {
@@ -52,7 +50,6 @@
   font-size: 22rpx;
   font-weight: 700;
   letter-spacing: 2rpx;
-  color: #fff;
 }
 
 .hero-title {
@@ -64,7 +61,7 @@
 
 .hero-desc {
   font-size: 26rpx;
-  opacity: 0.85;
+  opacity: 0.9;
   line-height: 1.6;
   margin-bottom: 36rpx;
 }
@@ -84,18 +81,16 @@
 .hero-actions .btn-primary {
   background: #fff !important;
   color: var(--c-primary) !important;
-  box-shadow: 0 4rpx 16rpx rgba(0,0,0,0.12) !important;
+  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.12) !important;
   font-weight: 700;
 }
 
 .hero-actions .btn-secondary {
-  background: rgba(255,255,255,0.18) !important;
+  background: rgba(255, 255, 255, 0.18) !important;
   color: #fff !important;
-  border-color: rgba(255,255,255,0.3) !important;
-  backdrop-filter: blur(4px);
+  border-color: rgba(255, 255, 255, 0.3) !important;
 }
 
-/* ── Section ── */
 .section {
   display: flex;
   flex-direction: column;
@@ -115,78 +110,39 @@
   color: var(--c-text);
 }
 
-.section-sub {
-  font-size: 22rpx;
-  color: var(--c-text-3);
+.entry-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14rpx;
 }
 
-/* ── Command List ── */
-.cmd-list {
+.entry-card {
+  padding: 22rpx 10rpx;
   display: flex;
   flex-direction: column;
-  gap: 16rpx;
-}
-
-.cmd-item {
-  display: flex;
   align-items: center;
-  padding: 24rpx 24rpx;
-  gap: 20rpx;
-  transition: transform 0.15s;
+  gap: 8rpx;
 }
 
-.cmd-item:active {
-  transform: scale(0.985);
+.entry-card:active {
+  transform: scale(0.98);
 }
 
-.cmd-icon-wrap {
-  width: 72rpx;
-  height: 72rpx;
-  border-radius: 20rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
+.entry-icon {
+  font-size: 34rpx;
 }
 
-.cmd-icon-text {
-  font-size: 32rpx;
+.entry-name {
+  font-size: 25rpx;
+  color: var(--c-text-2);
+  font-weight: 700;
 }
 
-.cmd-icon-blue  { background: #ebeffe; }
-.cmd-icon-pink  { background: #fce7f3; }
-.cmd-icon-green { background: #d1fae5; }
-.cmd-icon-amber { background: #fef3c7; }
-
-.cmd-body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 6rpx;
-  min-width: 0;
-}
-
-.cmd-label {
-  font-size: 28rpx;
-  font-weight: 600;
-  color: var(--c-text);
-}
-
-.cmd-example {
-  font-size: 22rpx;
-  color: var(--c-text-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cmd-arrow {
-  font-size: 36rpx;
+.entry-desc {
+  font-size: 20rpx;
   color: var(--c-text-4);
-  flex-shrink: 0;
 }
 
-/* ── Capability Grid ── */
 .cap-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -214,10 +170,21 @@
   font-size: 30rpx;
 }
 
-.cap-icon-blue  { background: #ebeffe; }
-.cap-icon-pink  { background: #fce7f3; }
-.cap-icon-green { background: #d1fae5; }
-.cap-icon-amber { background: #fef3c7; }
+.cap-icon-blue {
+  background: #ebeffe;
+}
+
+.cap-icon-pink {
+  background: #fce7f3;
+}
+
+.cap-icon-green {
+  background: #d1fae5;
+}
+
+.cap-icon-amber {
+  background: #fef3c7;
+}
 
 .cap-name {
   font-size: 28rpx;
@@ -231,7 +198,6 @@
   line-height: 1.5;
 }
 
-/* ── Footer ── */
 .footer {
   margin-top: auto;
   padding: 32rpx 0 16rpx;
@@ -241,4 +207,45 @@
 .footer-text {
   font-size: 22rpx;
   color: var(--c-text-4);
+}
+
+.popup-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.38);
+  z-index: 390;
+}
+
+.popup-card {
+  position: fixed;
+  left: 50%;
+  top: 46%;
+  transform: translate(-50%, -50%);
+  width: 620rpx;
+  max-width: calc(100vw - 64rpx);
+  z-index: 400;
+  padding: 28rpx 24rpx 24rpx;
+}
+
+.popup-title {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--c-text);
+}
+
+.popup-content {
+  margin-top: 14rpx;
+  font-size: 24rpx;
+  color: var(--c-text-2);
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.popup-actions {
+  margin-top: 24rpx;
+}
+
+.popup-btn {
+  height: 78rpx;
+  border-radius: var(--r-md) !important;
 }

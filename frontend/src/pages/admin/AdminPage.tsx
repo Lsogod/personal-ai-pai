@@ -26,15 +26,16 @@ import {
   fetchAdminConversations,
   fetchAdminConversationStats,
   fetchAdminDashboard,
-  fetchAdminFeedbacks,
+  fetchAdminMiniappHomePopup,
   fetchAdminScheduleDelivery,
   fetchAdminSkills,
   fetchAdminTools,
   fetchAdminUsers,
+  saveAdminMiniappHomePopup,
   type AdminAuditItem,
   type AdminConversationItem,
   type AdminConversationMessageItem,
-  type AdminFeedbackItem,
+  type AdminMiniappHomePopupConfig,
   type AdminSkillsItem,
   type AdminToolItem,
   type AdminUserItem,
@@ -73,6 +74,21 @@ function fmtNum(n: number | null | undefined): string {
   return n.toLocaleString("en-US");
 }
 
+function toDatetimeLocalValue(value: string | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 16);
+}
+
+function fromDatetimeLocalValue(value: string): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString();
+}
+
 type SectionKey =
   | "dashboard"
   | "users"
@@ -80,7 +96,7 @@ type SectionKey =
   | "skills"
   | "tools"
   | "delivery"
-  | "feedback"
+  | "miniappPopup"
   | "audit";
 
 const SECTION_ITEMS: Array<{ key: SectionKey; label: string }> = [
@@ -90,7 +106,7 @@ const SECTION_ITEMS: Array<{ key: SectionKey; label: string }> = [
   { key: "skills", label: "技能管理" },
   { key: "tools", label: "工具管理" },
   { key: "delivery", label: "提醒投递" },
-  { key: "feedback", label: "问题反馈" },
+  { key: "miniappPopup", label: "首页弹窗" },
   { key: "audit", label: "审计日志" },
 ];
 
@@ -174,12 +190,8 @@ export function AdminPage() {
   const [auditUserId, setAuditUserId] = useState("");
   const [auditPage, setAuditPage] = useState(1);
   const auditSize = 30;
-
-  const [feedbackKeyword, setFeedbackKeyword] = useState("");
-  const [feedbackPlatform, setFeedbackPlatform] = useState("");
-  const [feedbackUserId, setFeedbackUserId] = useState("");
-  const [feedbackPage, setFeedbackPage] = useState(1);
-  const feedbackSize = 30;
+  const [popupDraft, setPopupDraft] = useState<AdminMiniappHomePopupConfig | null>(null);
+  const [popupSaveMessage, setPopupSaveMessage] = useState("");
 
   const dashboard = useQuery({
     queryKey: ["admin", "dashboard", token, days],
@@ -275,25 +287,9 @@ export function AdminPage() {
     enabled: !!token,
   });
 
-  const feedbacks = useQuery({
-    queryKey: [
-      "admin",
-      "feedbacks",
-      token,
-      feedbackPage,
-      feedbackSize,
-      feedbackKeyword,
-      feedbackPlatform,
-      feedbackUserId,
-    ],
-    queryFn: () =>
-      fetchAdminFeedbacks(token, {
-        page: feedbackPage,
-        size: feedbackSize,
-        q: feedbackKeyword || undefined,
-        platform: feedbackPlatform || undefined,
-        user_id: feedbackUserId ? Number(feedbackUserId) : undefined,
-      }),
+  const miniappPopup = useQuery({
+    queryKey: ["admin", "miniapp-home-popup", token],
+    queryFn: () => fetchAdminMiniappHomePopup(token),
     enabled: !!token,
   });
 
@@ -303,6 +299,12 @@ export function AdminPage() {
     const first = conversations.data?.items?.[0]?.id;
     if (first) setSelectedConversationId(first);
   }, [activeSection, conversations.data, selectedConversationId]);
+
+  useEffect(() => {
+    if (!miniappPopup.data) return;
+    setPopupDraft(miniappPopup.data);
+    setPopupSaveMessage("");
+  }, [miniappPopup.data]);
 
   const blockMutation = useMutation({
     mutationFn: (payload: { userId: number; blocked: boolean; reason?: string }) =>
@@ -342,6 +344,19 @@ export function AdminPage() {
     mutationFn: (skillId: number) => adminDisableSkill(token, skillId),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["admin", "skills", token] });
+    },
+  });
+
+  const savePopupMutation = useMutation({
+    mutationFn: (payload: AdminMiniappHomePopupConfig) => saveAdminMiniappHomePopup(token, payload),
+    onSuccess: async (res) => {
+      setPopupDraft(res.config);
+      setPopupSaveMessage(`保存成功：${new Date(res.updated_at).toLocaleString()}`);
+      await queryClient.invalidateQueries({ queryKey: ["admin", "miniapp-home-popup", token] });
+    },
+    onError: (error) => {
+      if (error instanceof Error) setPopupSaveMessage(`保存失败：${error.message}`);
+      else setPopupSaveMessage("保存失败");
     },
   });
 
@@ -897,81 +912,157 @@ export function AdminPage() {
             </Card>
           ) : null}
 
-          {activeSection === "feedback" ? (
+          {activeSection === "miniappPopup" ? (
             <Card>
-              <CardHeader className="text-lg font-semibold">问题反馈</CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid md:grid-cols-3 gap-2">
-                  <Input
-                    placeholder="反馈内容/版本/页面搜索"
-                    value={feedbackKeyword}
-                    onChange={(e) => {
-                      setFeedbackKeyword(e.target.value);
-                      setFeedbackPage(1);
-                    }}
-                  />
-                  <Input
-                    placeholder="user_id 筛选"
-                    value={feedbackUserId}
-                    onChange={(e) => {
-                      setFeedbackUserId(e.target.value);
-                      setFeedbackPage(1);
-                    }}
-                  />
-                  <select
-                    className="h-10 rounded-xl border border-border bg-surface-card px-3 text-sm"
-                    value={feedbackPlatform}
-                    onChange={(e) => {
-                      setFeedbackPlatform(e.target.value);
-                      setFeedbackPage(1);
-                    }}
-                  >
-                    <option value="">全部平台</option>
-                    {USER_PLATFORM_OPTIONS.map((platform) => (
-                      <option key={`feedback-${platform}`} value={platform}>
-                        {platform}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="overflow-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-content-secondary border-b border-border">
-                        <th className="py-2 pr-2">ID</th>
-                        <th className="py-2 pr-2">用户</th>
-                        <th className="py-2 pr-2">平台</th>
-                        <th className="py-2 pr-2">版本</th>
-                        <th className="py-2 pr-2">页面</th>
-                        <th className="py-2 pr-2">反馈内容</th>
-                        <th className="py-2 pr-2">时间</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(feedbacks.data?.items || []).map((row: AdminFeedbackItem) => (
-                        <tr key={row.id} className="border-b border-border/60 align-top">
-                          <td className="py-2 pr-2">#{row.id}</td>
-                          <td className="py-2 pr-2 whitespace-nowrap">{row.user_nickname || row.user_id}</td>
-                          <td className="py-2 pr-2 whitespace-nowrap">{row.platform || "-"}</td>
-                          <td className="py-2 pr-2 whitespace-nowrap">
-                            {row.app_version || "-"} / {row.env_version || "-"}
-                          </td>
-                          <td className="py-2 pr-2 max-w-[200px] truncate" title={row.client_page || ""}>
-                            {row.client_page || "-"}
-                          </td>
-                          <td className="py-2 pr-2 max-w-[480px] whitespace-pre-wrap break-words">{row.content}</td>
-                          <td className="py-2 pr-2 whitespace-nowrap">{new Date(row.created_at).toLocaleString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <Pager
-                  page={feedbacks.data?.page || 1}
-                  size={feedbacks.data?.size || feedbackSize}
-                  total={feedbacks.data?.total || 0}
-                  onPageChange={setFeedbackPage}
-                />
+              <CardHeader className="text-lg font-semibold">首页弹窗配置</CardHeader>
+              <CardContent className="space-y-4">
+                {miniappPopup.error instanceof Error ? (
+                  <div className="rounded-xl border border-danger/40 bg-danger/5 px-3 py-2 text-sm text-danger">
+                    读取失败：{miniappPopup.error.message}
+                  </div>
+                ) : null}
+
+                {popupSaveMessage ? (
+                  <div className="rounded-xl border border-border px-3 py-2 text-sm">{popupSaveMessage}</div>
+                ) : null}
+
+                {!popupDraft ? (
+                  <div className="text-sm text-content-secondary">
+                    {miniappPopup.isLoading ? "加载配置中..." : "暂无配置"}
+                  </div>
+                ) : (
+                  <>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={popupDraft.enabled}
+                        onChange={(e) =>
+                          setPopupDraft((prev) => (prev ? { ...prev, enabled: e.target.checked } : prev))
+                        }
+                      />
+                      启用首页弹窗
+                    </label>
+
+                    <div className="grid md:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <div className="text-xs text-content-secondary">标题</div>
+                        <Input
+                          value={popupDraft.title}
+                          onChange={(e) =>
+                            setPopupDraft((prev) => (prev ? { ...prev, title: e.target.value } : prev))
+                          }
+                          placeholder="例如：版本更新说明"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-xs text-content-secondary">按钮文案</div>
+                        <Input
+                          value={popupDraft.primary_button_text}
+                          onChange={(e) =>
+                            setPopupDraft((prev) =>
+                              prev ? { ...prev, primary_button_text: e.target.value } : prev
+                            )
+                          }
+                          placeholder="我知道了"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="text-xs text-content-secondary">内容</div>
+                      <textarea
+                        className="w-full min-h-[120px] rounded-xl border border-border bg-surface-card px-3 py-2 text-sm"
+                        value={popupDraft.content}
+                        onChange={(e) =>
+                          setPopupDraft((prev) => (prev ? { ...prev, content: e.target.value } : prev))
+                        }
+                        placeholder="支持多行文案"
+                      />
+                    </div>
+
+                    <div className="grid md:grid-cols-3 gap-3">
+                      <div className="space-y-1">
+                        <div className="text-xs text-content-secondary">展示策略</div>
+                        <select
+                          className="h-10 w-full rounded-xl border border-border bg-surface-card px-3 text-sm"
+                          value={popupDraft.show_mode}
+                          onChange={(e) =>
+                            setPopupDraft((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    show_mode: e.target.value as AdminMiniappHomePopupConfig["show_mode"],
+                                  }
+                                : prev
+                            )
+                          }
+                        >
+                          <option value="always">每次都弹</option>
+                          <option value="once_per_day">每天一次</option>
+                          <option value="once_per_version">每版本一次</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-xs text-content-secondary">版本号</div>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={String(popupDraft.version)}
+                          onChange={(e) =>
+                            setPopupDraft((prev) =>
+                              prev ? { ...prev, version: Math.max(1, Number(e.target.value || 1)) } : prev
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-xs text-content-secondary">状态</div>
+                        <div className="h-10 rounded-xl border border-border bg-surface-card px-3 text-sm flex items-center">
+                          {popupDraft.enabled ? "已启用" : "已停用"}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid md:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <div className="text-xs text-content-secondary">开始时间（可选）</div>
+                        <Input
+                          type="datetime-local"
+                          value={toDatetimeLocalValue(popupDraft.start_at)}
+                          onChange={(e) =>
+                            setPopupDraft((prev) =>
+                              prev ? { ...prev, start_at: fromDatetimeLocalValue(e.target.value) } : prev
+                            )
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-xs text-content-secondary">结束时间（可选）</div>
+                        <Input
+                          type="datetime-local"
+                          value={toDatetimeLocalValue(popupDraft.end_at)}
+                          onChange={(e) =>
+                            setPopupDraft((prev) =>
+                              prev ? { ...prev, end_at: fromDatetimeLocalValue(e.target.value) } : prev
+                            )
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={() => popupDraft && savePopupMutation.mutate(popupDraft)}
+                        disabled={!popupDraft || savePopupMutation.isPending}
+                      >
+                        {savePopupMutation.isPending ? "保存中..." : "保存配置"}
+                      </Button>
+                      <Button variant="ghost" onClick={() => miniappPopup.refetch()} disabled={miniappPopup.isLoading}>
+                        刷新
+                      </Button>
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
           ) : null}

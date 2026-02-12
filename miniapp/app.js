@@ -4,7 +4,9 @@ App({
   globalData: {
     token: "",
     profile: null,
-    lastReminderAt: ""
+    lastReminderAt: "",
+    pendingCmd: "",
+    homeQuickAction: ""
   },
 
   onLaunch() {

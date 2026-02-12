@@ -193,6 +193,12 @@ function submitUserFeedback(data) {
   });
 }
 
+function fetchHomePopupConfig() {
+  return request("/api/config/miniapp/home-popup", {
+    token: ""
+  });
+}
+
 module.exports = {
   request,
   getWsUrl,
@@ -218,5 +224,6 @@ module.exports = {
   fetchIdentities,
   createBindCode,
   consumeBindCode,
-  submitUserFeedback
+  submitUserFeedback,
+  fetchHomePopupConfig
 };

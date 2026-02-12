@@ -266,3 +266,119 @@
   box-shadow: 0 4rpx 16rpx rgba(79,110,247,0.3);
 }
 .icon-send { width: 30rpx; height: 30rpx; }
+
+.guide-board {
+  margin: 16rpx 24rpx 8rpx;
+  padding: 20rpx;
+  border: 1rpx solid var(--c-border-light);
+}
+
+.guide-board.is-waiting {
+  opacity: 0.72;
+  background: #f3f4f6;
+}
+
+.guide-title {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--c-text);
+}
+
+.guide-sub {
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: var(--c-text-3);
+}
+
+.onboarding-chip-list {
+  margin-top: 14rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+
+.onboarding-chip {
+  padding: 0 18rpx;
+  height: 52rpx;
+  border-radius: 999rpx;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--c-primary-light);
+  color: var(--c-primary-dark);
+  font-size: 22rpx;
+  font-weight: 600;
+}
+
+.onboarding-chip.disabled {
+  background: #e5e7eb;
+  color: #9ca3af;
+}
+
+.onboarding-input-row {
+  margin-top: 14rpx;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.onboarding-input {
+  flex: 1;
+  min-width: 0;
+  height: 72rpx;
+  border-radius: 18rpx;
+  border: 1rpx solid var(--c-border-light);
+  background: var(--c-bg);
+  padding: 0 20rpx;
+  box-sizing: border-box;
+  font-size: 26rpx;
+  color: var(--c-text);
+}
+
+.onboarding-input.disabled {
+  background: #e5e7eb;
+  color: #9ca3af;
+}
+
+.onboarding-placeholder {
+  color: var(--c-text-4);
+}
+
+.onboarding-send-btn {
+  width: 144rpx;
+  height: 72rpx;
+  font-size: 24rpx;
+  border-radius: 18rpx !important;
+}
+
+.onboarding-send-btn.disabled {
+  background: #9ca3af !important;
+  border-color: #9ca3af !important;
+  color: #ffffff !important;
+}
+
+.onboarding-waiting {
+  margin-top: 14rpx;
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.wait-dot {
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: 50%;
+  background: var(--c-primary);
+  animation: waitPulse 1s ease-in-out infinite;
+}
+
+.onboarding-waiting-text {
+  font-size: 22rpx;
+  color: var(--c-text-3);
+}
+
+@keyframes waitPulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
