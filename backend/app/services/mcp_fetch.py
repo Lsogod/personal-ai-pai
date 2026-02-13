@@ -53,12 +53,15 @@ class MCPFetchClient:
         if session_id:
             headers["mcp-session-id"] = session_id
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(
-                self.url,
-                headers=headers,
-                content=json.dumps(payload, ensure_ascii=False),
-            )
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(
+                    self.url,
+                    headers=headers,
+                    content=json.dumps(payload, ensure_ascii=False),
+                )
+        except httpx.HTTPError as exc:
+            raise MCPFetchError(f"mcp request failed: {exc}") from exc
 
         if response.status_code >= 400:
             raise MCPFetchError(f"mcp http {response.status_code}")

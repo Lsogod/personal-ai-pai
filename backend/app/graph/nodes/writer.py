@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import json
@@ -23,22 +24,15 @@ from app.services.llm import get_llm
 from app.services.mcp_fetch import MCPFetchError, get_mcp_fetch_client
 from app.services.runtime_context import get_session
 from app.services.skills import load_skills
-from app.services.tool_registry import list_runtime_tool_metas
+from app.services.tool_registry import (
+    filter_allowed_mcp_tools,
+    get_allowed_mcp_tool_names,
+    is_mcp_tool_allowed,
+    list_runtime_tool_metas,
+)
 from app.services.usage import log_tool_usage
 
 URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
-WEATHER_CITY_ALIASES = {
-    "武汉": "Wuhan",
-    "北京": "Beijing",
-    "上海": "Shanghai",
-    "广州": "Guangzhou",
-    "深圳": "Shenzhen",
-    "杭州": "Hangzhou",
-    "南京": "Nanjing",
-    "成都": "Chengdu",
-    "重庆": "Chongqing",
-    "西安": "Xian",
-}
 VALID_WRITER_KINDS = {"general", "time", "external", "weather", "tooling", "unknown"}
 
 
@@ -237,6 +231,37 @@ def _render_time_reply(content: str) -> str:
     return f"当前时间（{tz}）：{now.strftime('%Y-%m-%d %H:%M:%S')}"
 
 
+def _render_now_time_tool_like_text(timezone: str = "Asia/Shanghai") -> str:
+    tz = (timezone or "").strip() or "Asia/Shanghai"
+    try:
+        now = datetime.now(ZoneInfo(tz))
+        return f"{tz} 当前时间: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+    except Exception:
+        now = datetime.utcnow()
+        return f"UTC 当前时间: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+
+
+def _pick_mcp_weather_tool_name() -> str:
+    allowed = sorted(get_allowed_mcp_tool_names())
+    if not allowed:
+        return "maps_weather"
+    if "maps_weather" in allowed:
+        return "maps_weather"
+    return allowed[0]
+
+
+async def _fetch_weather_via_mcp(location: str) -> tuple[str, str]:
+    city = (location or "").strip() or "Wuhan"
+    tool_name = _pick_mcp_weather_tool_name()
+    if not is_mcp_tool_allowed(tool_name):
+        raise MCPFetchError(f"weather tool `{tool_name}` is blocked by allowlist")
+    output = await get_mcp_fetch_client().call_tool(
+        name=tool_name,
+        arguments={"city": city},
+    )
+    return output, f"mcp:{tool_name}?city={quote(city)}"
+
+
 async def _answer_with_fetched_content(
     *,
     user: User,
@@ -265,6 +290,46 @@ async def _answer_with_fetched_content(
     return text or _render_fetched_preview(source_url, fetched_markdown)
 
 
+async def _answer_weather_with_time_context(
+    *,
+    user: User,
+    content: str,
+    context_text: str,
+    skills: str,
+    now_time_text: str,
+    weather_output: str,
+    source_url: str,
+) -> str:
+    llm = get_llm(node_name="writer")
+    system = SystemMessage(
+        content=(
+            f"你是{user.nickname}的私人助理{user.ai_name} {user.ai_emoji}。"
+            "你必须结合会话上下文连续对话，不要声称自己无法回忆当前会话。\n"
+            "你将基于两份工具证据回答天气问题：now_time 与 maps_weather。\n"
+            "请以 now_time 作为“今天”的时间基准，对天气日期进行相对判断（今天/明天/后天）。\n"
+            "只允许依据提供的工具结果回答，禁止补充工具结果中不存在的事实。\n"
+            "禁止输出“模拟/测试数据”“未来日期异常”“系统此前限制”等主观推断。\n"
+            "如果某字段缺失，明确说“工具未返回该字段”。\n"
+            "输出简洁中文，可给出 2~4 天预报要点。\n"
+            f"会话上下文:\n{context_text}\n\n"
+            f"技能文档:\n{skills}\n\n"
+            f"now_time 结果:\n{now_time_text}\n\n"
+            f"maps_weather 来源:\n{source_url}\n"
+            f"maps_weather 原始结果:\n{weather_output}"
+        )
+    )
+    human = HumanMessage(content=content or "")
+    response = await llm.ainvoke([system, human])
+    text = str(response.content or "").strip()
+    if text:
+        return text
+    return (
+        f"时间基准：{now_time_text}\n"
+        f"天气来源：{source_url}\n"
+        f"天气原始结果：\n{_shorten_text(weather_output, 2400)}"
+    )
+
+
 def _build_writer_tools(
     *,
     user_id: int | None,
@@ -291,36 +356,19 @@ def _build_writer_tools(
             )
             return text
         tz = (timezone or "").strip() or "Asia/Shanghai"
-        try:
-            now = datetime.now(ZoneInfo(tz))
-            text = f"{tz} 当前时间: {now.strftime('%Y-%m-%d %H:%M:%S')}"
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name="now_time",
-                tool_source="builtin",
-                arguments=args,
-                ok=True,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                result_preview=text,
-            )
-            return text
-        except Exception:
-            now = datetime.utcnow()
-            text = f"UTC 当前时间: {now.strftime('%Y-%m-%d %H:%M:%S')}"
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name="now_time",
-                tool_source="builtin",
-                arguments=args,
-                ok=True,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                result_preview=text,
-            )
-            return text
+        text = _render_now_time_tool_like_text(tz)
+        await _audit_tool_call(
+            user_id=user_id,
+            platform=platform,
+            conversation_id=conversation_id,
+            tool_name="now_time",
+            tool_source="builtin",
+            arguments=args,
+            ok=True,
+            latency_ms=int((time.perf_counter() - start) * 1000),
+            result_preview=text,
+        )
+        return text
 
     @tool("mcp_list_tools")
     async def mcp_list_tools_tool() -> str:
@@ -358,6 +406,7 @@ def _build_writer_tools(
             return text
         try:
             tools = await get_mcp_fetch_client().list_tools()
+            tools = filter_allowed_mcp_tools(tools)
             text = _format_mcp_tools(tools)
             await _audit_tool_call(
                 user_id=user_id,
@@ -429,6 +478,22 @@ def _build_writer_tools(
                 conversation_id=conversation_id,
                 tool_name="mcp_call_tool",
                 tool_source="builtin",
+                arguments=audit_args,
+                ok=False,
+                latency_ms=int((time.perf_counter() - start) * 1000),
+                error=text,
+            )
+            return text
+        if not is_mcp_tool_allowed(name):
+            allowed = sorted(get_allowed_mcp_tool_names())
+            allowed_text = ", ".join(allowed) if allowed else "none"
+            text = f"MCP tool `{name}` is blocked by allowlist. Allowed tools: {allowed_text}."
+            await _audit_tool_call(
+                user_id=user_id,
+                platform=platform,
+                conversation_id=conversation_id,
+                tool_name=name,
+                tool_source="mcp",
                 arguments=audit_args,
                 ok=False,
                 latency_ms=int((time.perf_counter() - start) * 1000),
@@ -699,8 +764,8 @@ async def _run_tool_agent(
         "若用户提到特定站点/品牌（例如 OpenAI），应优先抓取该官方站点；失败后再征求用户是否允许替代来源。\n"
         "最多调用 3 次工具；若连续失败，直接输出失败原因与下一步建议，不要盲目尝试无关站点。\n"
         "若用户要抓取网页但未给 URL：你可自行选择可公开抓取来源并调用 fetch_url。\n"
-        "天气可优先来源 wttr.in（JSON）；时间可优先调用 now_time。\n"
-        "对天气/时间类查询，fetch_url 仅调用 1 次，禁止分页重试（start_index 必须为 0）。\n"
+        "天气查询优先使用 MCP 天气工具（如 maps_weather）；时间查询优先调用 now_time。\n"
+        "对天气类查询，不要用 fetch_url 代替 MCP 天气工具。\n"
         "若站点禁止抓取，请明确告知并给替代来源或让用户提供 URL。\n"
         "不要暴露内部链路与调试信息。\n"
         f"当前可用工具目录:\n{runtime_tools}\n\n"
@@ -750,6 +815,7 @@ async def _handle_command_fallback(
             return "系统级 MCP 未启用。"
         try:
             tools = await get_mcp_fetch_client().list_tools()
+            tools = filter_allowed_mcp_tools(tools)
             return _format_mcp_tools(tools)
         except MCPFetchError as exc:
             return f"MCP 工具列表获取失败：{exc}"
@@ -776,18 +842,17 @@ async def _handle_command_fallback(
     if lower.startswith("/weather"):
         if not settings.mcp_fetch_enabled:
             return "系统级 MCP 未启用。"
-        location = content[8:].strip() or "武汉"
-        city = WEATHER_CITY_ALIASES.get(location, location)
-        url = f"https://wttr.in/{quote(city)}?format=j1"
+        location = content[8:].strip() or "Wuhan"
         try:
-            fetched = await get_mcp_fetch_client().fetch(url=url, raw=True)
-            return await _answer_with_fetched_content(
+            fetched, source_url = await _fetch_weather_via_mcp(location)
+            return await _answer_weather_with_time_context(
                 user=user,
                 content=content,
                 context_text=context_text,
                 skills=skills,
-                fetched_markdown=fetched,
-                source_url=url,
+                now_time_text=_render_now_time_tool_like_text(get_settings().timezone),
+                weather_output=fetched,
+                source_url=source_url,
             )
         except MCPFetchError as exc:
             return f"天气抓取失败：{exc}"
@@ -808,39 +873,51 @@ async def _weather_fallback_fetch_and_answer(
     settings = get_settings()
     if not settings.mcp_fetch_enabled:
         return None
-    location = (weather_location or "").strip() or "武汉"
-    city = WEATHER_CITY_ALIASES.get(location, location)
-    url = f"https://wttr.in/{quote(city)}?format=j1"
+    location = (weather_location or "").strip() or "Wuhan"
+    tool_name = _pick_mcp_weather_tool_name()
     start = time.perf_counter()
     try:
-        fetched = await get_mcp_fetch_client().fetch(url=url, raw=True)
+        fetched, source_url = await _fetch_weather_via_mcp(location)
+        now_time_text = _render_now_time_tool_like_text(get_settings().timezone)
         await _audit_tool_call(
             user_id=user.id,
             platform=platform,
             conversation_id=conversation_id,
-            tool_name="fetch_url",
-            tool_source="builtin",
-            arguments={"url": url, "raw": True},
+            tool_name=tool_name,
+            tool_source="mcp",
+            arguments={"city": location},
             ok=True,
             latency_ms=int((time.perf_counter() - start) * 1000),
             result_preview=fetched,
         )
-        return await _answer_with_fetched_content(
+        await _audit_tool_call(
+            user_id=user.id,
+            platform=platform,
+            conversation_id=conversation_id,
+            tool_name="now_time",
+            tool_source="builtin",
+            arguments={"timezone": get_settings().timezone},
+            ok=True,
+            latency_ms=0,
+            result_preview=now_time_text,
+        )
+        return await _answer_weather_with_time_context(
             user=user,
             content=content,
             context_text=context_text,
             skills=skills,
-            fetched_markdown=fetched,
-            source_url=url,
+            now_time_text=now_time_text,
+            weather_output=fetched,
+            source_url=source_url,
         )
     except Exception as exc:
         await _audit_tool_call(
             user_id=user.id,
             platform=platform,
             conversation_id=conversation_id,
-            tool_name="fetch_url",
-            tool_source="builtin",
-            arguments={"url": url, "raw": True},
+            tool_name=tool_name,
+            tool_source="mcp",
+            arguments={"city": location},
             ok=False,
             latency_ms=int((time.perf_counter() - start) * 1000),
             error=str(exc),
@@ -896,9 +973,30 @@ async def writer_node(state: GraphState) -> GraphState:
     weather_location = str(classification.get("weather_location") or "").strip()
     should_try_tools = tool_required or (kind in {"time", "external", "weather", "tooling"})
 
-    # LangGraph tool-call path.
+    # Weather should be deterministic: call MCP weather first, avoid web-fetch fallback drift.
     platform = (message.platform or "unknown")
     conversation_id = state.get("conversation_id")
+    if kind == "weather":
+        weather_text = await _weather_fallback_fetch_and_answer(
+            user=user,
+            platform=platform,
+            conversation_id=conversation_id,
+            content=content,
+            context_text=context_text,
+            skills=skills,
+            weather_location=weather_location,
+        )
+        if weather_text:
+            return {**state, "responses": [weather_text]}
+        return {
+            **state,
+            "responses": [
+                "天气 MCP 工具当前不可用（超时或服务异常），本轮未改用网页抓取。"
+                "请稍后重试，或检查 MCP 服务 URL/网络连通性。"
+            ],
+        }
+
+    # LangGraph tool-call path.
     if should_try_tools:
         try:
             tool_answer, tool_count = await _run_tool_agent(
@@ -916,25 +1014,6 @@ async def writer_node(state: GraphState) -> GraphState:
             pass
 
     # Rule fallback after LLM intent classification.
-    if kind == "weather":
-        weather_text = await _weather_fallback_fetch_and_answer(
-            user=user,
-            platform=platform,
-            conversation_id=conversation_id,
-            content=content,
-            context_text=context_text,
-            skills=skills,
-            weather_location=weather_location,
-        )
-        if weather_text:
-            return {**state, "responses": [weather_text]}
-        return {
-            **state,
-            "responses": [
-                "天气查询需要可访问的数据源。请提供可抓取 URL，或确认我使用公开来源继续。"
-            ],
-        }
-
     if kind == "time":
         return {**state, "responses": [_render_time_reply(content)]}
 

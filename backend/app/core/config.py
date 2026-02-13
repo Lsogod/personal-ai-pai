@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     mcp_fetch_url: str = ""
     mcp_fetch_timeout_sec: int = 30
     mcp_fetch_default_max_length: int = 5000
+    # Comma-separated MCP tool allowlist. Empty means allow all tools.
+    mcp_allowed_tool_names: str = "maps_weather"
 
     long_term_memory_enabled: bool = True
     long_term_memory_min_confidence: float = 0.75

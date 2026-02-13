@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from typing import TypedDict
 
 from app.core.config import get_settings
@@ -12,6 +13,35 @@ class ToolMeta(TypedDict):
     source: str
     description: str
     enabled: bool
+
+
+def get_allowed_mcp_tool_names() -> set[str]:
+    raw = str(get_settings().mcp_allowed_tool_names or "").strip()
+    if not raw:
+        return set()
+    return {part.strip().lower() for part in raw.split(",") if part.strip()}
+
+
+def is_mcp_tool_allowed(name: str) -> bool:
+    allowed = get_allowed_mcp_tool_names()
+    tool_name = (name or "").strip().lower()
+    if not tool_name:
+        return False
+    if not allowed:
+        return True
+    return tool_name in allowed
+
+
+def filter_allowed_mcp_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for item in tools:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not is_mcp_tool_allowed(name):
+            continue
+        rows.append(item)
+    return rows
 
 
 def list_builtin_tool_metas() -> list[ToolMeta]:
@@ -54,9 +84,9 @@ async def list_runtime_tool_metas() -> list[ToolMeta]:
         return rows
     try:
         mcp_tools = await get_mcp_fetch_client().list_tools()
-    except MCPFetchError:
+    except Exception:
         return rows
-    for item in mcp_tools:
+    for item in filter_allowed_mcp_tools(mcp_tools):
         if not isinstance(item, dict):
             continue
         name = str(item.get("name") or "").strip()
