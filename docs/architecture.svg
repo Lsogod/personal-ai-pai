@@ -114,17 +114,17 @@
   <g>
     <rect x="156" y="358" width="110" height="56" rx="10" fill="#1a2332" stroke="#34d39950" stroke-width="1"/>
     <text x="211" y="380" text-anchor="middle" fill="#34d399" font-size="10" font-weight="600">💰 记账</text>
-    <text x="211" y="396" text-anchor="middle" fill="#64748b" font-size="8">Finance</text>
+    <text x="211" y="396" text-anchor="middle" fill="#64748b" font-size="8">Ledger Mgr</text>
   </g>
   <g>
     <rect x="280" y="358" width="110" height="56" rx="10" fill="#1a2332" stroke="#60a5fa50" stroke-width="1"/>
     <text x="335" y="380" text-anchor="middle" fill="#60a5fa" font-size="10" font-weight="600">📅 秘书</text>
-    <text x="335" y="396" text-anchor="middle" fill="#64748b" font-size="8">Secretary</text>
+    <text x="335" y="396" text-anchor="middle" fill="#64748b" font-size="8">Schedule Mgr</text>
   </g>
   <g>
     <rect x="404" y="358" width="110" height="56" rx="10" fill="#1a2332" stroke="#f472b650" stroke-width="1"/>
     <text x="459" y="380" text-anchor="middle" fill="#f472b6" font-size="10" font-weight="600">✍️ 写作</text>
-    <text x="459" y="396" text-anchor="middle" fill="#64748b" font-size="8">Writer + MCP</text>
+    <text x="459" y="396" text-anchor="middle" fill="#64748b" font-size="8">Chat Mgr + MCP</text>
   </g>
   <g>
     <rect x="528" y="358" width="110" height="56" rx="10" fill="#1a2332" stroke="#fb923c50" stroke-width="1"/>
@@ -133,8 +133,8 @@
   </g>
   <g>
     <rect x="652" y="358" width="110" height="56" rx="10" fill="#1a2332" stroke="#22d3ee50" stroke-width="1"/>
-    <text x="707" y="380" text-anchor="middle" fill="#22d3ee" font-size="10" font-weight="600">📖 引导</text>
-    <text x="707" y="396" text-anchor="middle" fill="#64748b" font-size="8">Guide</text>
+    <text x="707" y="380" text-anchor="middle" fill="#22d3ee" font-size="10" font-weight="600">📖 帮助</text>
+    <text x="707" y="396" text-anchor="middle" fill="#64748b" font-size="8">Help Center</text>
   </g>
   <g>
     <rect x="776" y="358" width="110" height="56" rx="10" fill="#1a2332" stroke="#fbbf2450" stroke-width="1"/>

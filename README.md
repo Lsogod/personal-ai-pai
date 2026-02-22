@@ -43,11 +43,11 @@
 </p>
 
 - **🔀 Router** — 意图分类器，自动识别消息类型，支持 runtime_tools 上下文
-- **💰 Finance** — 记账、消费统计、小票 OCR 识别
-- **📅 Secretary** — 日程管理、定时提醒（APScheduler 持久化 · 多端广播投递）
-- **✨️ Writer** — 翻译、润色、写作、通用问答、MCP 工具调用、天气查询
+- **💰 Ledger Manager** — 记账、消费统计、小票 OCR 识别
+- **📅 Schedule Manager** — 日程管理、定时提醒（APScheduler 持久化 · 多端广播投递）
+- **✨️ Chat Manager** — 翻译、润色、写作、通用问答、MCP 工具调用、天气查询
 - **🎯 Skill Manager** — 用户自定义技能的创建/更新/发布
-- **📖 Guide** — 使用指南、命令帮助、工具能力概览（加载 knowledge/AGENT_GUIDE.md）
+- **📖 Help Center** — 使用指南、命令帮助、工具能力概览（加载 knowledge/AGENT_GUIDE.md）
 - **🚀 Onboarding** — 新用户三步引导流程
 
 <details>
@@ -62,10 +62,10 @@ flowchart TB
 
     E -->|setup_stage < 3| N1["onboarding_node"]
     E -->|skill_manager| N2["skill_manager_node"]
-    E -->|finance| N3["finance_node"]
-    E -->|secretary| N4["secretary_node"]
-    E -->|guide| N5["guide_node"]
-    E -->|writer| N6["writer_node"]
+    E -->|ledger_manager| N3["ledger_manager_node"]
+    E -->|schedule_manager| N4["schedule_manager_node"]
+    E -->|help_center| N5["help_center_node"]
+    E -->|chat_manager| N6["chat_manager_node"]
 
     N1 --> DB[(PostgreSQL users)]
     N2 --> DB

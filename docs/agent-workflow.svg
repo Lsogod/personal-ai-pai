@@ -88,11 +88,11 @@
   <line x1="740" y1="148" x2="924" y2="148" stroke="#34d39930" stroke-width="1"/>
   <text x="740" y="163" fill="#fbbf24" font-size="9" font-weight="600">① 前置拦截 (router_node)</text>
   <text x="750" y="176" fill="#94a3b8" font-size="8.5">setup_stage &lt; 3 → 跳过(由③处理)</text>
-  <text x="750" y="188" fill="#94a3b8" font-size="8.5">空消息且无图 → writer</text>
+  <text x="750" y="188" fill="#94a3b8" font-size="8.5">空消息且无图 → chat_manager</text>
   <text x="740" y="203" fill="#fbbf24" font-size="9" font-weight="600">② LLM 意图分类</text>
   <text x="750" y="215" fill="#94a3b8" font-size="8.5">_classify_intent_with_llm()</text>
   <text x="750" y="227" fill="#94a3b8" font-size="8.5">+context · +image · +pending · +tools</text>
-  <text x="750" y="239" fill="#94a3b8" font-size="8.5">unknown → image/pending→finance</text>
+  <text x="750" y="239" fill="#94a3b8" font-size="8.5">unknown → image/pending→ledger_manager</text>
   <text x="740" y="254" fill="#fbbf24" font-size="9" font-weight="600">③ 命令兜底 (route_intent)</text>
   <text x="750" y="266" fill="#94a3b8" font-size="8.5">setup&lt;3→onboarding</text>
   <text x="750" y="278" fill="#94a3b8" font-size="8.5">/help /skill /ledger /calendar /mcp</text>
@@ -112,11 +112,11 @@
 
   <!-- Edge labels -->
   <text x="192" y="286" fill="#a78bfa" font-size="7.5" font-weight="600" transform="rotate(-15,192,286)">setup&lt;3</text>
-  <text x="302" y="286" fill="#34d399" font-size="7.5" font-weight="600">finance</text>
-  <text x="400" y="282" fill="#60a5fa" font-size="7.5" font-weight="600">secretary</text>
-  <text x="510" y="282" fill="#f472b6" font-size="7.5" font-weight="600">writer</text>
+  <text x="302" y="286" fill="#34d399" font-size="7.5" font-weight="600">ledger_mgr</text>
+  <text x="400" y="282" fill="#60a5fa" font-size="7.5" font-weight="600">schedule_mgr</text>
+  <text x="510" y="282" fill="#f472b6" font-size="7.5" font-weight="600">chat_mgr</text>
   <text x="638" y="286" fill="#fb923c" font-size="7.5" font-weight="600">skill_mgr</text>
-  <text x="756" y="286" fill="#22d3ee" font-size="7.5" font-weight="600">guide</text>
+  <text x="756" y="286" fill="#22d3ee" font-size="7.5" font-weight="600">help_center</text>
 
   <!-- ═══════ Layer 4: Worker Nodes ═══════ -->
 
@@ -134,11 +134,11 @@
     <text x="42" y="430" fill="#64748b" font-size="7" font-style="italic">stage 0→1→2→3</text>
   </g>
 
-  <!-- Finance -->
+  <!-- Ledger Manager -->
   <g class="float-box" style="animation-delay:.3s">
     <rect x="164" y="310" width="152" height="140" rx="12" fill="#1e1e2e" stroke="#34d39950" stroke-width="1.5" filter="url(#shadow)"/>
-    <text x="240" y="334" text-anchor="middle" fill="#34d399" font-size="11" font-weight="700">💰 Finance</text>
-    <text x="240" y="348" text-anchor="middle" fill="#64748b" font-size="8">finance_node()</text>
+    <text x="240" y="334" text-anchor="middle" fill="#34d399" font-size="11" font-weight="700">💰 Ledger Mgr</text>
+    <text x="240" y="348" text-anchor="middle" fill="#64748b" font-size="8">ledger_manager_node()</text>
     <line x1="176" y1="354" x2="304" y2="354" stroke="#34d39920" stroke-width="1"/>
     <text x="180" y="368" fill="#94a3b8" font-size="7.5">LLM 解析金额/分类</text>
     <text x="180" y="382" fill="#94a3b8" font-size="7.5">小票 OCR (Vision)</text>
@@ -148,11 +148,11 @@
     <text x="180" y="430" fill="#64748b" font-size="7" font-style="italic">analyze_receipt()</text>
   </g>
 
-  <!-- Secretary -->
+  <!-- Schedule Manager -->
   <g class="float-box" style="animation-delay:.6s">
     <rect x="330" y="310" width="120" height="140" rx="12" fill="#1e1e2e" stroke="#60a5fa50" stroke-width="1.5" filter="url(#shadow)"/>
-    <text x="390" y="334" text-anchor="middle" fill="#60a5fa" font-size="11" font-weight="700">📅 Secretary</text>
-    <text x="390" y="348" text-anchor="middle" fill="#64748b" font-size="8">secretary_node()</text>
+    <text x="390" y="334" text-anchor="middle" fill="#60a5fa" font-size="11" font-weight="700">📅 Schedule Mgr</text>
+    <text x="390" y="348" text-anchor="middle" fill="#64748b" font-size="8">schedule_manager_node()</text>
     <line x1="342" y1="354" x2="438" y2="354" stroke="#60a5fa20" stroke-width="1"/>
     <text x="346" y="368" fill="#94a3b8" font-size="7.5">自然语言→时间</text>
     <text x="346" y="382" fill="#94a3b8" font-size="7.5">APScheduler 持久化</text>
@@ -162,11 +162,11 @@
     <text x="346" y="430" fill="#64748b" font-size="7" font-style="italic">多端广播 + 投递记录</text>
   </g>
 
-  <!-- Writer -->
+  <!-- Chat Manager -->
   <g class="float-box" style="animation-delay:.9s">
     <rect x="464" y="310" width="138" height="140" rx="12" fill="#1e1e2e" stroke="url(#pink)" stroke-width="2" filter="url(#shadow)"/>
-    <text x="533" y="334" text-anchor="middle" fill="#f472b6" font-size="11" font-weight="700">✍️ Writer + MCP</text>
-    <text x="533" y="348" text-anchor="middle" fill="#64748b" font-size="8">writer_node()</text>
+    <text x="533" y="334" text-anchor="middle" fill="#f472b6" font-size="11" font-weight="700">✍️ Chat Mgr + MCP</text>
+    <text x="533" y="348" text-anchor="middle" fill="#64748b" font-size="8">chat_manager_node()</text>
     <line x1="476" y1="354" x2="590" y2="354" stroke="#f472b620" stroke-width="1"/>
     <text x="480" y="368" fill="#94a3b8" font-size="7.5">翻译/润色/写作/问答</text>
     <text x="480" y="382" fill="#94a3b8" font-size="7.5">天气查询 · 技能注入</text>
@@ -193,20 +193,20 @@
   <!-- Guide -->
   <g class="float-box" style="animation-delay:1.5s">
     <rect x="766" y="310" width="170" height="140" rx="12" fill="#1e1e2e" stroke="#22d3ee50" stroke-width="1.5" filter="url(#shadow)"/>
-    <text x="851" y="334" text-anchor="middle" fill="#22d3ee" font-size="11" font-weight="700">📖 Guide</text>
-    <text x="851" y="348" text-anchor="middle" fill="#64748b" font-size="8">guide_node()</text>
+    <text x="851" y="334" text-anchor="middle" fill="#22d3ee" font-size="11" font-weight="700">📖 Help Center</text>
+    <text x="851" y="348" text-anchor="middle" fill="#64748b" font-size="8">help_center_node()</text>
     <line x1="778" y1="354" x2="924" y2="354" stroke="#22d3ee20" stroke-width="1"/>
     <text x="782" y="368" fill="#94a3b8" font-size="7.5">AGENT_GUIDE.md 知识库</text>
     <text x="782" y="382" fill="#94a3b8" font-size="7.5">命令帮助说明</text>
     <text x="782" y="396" fill="#94a3b8" font-size="7.5">工具能力概览</text>
     <line x1="778" y1="403" x2="924" y2="403" stroke="#22d3ee20" stroke-width="1"/>
-    <text x="782" y="417" fill="#64748b" font-size="7" font-style="italic">_load_guide_doc()</text>
+    <text x="782" y="417" fill="#64748b" font-size="7" font-style="italic">_load_help_doc()</text>
     <text x="782" y="430" fill="#64748b" font-size="7" font-style="italic">tool_registry 注入</text>
   </g>
 
-  <!-- ═══════ Layer 4.5: Writer → ReAct Agent → Tools → MCP ═══════ -->
+  <!-- ═══════ Layer 4.5: Chat Manager → ReAct Agent → Tools → MCP ═══════ -->
 
-  <!-- Flow: Writer → ReAct Agent -->
+  <!-- Flow: Chat Manager → ReAct Agent -->
   <line x1="533" y1="450" x2="533" y2="478" stroke="#f472b680" stroke-width="1.5" class="flow-line"/>
 
   <!-- ReAct Agent box -->
@@ -251,14 +251,14 @@
 
   <!-- ═══════ Layer 5: Fixed Edges → END ═══════ -->
 
-  <!-- Vertical lines from non-Writer nodes to merge line -->
+  <!-- Vertical lines from non-Chat Manager nodes to merge line -->
   <line x1="88" y1="450" x2="88" y2="672" stroke="#a78bfa40" stroke-width="1" class="flow-line"/>
   <line x1="240" y1="450" x2="240" y2="672" stroke="#34d39940" stroke-width="1" class="flow-line"/>
   <line x1="390" y1="450" x2="390" y2="672" stroke="#60a5fa40" stroke-width="1" class="flow-line"/>
   <line x1="684" y1="450" x2="684" y2="672" stroke="#fb923c40" stroke-width="1" class="flow-line"/>
   <line x1="851" y1="450" x2="851" y2="672" stroke="#22d3ee40" stroke-width="1" class="flow-line"/>
 
-  <!-- Writer/MCP chain merges back -->
+  <!-- Chat Manager/MCP chain merges back -->
   <line x1="533" y1="634" x2="533" y2="672" stroke="#f472b640" stroke-width="1" class="flow-line"/>
 
   <!-- Merge line -->
