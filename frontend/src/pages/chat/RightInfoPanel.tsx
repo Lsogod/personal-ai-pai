@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { Zap, Calendar, Wallet, Link2 } from "../../components/ui/icons";
-import { SkillsPanel } from "../../components/skills/SkillsPanel";
-import { CalendarPanel } from "../../components/chat/CalendarPanel";
-import { LedgerStatsCard } from "../../components/chat/LedgerStatsCard";
-import { LedgerListCard } from "../../components/chat/LedgerListCard";
+import { Calendar, Link2, Wallet, Zap } from "../../components/ui/icons";
 import { BindingCard } from "../../components/chat/BindingCard";
+import { CalendarPanel } from "../../components/chat/CalendarPanel";
+import { LedgerListCard } from "../../components/chat/LedgerListCard";
+import { LedgerStatsCard } from "../../components/chat/LedgerStatsCard";
+import { SkillsPanel } from "../../components/skills/SkillsPanel";
 
 interface RightInfoPanelProps {
   token: string | null;
@@ -24,9 +24,8 @@ export function RightInfoPanel({ token, stats }: RightInfoPanelProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("ledger");
 
   return (
-    <div className="flex flex-col h-full bg-surface-card border-l border-border">
-      {/* Tabs Header */}
-      <div className="flex items-center p-2 border-b border-border gap-1 overflow-x-auto no-scrollbar shrink-0">
+    <div className="flex h-full flex-col border-l border-border bg-surface-card">
+      <div className="no-scrollbar flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border p-2">
         {TABS.map((tab) => {
           const isActive = activeTab === tab.key;
           const Icon = tab.icon;
@@ -34,14 +33,12 @@ export function RightInfoPanel({ token, stats }: RightInfoPanelProps) {
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
-              className={`
-                flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap flex-1 justify-center
-                ${
-                  isActive
-                    ? "bg-content text-surface"
-                    : "text-content-secondary hover:bg-surface-hover hover:text-content"
-                }
-              `}
+              className={[
+                "flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                isActive
+                  ? "bg-content text-surface"
+                  : "text-content-secondary hover:bg-surface-hover hover:text-content",
+              ].join(" ")}
             >
               <Icon size={16} />
               <span>{tab.label}</span>
@@ -50,21 +47,17 @@ export function RightInfoPanel({ token, stats }: RightInfoPanelProps) {
         })}
       </div>
 
-      {/* Content Area */}
-      <div className="flex-1 overflow-y-auto p-4 min-h-0">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {activeTab === "skills" && <SkillsPanel token={token} />}
-        
         {activeTab === "calendar" && <CalendarPanel token={token} />}
-        
         {activeTab === "ledger" && (
           <div className="space-y-4">
-            <LedgerStatsCard stats={stats} />
+            <LedgerStatsCard stats={stats} token={token} />
             <LedgerListCard token={token} />
           </div>
         )}
-        
         {activeTab === "binding" && (
-          <div className="max-w-lg mx-auto">
+          <div className="mx-auto max-w-lg">
             <BindingCard token={token} />
           </div>
         )}
