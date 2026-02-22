@@ -523,7 +523,7 @@ async def _understand_reminder_fallback(content: str, conversation_context: str)
     settings = get_settings()
     tz = settings.timezone
     now_local = datetime.now(ZoneInfo(tz)).strftime("%Y-%m-%d %H:%M")
-    llm = get_llm(node_name="secretary")
+    llm = get_llm(node_name="schedule_manager")
     system = SystemMessage(
         content=(
             "你是提醒专用解析器。只输出 JSON。"
@@ -612,11 +612,11 @@ async def _create_reminder(
     return f"好的，已设置{len(normalized_offsets)}次提醒：{_format_offsets_for_reply(normalized_offsets, event_time)}。"
 
 
-async def _understand_secretary_message(content: str, conversation_context: str) -> dict:
+async def _understand_schedule_message(content: str, conversation_context: str) -> dict:
     settings = get_settings()
     tz = settings.timezone
     now_local = datetime.now(ZoneInfo(tz)).strftime("%Y-%m-%d %H:%M")
-    llm = get_llm(node_name="secretary")
+    llm = get_llm(node_name="schedule_manager")
     system = SystemMessage(
         content=(
             "你是提醒与日历意图解析器。只输出 JSON。"
@@ -652,7 +652,7 @@ async def _understand_secretary_message(content: str, conversation_context: str)
 
 
 async def _answer_context_recall(content: str, conversation_context: str) -> str:
-    llm = get_llm(node_name="secretary")
+    llm = get_llm(node_name="schedule_manager")
     system = SystemMessage(
         content=(
             "你是会话回忆助手。请仅依据给定会话上下文回答用户问题。"
@@ -798,7 +798,7 @@ async def _answer_calendar_with_llm(
     ledgers: list[Ledger],
     schedules: list[Schedule],
 ) -> str:
-    llm = get_llm(node_name="secretary")
+    llm = get_llm(node_name="schedule_manager")
     payload = _build_calendar_payload(ledgers, schedules)
     system = SystemMessage(
         content=(
@@ -894,7 +894,7 @@ async def _answer_calendar(
     return _render_calendar_text(ledgers, schedules, label, schedule_status_filter)
 
 
-async def secretary_node(state: GraphState) -> GraphState:
+async def schedule_manager_node(state: GraphState) -> GraphState:
     message = state["message"]
     session = get_session()
     scheduler = get_scheduler()
@@ -906,7 +906,7 @@ async def secretary_node(state: GraphState) -> GraphState:
 
     parsed: dict = {}
     try:
-        parsed = await _understand_secretary_message(content, context_text)
+        parsed = await _understand_schedule_message(content, context_text)
     except Exception:
         parsed = {}
 

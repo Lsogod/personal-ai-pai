@@ -11,7 +11,7 @@ from app.services.llm import get_llm
 from app.services.tool_registry import list_runtime_tool_metas
 
 
-VALID_INTENTS = {"skill_manager", "finance", "secretary", "writer", "guide", "unknown"}
+VALID_INTENTS = {"skill_manager", "ledger_manager", "schedule_manager", "chat_manager", "help_center", "unknown"}
 
 
 def _extract_json_object(text: str) -> dict:
@@ -38,21 +38,21 @@ async def _classify_intent_with_llm(
     system = SystemMessage(
         content=(
             "你是消息路由器。请将用户消息分类到一个意图，且只输出 JSON。"
-            "可选 intent 仅限: skill_manager, finance, secretary, writer, guide, unknown。"
+            "可选 intent 仅限: skill_manager, ledger_manager, schedule_manager, chat_manager, help_center, unknown。"
             "当用户在管理技能（新增/创建/更新/发布/停用/列出技能）时，intent=skill_manager。"
-            "当用户记账、消费统计、小票识别、账单增删改查时，intent=finance。"
-            "当用户提醒、日程、定时任务、日历查询时，intent=secretary。"
-            "当用户在询问怎么用、教程、帮助、命令说明、手册时，intent=guide。"
-            "当用户询问“你能做什么/有哪些功能”时，也归类为 guide（但应是简洁能力说明，不是命令手册）。"
-            "写作/翻译/润色/普通问答时，intent=writer。"
-            "当用户要抓取网页、总结链接、调用 /fetch 或 /mcp 时，intent=writer。"
-            "当用户在查询天气（如“现在武汉天气”）时，intent=writer。"
-            "当用户询问“我刚才问了什么/之前聊了什么/你记得什么”这类回忆上下文问题时，intent=writer。"
+            "当用户记账、消费统计、小票识别、账单增删改查时，intent=ledger_manager。"
+            "当用户提醒、日程、定时任务、日历查询时，intent=schedule_manager。"
+            "当用户在询问怎么用、教程、帮助、命令说明、手册时，intent=help_center。"
+            "当用户询问“你能做什么/有哪些功能”时，也归类为 help_center（但应是简洁能力说明，不是命令手册）。"
+            "写作/翻译/润色/普通问答时，intent=chat_manager。"
+            "当用户要抓取网页、总结链接、调用 /fetch 或 /mcp 时，intent=chat_manager。"
+            "当用户在查询天气（如“现在武汉天气”）时，intent=chat_manager。"
+            "当用户询问“我刚才问了什么/之前聊了什么/你记得什么”这类回忆上下文问题时，intent=chat_manager。"
             "必须优先依据 user_message 本身判断；conversation_context 仅作辅助。"
-            "可用工具信息可帮助判断是否属于 writer（工具调用/外部信息查询）。"
+            "可用工具信息可帮助判断是否属于 chat_manager（工具调用/外部信息查询）。"
             "若不确定，intent=unknown。"
-            "如果 has_pending_ledger=true，优先判断为 finance，除非用户明确在取消该流程。"
-            "如果 has_image=true，优先判断为 finance 或 writer（取决于用户是否在做账单/票据/支付分析）。"
+            "如果 has_pending_ledger=true，优先判断为 ledger_manager，除非用户明确在取消该流程。"
+            "如果 has_image=true，优先判断为 ledger_manager 或 chat_manager（取决于用户是否在做账单/票据/支付分析）。"
         )
     )
     human = HumanMessage(
@@ -78,7 +78,7 @@ async def router_node(state: GraphState) -> GraphState:
     message = state["message"]
     content = (message.content or "").strip()
     if not content and not message.image_urls:
-        return {**state, "intent": "writer"}
+        return {**state, "intent": "chat_manager"}
     has_pending = False
     if user_id > 0 and conversation_id > 0:
         has_pending = await has_pending_ledger(user_id, conversation_id)
@@ -106,7 +106,7 @@ async def router_node(state: GraphState) -> GraphState:
         return {**state, "intent": intent}
     # Rule fallback when LLM is uncertain/unavailable.
     if message.image_urls or has_pending:
-        return {**state, "intent": "finance"}
+        return {**state, "intent": "ledger_manager"}
     return {**state, "intent": intent}
 
 def route_intent(state: GraphState) -> str:
@@ -116,20 +116,20 @@ def route_intent(state: GraphState) -> str:
         return "onboarding"
 
     routed = str(state.get("intent") or "").strip().lower()
-    if routed in {"skill_manager", "finance", "secretary", "writer", "guide"}:
+    if routed in {"skill_manager", "ledger_manager", "schedule_manager", "chat_manager", "help_center"}:
         return routed
 
     content = (message.content or "").lower()
     # Command fallback when LLM route fails.
     if content.startswith("/help"):
-        return "guide"
+        return "help_center"
     if content.startswith("/mcp") or content.startswith("/fetch") or content.startswith("/weather"):
-        return "writer"
+        return "chat_manager"
     if content.startswith("/skill"):
         return "skill_manager"
     if message.image_urls or content.startswith("/ledger"):
-        return "finance"
+        return "ledger_manager"
     if content.startswith("/calendar"):
-        return "secretary"
+        return "schedule_manager"
     # Default route fallback.
-    return "writer"
+    return "chat_manager"

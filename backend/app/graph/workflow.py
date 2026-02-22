@@ -6,11 +6,11 @@ from langgraph.checkpoint.memory import MemorySaver
 from app.graph.state import GraphState
 from app.graph.nodes.router import route_intent, router_node
 from app.graph.nodes.onboarding import onboarding_node
-from app.graph.nodes.finance import finance_node
-from app.graph.nodes.secretary import secretary_node
-from app.graph.nodes.writer import writer_node
+from app.graph.nodes.ledger_manager import ledger_manager_node
+from app.graph.nodes.schedule_manager import schedule_manager_node
+from app.graph.nodes.chat_manager import chat_manager_node
 from app.graph.nodes.skill_manager import skill_manager_node
-from app.graph.nodes.guide import guide_node
+from app.graph.nodes.help_center import help_center_node
 
 _graph = None
 _graph_lock = asyncio.Lock()
@@ -23,11 +23,11 @@ def _build_graph(checkpointer):
 
     graph.add_node("router", router_node)
     graph.add_node("onboarding", onboarding_node)
-    graph.add_node("finance", finance_node)
-    graph.add_node("secretary", secretary_node)
-    graph.add_node("writer", writer_node)
+    graph.add_node("ledger_manager", ledger_manager_node)
+    graph.add_node("schedule_manager", schedule_manager_node)
+    graph.add_node("chat_manager", chat_manager_node)
     graph.add_node("skill_manager", skill_manager_node)
-    graph.add_node("guide", guide_node)
+    graph.add_node("help_center", help_center_node)
 
     graph.set_entry_point("router")
 
@@ -36,20 +36,20 @@ def _build_graph(checkpointer):
         route_intent,
         {
             "onboarding": "onboarding",
-            "finance": "finance",
-            "secretary": "secretary",
-            "writer": "writer",
+            "ledger_manager": "ledger_manager",
+            "schedule_manager": "schedule_manager",
+            "chat_manager": "chat_manager",
             "skill_manager": "skill_manager",
-            "guide": "guide",
+            "help_center": "help_center",
         },
     )
 
     graph.add_edge("onboarding", END)
-    graph.add_edge("finance", END)
-    graph.add_edge("secretary", END)
-    graph.add_edge("writer", END)
+    graph.add_edge("ledger_manager", END)
+    graph.add_edge("schedule_manager", END)
+    graph.add_edge("chat_manager", END)
     graph.add_edge("skill_manager", END)
-    graph.add_edge("guide", END)
+    graph.add_edge("help_center", END)
 
     return graph.compile(checkpointer=checkpointer)
 

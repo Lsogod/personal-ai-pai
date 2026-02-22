@@ -33,7 +33,7 @@ from app.services.tool_registry import (
 from app.services.usage import log_tool_usage
 
 URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
-VALID_WRITER_KINDS = {"general", "time", "external", "weather", "tooling", "unknown"}
+VALID_CHAT_KINDS = {"general", "time", "external", "weather", "tooling", "unknown"}
 
 
 def _shorten_text(value: str, limit: int = 500) -> str:
@@ -109,16 +109,16 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
     return default
 
 
-async def _classify_writer_request_with_llm(
+async def _classify_chat_request_with_llm(
     *,
     content: str,
     context_text: str,
     runtime_tools: str,
 ) -> dict[str, Any]:
-    llm = get_llm(node_name="writer")
+    llm = get_llm(node_name="chat_manager")
     system = SystemMessage(
         content=(
-            "你是 writer 节点的请求分析器。只输出 JSON。"
+            "你是 chat_manager 节点的请求分析器。只输出 JSON。"
             "字段: kind, tool_required, weather_location, confidence。"
             "kind 仅可为: general, time, external, weather, tooling, unknown。"
             "tool_required 必须是布尔值。"
@@ -142,7 +142,7 @@ async def _classify_writer_request_with_llm(
     except Exception:
         data = {}
     kind = str(data.get("kind") or "unknown").strip().lower()
-    if kind not in VALID_WRITER_KINDS:
+    if kind not in VALID_CHAT_KINDS:
         kind = "unknown"
     weather_location = str(data.get("weather_location") or "").strip()
     confidence_raw = data.get("confidence")
@@ -271,7 +271,7 @@ async def _answer_with_fetched_content(
     fetched_markdown: str,
     source_url: str,
 ) -> str:
-    llm = get_llm(node_name="writer")
+    llm = get_llm(node_name="chat_manager")
     system = SystemMessage(
         content=(
             f"你是{user.nickname}的私人助理{user.ai_name} {user.ai_emoji}。"
@@ -300,7 +300,7 @@ async def _answer_weather_with_time_context(
     weather_output: str,
     source_url: str,
 ) -> str:
-    llm = get_llm(node_name="writer")
+    llm = get_llm(node_name="chat_manager")
     system = SystemMessage(
         content=(
             f"你是{user.nickname}的私人助理{user.ai_name} {user.ai_emoji}。"
@@ -330,7 +330,7 @@ async def _answer_weather_with_time_context(
     )
 
 
-def _build_writer_tools(
+def _build_chat_tools(
     *,
     user_id: int | None,
     platform: str,
@@ -711,7 +711,7 @@ async def _ground_answer_with_tool_outputs(
     tool_outputs: list[str],
     draft_answer: str,
 ) -> str:
-    llm = get_llm(node_name="writer")
+    llm = get_llm(node_name="chat_manager")
     merged = "\n\n---\n\n".join(tool_outputs)
     if len(merged) > 16000:
         merged = merged[:16000] + "\n...(tool outputs truncated)"
@@ -745,13 +745,13 @@ async def _run_tool_agent(
     runtime_tools: str,
 ) -> tuple[str, int]:
     agent = create_react_agent(
-        model=get_llm(node_name="writer"),
-        tools=_build_writer_tools(
+        model=get_llm(node_name="chat_manager"),
+        tools=_build_chat_tools(
             user_id=user.id,
             platform=platform,
             conversation_id=conversation_id,
         ),
-        name=f"writer_tool_agent_{user.id}_{conversation_id or 0}",
+        name=f"chat_tool_agent_{user.id}_{conversation_id or 0}",
     )
     system_prompt = (
         f"你是{user.nickname}的私人助理{user.ai_name} {user.ai_emoji}。"
@@ -925,7 +925,7 @@ async def _weather_fallback_fetch_and_answer(
         return None
 
 
-async def writer_node(state: GraphState) -> GraphState:
+async def chat_manager_node(state: GraphState) -> GraphState:
     message = state["message"]
     session = get_session()
     user = await session.get(User, state["user_id"])
@@ -956,7 +956,7 @@ async def writer_node(state: GraphState) -> GraphState:
         return {**state, "responses": [cmd]}
 
     try:
-        classification = await _classify_writer_request_with_llm(
+        classification = await _classify_chat_request_with_llm(
             content=content,
             context_text=context_text,
             runtime_tools=runtime_tools,
@@ -1027,7 +1027,7 @@ async def writer_node(state: GraphState) -> GraphState:
         }
 
     # Final plain-LLM fallback.
-    llm = get_llm(node_name="writer")
+    llm = get_llm(node_name="chat_manager")
     system = SystemMessage(
         content=(
             f"你是{user.nickname}的私人助理{user.ai_name} {user.ai_emoji}。"

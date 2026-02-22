@@ -13,7 +13,7 @@ from app.services.skills import list_skills_with_source
 from app.services.tool_registry import list_runtime_tool_metas
 
 
-GUIDE_DOC_PATH = Path(__file__).resolve().parents[2] / "knowledge" / "AGENT_GUIDE.md"
+HELP_DOC_PATH = Path(__file__).resolve().parents[2] / "knowledge" / "AGENT_GUIDE.md"
 
 
 def _skill_status_label(value: str | None) -> str:
@@ -26,9 +26,9 @@ def _skill_status_label(value: str | None) -> str:
     }.get(key, key or "未知")
 
 
-def _load_guide_doc() -> str:
+def _load_help_doc() -> str:
     try:
-        return GUIDE_DOC_PATH.read_text(encoding="utf-8").strip()
+        return HELP_DOC_PATH.read_text(encoding="utf-8").strip()
     except Exception:
         return (
             "PAI 使用说明缺失。你可以直接说需求：记账、提醒、日历、技能管理。"
@@ -63,7 +63,7 @@ def _build_tool_context(tools: list[dict]) -> str:
     return "\n".join(lines)
 
 
-async def guide_node(state: GraphState) -> GraphState:
+async def help_center_node(state: GraphState) -> GraphState:
     message = state["message"]
     content = (message.content or "").strip()
     platform = (message.platform or "").strip().lower()
@@ -76,10 +76,10 @@ async def guide_node(state: GraphState) -> GraphState:
     skills = await list_skills_with_source(session, user.id)
     skill_context = _build_skill_context(skills)
     tool_context = _build_tool_context(await list_runtime_tool_metas())
-    guide_doc = _load_guide_doc()
+    help_doc = _load_help_doc()
     context_text = render_conversation_context(state)
 
-    llm = get_llm(node_name="guide")
+    llm = get_llm(node_name="help_center")
     system = SystemMessage(
         content=(
             "你是 PAI 的帮助与能力说明助手。"
@@ -101,7 +101,7 @@ async def guide_node(state: GraphState) -> GraphState:
     )
     human = HumanMessage(
         content=(
-            f"《平台说明文档》:\n{guide_doc}\n\n"
+            f"《平台说明文档》:\n{help_doc}\n\n"
             f"《当前用户技能上下文》:\n{skill_context}\n\n"
             f"《当前可用工具上下文》:\n{tool_context}\n\n"
             f"《当前会话上下文》:\n{context_text}\n\n"

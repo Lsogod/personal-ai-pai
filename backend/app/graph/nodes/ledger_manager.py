@@ -338,7 +338,7 @@ async def _understand_pending_selection(
     pending: dict,
     conversation_context: str,
 ) -> dict:
-    llm = get_llm(node_name="finance")
+    llm = get_llm(node_name="ledger_manager")
     system = SystemMessage(
         content=(
             "你是待确认记账解析器。只输出 JSON。"
@@ -413,8 +413,8 @@ def _parse_vision_result(result: dict) -> dict:
     }
 
 
-async def _understand_finance_message(content: str, conversation_context: str) -> dict:
-    llm = get_llm(node_name="finance")
+async def _understand_ledger_message(content: str, conversation_context: str) -> dict:
+    llm = get_llm(node_name="ledger_manager")
     system = SystemMessage(
         content=(
             "你是记账意图解析器。只输出 JSON。"
@@ -559,7 +559,7 @@ async def _answer_ledger_with_llm(
     category: str | None,
     rows: list[Ledger],
 ) -> str:
-    llm = get_llm(node_name="finance")
+    llm = get_llm(node_name="ledger_manager")
     payload = _build_ledger_payload(rows)
     system = SystemMessage(
         content=(
@@ -698,7 +698,7 @@ async def _handle_ledger_command(
     return ["可用命令：`/ledger list`、`/ledger update <id> <金额> [分类] [摘要]`、`/ledger delete <id|latest>`。"]
 
 
-async def finance_node(state: GraphState) -> GraphState:
+async def ledger_manager_node(state: GraphState) -> GraphState:
     message = state["message"]
     session = get_session()
     user = await session.get(User, state["user_id"])
@@ -930,7 +930,7 @@ async def finance_node(state: GraphState) -> GraphState:
     # LLM-first: understand natural-language ledger intent first.
     parsed: dict = {}
     try:
-        parsed = await _understand_finance_message(content, context_text)
+        parsed = await _understand_ledger_message(content, context_text)
     except Exception:
         parsed = {}
 
