@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-import json
 import re
 from datetime import datetime, timezone
 from typing import Any
 
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.db.session import AsyncSessionLocal
 from app.services.llm import get_llm
 
 
-_JSON_BLOCK = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE | re.MULTILINE)
 _FORBIDDEN_SQL = re.compile(
     r"\b(drop|alter|truncate|create|grant|revoke|vacuum|analyze|copy|attach|detach)\b",
     re.IGNORECASE,
@@ -24,16 +23,13 @@ _USER_FILTER = re.compile(r"(?:\w+\.)?user_id\s*=\s*:user_id", re.IGNORECASE)
 _DELETE_ALL_HINT = re.compile(r"(所有|全部|清空|all)", re.IGNORECASE)
 
 
-def _parse_json(content: str) -> dict[str, Any]:
-    raw = (content or "").strip()
-    raw = re.sub(_JSON_BLOCK, "", raw).strip()
-    if not raw:
-        return {}
-    try:
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+class LedgerText2SQLPlan(BaseModel):
+    matched: bool = Field(default=False)
+    intent: str = Field(default="unknown")
+    sql: str = Field(default="")
+    params: dict[str, Any] = Field(default_factory=dict)
+    summary: str = Field(default="")
+    confidence: float = Field(default=0.0)
 
 
 def _normalize_params(params: dict[str, Any]) -> dict[str, Any]:
@@ -123,6 +119,7 @@ def _is_safe_sql(sql: str, intent: str, user_message: str) -> tuple[bool, str]:
 
 async def _plan_sql(message: str, conversation_context: str = "") -> dict[str, Any]:
     llm = get_llm(node_name="ledger_text2sql")
+    runnable = llm.with_structured_output(LedgerText2SQLPlan)
     now = datetime.utcnow().isoformat()
     system_prompt = (
         "你是账单 Text-to-SQL 规划器（PostgreSQL）。"
@@ -141,7 +138,7 @@ async def _plan_sql(message: str, conversation_context: str = "") -> dict[str, A
         "不得使用不存在的列（例如 description）。"
         "禁止输出 Markdown、解释文本、代码块。"
     )
-    response = await llm.ainvoke(
+    result = await runnable.ainvoke(
         [
             {"role": "system", "content": system_prompt},
             {
@@ -153,7 +150,11 @@ async def _plan_sql(message: str, conversation_context: str = "") -> dict[str, A
             },
         ]
     )
-    return _parse_json(str(response.content))
+    if isinstance(result, BaseModel):
+        return result.model_dump()
+    if isinstance(result, dict):
+        return result
+    return {}
 
 
 async def try_execute_ledger_text2sql(

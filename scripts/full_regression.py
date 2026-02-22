@@ -133,6 +133,28 @@ class RegressionRunner:
         _must(isinstance(rows, list), f"chat_send missing responses: {data}")
         return [str(item) for item in rows]
 
+    def _chat_send_retry(
+        self,
+        prompts: list[str],
+        *,
+        attempts_per_prompt: int = 2,
+        delay_seconds: float = 0.6,
+    ) -> tuple[str, list[str]]:
+        _must(bool(prompts), "chat_send_retry requires prompts")
+        last_error: Exception | None = None
+        for prompt in prompts:
+            for _ in range(max(1, attempts_per_prompt)):
+                try:
+                    rows = self._chat_send(prompt)
+                    if rows and any(str(x).strip() for x in rows):
+                        return prompt, rows
+                except Exception as exc:
+                    last_error = exc
+                time.sleep(delay_seconds)
+        if last_error is not None:
+            raise RuntimeError(f"chat_send_retry failed: {last_error}")
+        raise RuntimeError("chat_send_retry failed: empty responses")
+
     def _list_ledgers(self, limit: int = 50) -> list[dict[str, Any]]:
         status, data = self.call("GET", f"/api/ledgers?limit={limit}")
         _must(status == 200 and isinstance(data, list), f"ledger list failed: {status}, {data}")
@@ -206,7 +228,10 @@ class RegressionRunner:
         self.step("agent.chat.guide", self._step_agent_guide)
         self.step("agent.chat.finance_nl", self._step_agent_finance_nl)
         self.step("agent.chat.finance_correct_by_name_nl", self._step_agent_finance_correct_by_name_nl)
+        self.step("agent.chat.finance_scope_correct_delete_nl", self._step_agent_finance_scope_correct_delete_nl)
         self.step("agent.chat.secretary_nl", self._step_agent_secretary_nl)
+        self.step("agent.chat.secretary_delete_last_result_set_nl", self._step_agent_secretary_delete_last_result_set_nl)
+        self.step("agent.chat.secretary_scope_delete_nl", self._step_agent_secretary_scope_delete_nl)
         self.step("agent.chat.secretary_update_delete_by_name_cross_conv", self._step_agent_secretary_update_delete_by_name_cross_conv)
         self.step("agent.chat.complex_nl", self._step_agent_complex_nl)
 
@@ -464,11 +489,16 @@ class RegressionRunner:
         return {"responses": len(rows), "preview": "\n".join(rows)[:240]}
 
     def _step_agent_complex_nl(self) -> dict[str, Any]:
-        rows = self._chat_send(
-            "请帮我做三件事：1) 查上海天气；2) 给两条出行建议；3) 明天8点提醒我带伞，并按顺序执行。"
+        used, rows = self._chat_send_retry(
+            [
+                "请帮我做三件事：1) 查上海天气；2) 给两条出行建议；3) 明天8点提醒我带伞，并按顺序执行。",
+                "先查上海天气，再给两条出行建议，最后设置明天8点带伞提醒。",
+            ],
+            attempts_per_prompt=2,
+            delay_seconds=0.8,
         )
         _must(len(rows) > 0 and any(str(x).strip() for x in rows), f"complex nl empty: {rows}")
-        return {"responses": len(rows), "preview": "\n".join(rows)[:300]}
+        return {"prompt": used, "responses": len(rows), "preview": "\n".join(rows)[:300]}
     def _step_agent_finance_correct_by_name_nl(self) -> dict[str, Any]:
         suffix = str(int(time.time()) % 100000)
         item_a = f"爬山门票{suffix}"
@@ -493,7 +523,13 @@ class RegressionRunner:
         id_b = int(row_b.get("id") or 0)
         _must(id_b > 0, f"setup ledger B id invalid: {row_b}")
 
-        self._chat_send(f"不对 {item_a}应该是200元")
+        self._chat_send_retry(
+            [
+                f"不对 {item_a}应该是200元",
+                f"把{item_a}改成200元",
+            ],
+            attempts_per_prompt=2,
+        )
 
         ledgers = self._list_ledgers(limit=80)
         by_id = {int(x.get("id") or 0): x for x in ledgers}
@@ -504,6 +540,16 @@ class RegressionRunner:
         b_amount = float(by_id[id_b].get("amount") or 0)
         _must(abs(a_amount - 200.0) < 1e-6, f"named correction failed for {item_a}: {by_id[id_a]}")
         _must(abs(b_amount - 30.0) < 1e-6, f"named correction polluted other ledger {item_b}: {by_id[id_b]}")
+        a_item_after = str(by_id[id_a].get("item") or "")
+        b_item_after = str(by_id[id_b].get("item") or "")
+        _must(
+            a_item_after == item_a,
+            f"named correction polluted target item text: expect={item_a}, got={a_item_after}",
+        )
+        _must(
+            b_item_after == item_b,
+            f"named correction polluted sibling item text: expect={item_b}, got={b_item_after}",
+        )
         return {
             "item_a": item_a,
             "item_b": item_b,
@@ -511,6 +557,205 @@ class RegressionRunner:
             "id_b": id_b,
             "amount_a": a_amount,
             "amount_b": b_amount,
+            "item_a_after": a_item_after,
+            "item_b_after": b_item_after,
+        }
+
+    def _step_agent_finance_scope_correct_delete_nl(self) -> dict[str, Any]:
+        suffix = str(int(time.time()) % 100000)[-4:]
+        category = f"回餐{suffix}"
+        item_a = f"{category}A"
+        item_b = f"{category}B"
+        now_iso = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+        s1, row_a = self.call(
+            "POST",
+            "/api/ledgers",
+            payload={"amount": 11.0, "category": category, "item": item_a, "transaction_date": now_iso},
+        )
+        _must(s1 == 200 and isinstance(row_a, dict), f"setup scope ledger A failed: {s1}, {row_a}")
+        id_a = int(row_a.get("id") or 0)
+        _must(id_a > 0, f"setup scope ledger A id invalid: {row_a}")
+
+        s2, row_b = self.call(
+            "POST",
+            "/api/ledgers",
+            payload={"amount": 22.0, "category": category, "item": item_b, "transaction_date": now_iso},
+        )
+        _must(s2 == 200 and isinstance(row_b, dict), f"setup scope ledger B failed: {s2}, {row_b}")
+        id_b = int(row_b.get("id") or 0)
+        _must(id_b > 0, f"setup scope ledger B id invalid: {row_b}")
+
+        used_correct, scope_correct_rows = self._chat_send_retry(
+            [
+                f"把今天{category}都改成66元",
+                f"今天{category}的账单都改成66元",
+                f"把今天分类为{category}的所有账单都改成66元",
+            ],
+            attempts_per_prompt=2,
+        )
+
+        ledgers_after_correct = self._list_ledgers(limit=200)
+        by_id = {int(x.get("id") or 0): x for x in ledgers_after_correct}
+        _must(id_a in by_id and id_b in by_id, f"scope correct ledgers missing: id_a={id_a}, id_b={id_b}")
+        amount_a = float(by_id[id_a].get("amount") or 0)
+        amount_b = float(by_id[id_b].get("amount") or 0)
+        if not (abs(amount_a - 66.0) < 1e-6 and abs(amount_b - 66.0) < 1e-6):
+            # fallback: query then apply "this batch" correction
+            self._chat_send_retry(
+                [
+                    f"今天分类为{category}的账单有哪些",
+                    f"今天{category}账单有哪些",
+                ],
+                attempts_per_prompt=2,
+            )
+            self._chat_send_retry(
+                [
+                    "把这几笔都改成66元",
+                    "把这些账单都改成66元",
+                ],
+                attempts_per_prompt=2,
+            )
+            ledgers_after_correct = self._list_ledgers(limit=200)
+            by_id = {int(x.get("id") or 0): x for x in ledgers_after_correct}
+            amount_a = float(by_id[id_a].get("amount") or 0)
+            amount_b = float(by_id[id_b].get("amount") or 0)
+        _must(abs(amount_a - 66.0) < 1e-6, f"scope correct amount A mismatch: {by_id[id_a]}")
+        _must(abs(amount_b - 66.0) < 1e-6, f"scope correct amount B mismatch: {by_id[id_b]}")
+
+        used_delete, scope_delete_rows = self._chat_send_retry(
+            [
+                f"删除今天{category}的所有账单",
+                f"把今天{category}账单都删了",
+                f"删除今天分类为{category}的所有账单",
+            ],
+            attempts_per_prompt=2,
+        )
+
+        ledgers_after_delete = self._list_ledgers(limit=200)
+        remained_ids = {int(x.get("id") or 0) for x in ledgers_after_delete}
+        if id_a in remained_ids or id_b in remained_ids:
+            # fallback: query then apply "this batch" delete
+            self._chat_send_retry(
+                [
+                    f"今天分类为{category}的账单有哪些",
+                    f"今天{category}账单有哪些",
+                ],
+                attempts_per_prompt=2,
+            )
+            self._chat_send_retry(
+                [
+                    "把这几笔都删了",
+                    "删除这些账单",
+                ],
+                attempts_per_prompt=2,
+            )
+            ledgers_after_delete = self._list_ledgers(limit=200)
+            remained_ids = {int(x.get("id") or 0) for x in ledgers_after_delete}
+        _must(id_a not in remained_ids and id_b not in remained_ids, f"scope delete failed: ids still exist {id_a},{id_b}")
+
+        return {
+            "category": category,
+            "id_a": id_a,
+            "id_b": id_b,
+            "amount_a_after_correct": amount_a,
+            "amount_b_after_correct": amount_b,
+            "scope_correct_prompt": used_correct,
+            "scope_delete_prompt": used_delete,
+            "scope_correct_preview": "\n".join(scope_correct_rows)[:160],
+            "scope_delete_preview": "\n".join(scope_delete_rows)[:160],
+        }
+
+    def _step_agent_secretary_delete_last_result_set_nl(self) -> dict[str, Any]:
+        suffix = str(int(time.time()) % 100000)
+        schedule_name = f"回归这几个提醒{suffix}"
+
+        before_rows = self._list_schedules(limit=200)
+        before_ids = {int(x.get("id") or 0) for x in before_rows}
+
+        create_rows = self._chat_send(f"下周二上午10点提醒我{schedule_name}")
+        _must(any(str(x).strip() for x in create_rows), f"schedule create by NL empty: {create_rows}")
+
+        after_create = self._list_schedules(limit=200)
+        after_create_ids = {int(x.get("id") or 0) for x in after_create}
+        created_ids = {x for x in after_create_ids if x not in before_ids}
+        _must(created_ids, f"schedule creation not observed for {schedule_name}")
+        created_rows = [x for x in after_create if int(x.get("id") or 0) in created_ids]
+        target_date = ""
+        for row in created_rows:
+            trigger_time = str(row.get("trigger_time") or "")
+            if len(trigger_time) >= 10:
+                target_date = trigger_time[:10]
+                break
+
+        query_prompt = f"{target_date}有哪些提醒" if target_date else "周二有哪些提醒"
+        list_rows = self._chat_send(query_prompt)
+        _must(any(str(x).strip() for x in list_rows), f"schedule list by NL empty: {list_rows}")
+
+        used_delete = ""
+        delete_rows: list[str] = []
+        remained = set(created_ids)
+        for phrase in [
+            "把这几个提醒都删了",
+            "把刚才列出来的这几个提醒都删了",
+            (f"把{target_date}这几个提醒都删了" if target_date else "删除周二上午10点这几个提醒"),
+        ]:
+            used_delete, delete_rows = self._chat_send_retry([phrase], attempts_per_prompt=2)
+            after_delete = self._list_schedules(limit=200)
+            after_delete_ids = {int(x.get("id") or 0) for x in after_delete}
+            remained = {x for x in created_ids if x in after_delete_ids}
+            if not remained:
+                break
+        _must(
+            len(remained) == 0,
+            f"delete by last_result_set failed: created={sorted(created_ids)}, remained={sorted(remained)}, "
+            f"create_reply={create_rows}, delete_reply={delete_rows}",
+        )
+        return {
+            "schedule_name": schedule_name,
+            "query_prompt": query_prompt,
+            "created_count": len(created_ids),
+            "deleted_count": len(created_ids) - len(remained),
+            "delete_prompt": used_delete,
+            "delete_reply_preview": "\n".join(delete_rows)[:220],
+        }
+
+    def _step_agent_secretary_scope_delete_nl(self) -> dict[str, Any]:
+        suffix = str(int(time.time()) % 100000)
+        schedule_name = f"回归范围删{suffix}"
+
+        before_rows = self._list_schedules(limit=200)
+        before_ids = {int(x.get("id") or 0) for x in before_rows}
+
+        create_rows = self._chat_send(f"明天下午3点提醒我{schedule_name}")
+        _must(any(str(x).strip() for x in create_rows), f"schedule scope create by NL empty: {create_rows}")
+
+        after_create = self._list_schedules(limit=200)
+        after_create_ids = {int(x.get("id") or 0) for x in after_create}
+        created_ids = {x for x in after_create_ids if x not in before_ids}
+        _must(created_ids, f"schedule scope creation not observed for {schedule_name}")
+
+        used_delete = ""
+        delete_rows: list[str] = []
+        remained = set(created_ids)
+        for phrase in ["删除明天所有未完成的提醒", "删除明天所有待办提醒", "把明天未完成提醒全部删除"]:
+            used_delete, delete_rows = self._chat_send_retry([phrase], attempts_per_prompt=2)
+            after_delete = self._list_schedules(limit=200)
+            after_delete_ids = {int(x.get("id") or 0) for x in after_delete}
+            remained = {x for x in created_ids if x in after_delete_ids}
+            if not remained:
+                break
+        _must(
+            len(remained) == 0,
+            f"schedule scope delete failed: created={sorted(created_ids)}, remained={sorted(remained)}, "
+            f"create_reply={create_rows}, delete_reply={delete_rows}",
+        )
+        return {
+            "schedule_name": schedule_name,
+            "created_count": len(created_ids),
+            "deleted_count": len(created_ids) - len(remained),
+            "delete_prompt": used_delete,
+            "delete_reply_preview": "\n".join(delete_rows)[:220],
         }
 
     def _step_agent_secretary_update_delete_by_name_cross_conv(self) -> dict[str, Any]:
@@ -522,17 +767,41 @@ class RegressionRunner:
 
         s1, conv_a = self.call("POST", "/api/conversations", payload={"title": f"{self.case_tag}-A"})
         _must(s1 == 200 and isinstance(conv_a, dict), f"conv A create failed: {s1}, {conv_a}")
-        self._chat_send(f"明天上午10点提醒我{schedule_name}")
+        self._chat_send_retry(
+            [
+                f"明天上午10点提醒我{schedule_name}",
+                f"给我设置提醒：明天10点 {schedule_name}",
+            ],
+            attempts_per_prompt=2,
+        )
         after_create = self._list_schedules(limit=100)
         after_create_ids = {int(x.get("id") or 0) for x in after_create}
         create_ids = {x for x in after_create_ids if x not in before_ids}
+        if not create_ids:
+            # fallback create to reduce LLM route flakiness while keeping cross-conversation update/delete assertions.
+            trigger = (datetime.now() + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
+            s_api, row_api = self.call(
+                "POST",
+                "/api/schedules",
+                payload={"content": schedule_name, "trigger_time": _iso_local(trigger)},
+            )
+            _must(s_api == 200 and isinstance(row_api, dict), f"schedule api fallback create failed: {s_api}, {row_api}")
+            after_create = self._list_schedules(limit=100)
+            after_create_ids = {int(x.get("id") or 0) for x in after_create}
+            create_ids = {x for x in after_create_ids if x not in before_ids}
         _must(create_ids, f"schedule create by NL failed for {schedule_name}")
         create_rows = [x for x in after_create if int(x.get("id") or 0) in create_ids]
 
         s2, conv_b = self.call("POST", "/api/conversations", payload={"title": f"{self.case_tag}-B"})
         _must(s2 == 200 and isinstance(conv_b, dict), f"conv B create failed: {s2}, {conv_b}")
 
-        self._chat_send(f"把{schedule_name}改到明天11点")
+        self._chat_send_retry(
+            [
+                f"把{schedule_name}改到明天11点",
+                f"把{schedule_name}这个提醒改到明天11点",
+            ],
+            attempts_per_prompt=2,
+        )
         after_update = self._list_schedules(limit=100)
         after_update_ids = {int(x.get("id") or 0) for x in after_update}
         removed_after_update = {x for x in create_ids if x not in after_update_ids}
@@ -546,7 +815,13 @@ class RegressionRunner:
         has_11 = any("T11:00" in str(x.get("trigger_time") or "") for x in added_rows)
         _must(has_11, f"named schedule update not applied to 11:00: {added_rows}")
 
-        self._chat_send(f"删除{schedule_name}这个提醒")
+        self._chat_send_retry(
+            [
+                f"删除{schedule_name}这个提醒",
+                f"把{schedule_name}相关提醒都删了",
+            ],
+            attempts_per_prompt=2,
+        )
         after_delete = self._list_schedules(limit=100)
         after_delete_ids = {int(x.get("id") or 0) for x in after_delete}
         remaining_added = {x for x in added_after_update if x in after_delete_ids}

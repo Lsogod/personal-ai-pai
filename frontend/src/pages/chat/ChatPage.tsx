@@ -47,6 +47,10 @@ export function ChatPage() {
   const streamBufferRef = useRef("");
   const streamFlushTimerRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const wsReconnectTimerRef = useRef<number | null>(null);
+  const wsPingTimerRef = useRef<number | null>(null);
+  const wsShouldReconnectRef = useRef(false);
 
   function playReminderSound() {
     const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -136,39 +140,102 @@ export function ChatPage() {
 
   useEffect(() => {
     if (!token) return;
+    wsShouldReconnectRef.current = true;
+    let reconnectAttempt = 0;
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const url = `${protocol}://${window.location.host}/api/notifications/ws?token=${encodeURIComponent(token)}`;
-    const ws = new WebSocket(url);
 
-    ws.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data || "{}");
-        if (payload?.type === "reminder" && payload?.content) {
-          const content = String(payload.content);
-          const createdAt = String(payload.created_at || new Date().toISOString());
-          const reminderMessage: ChatMessage = {
-            role: "assistant",
-            content,
-            created_at: createdAt,
-          };
-          queryClient.setQueryData<ChatMessage[]>(["history"], (prev) => [
-            ...(prev || []),
-            reminderMessage,
-          ]);
-          pushReminderToast(content, createdAt);
-          playReminderSound();
-          void refreshSideData();
-        }
-        if (payload?.type === "message" && payload?.content) {
-          void refreshSideData();
-        }
-      } catch {
-        // Ignore malformed websocket payloads.
+    const clearWsTimers = () => {
+      if (wsPingTimerRef.current !== null) {
+        window.clearInterval(wsPingTimerRef.current);
+        wsPingTimerRef.current = null;
+      }
+      if (wsReconnectTimerRef.current !== null) {
+        window.clearTimeout(wsReconnectTimerRef.current);
+        wsReconnectTimerRef.current = null;
       }
     };
 
+    const connectWs = () => {
+      if (!wsShouldReconnectRef.current) return;
+      const ws = new WebSocket(url);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        reconnectAttempt = 0;
+        if (wsPingTimerRef.current !== null) {
+          window.clearInterval(wsPingTimerRef.current);
+        }
+        // Keep notifications websocket alive across proxies / idle timeout.
+        wsPingTimerRef.current = window.setInterval(() => {
+          try {
+            if (ws.readyState === WebSocket.OPEN) ws.send("ping");
+          } catch {
+            // ignore ping failures, onclose will handle reconnect
+          }
+        }, 20000);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data || "{}");
+          if (payload?.type === "reminder" && payload?.content) {
+            const content = String(payload.content);
+            const createdAt = String(payload.created_at || new Date().toISOString());
+            const reminderMessage: ChatMessage = {
+              role: "assistant",
+              content,
+              created_at: createdAt,
+            };
+            queryClient.setQueryData<ChatMessage[]>(["history"], (prev) => [
+              ...(prev || []),
+              reminderMessage,
+            ]);
+            pushReminderToast(content, createdAt);
+            playReminderSound();
+            void refreshSideData();
+          }
+          if (payload?.type === "message" && payload?.content) {
+            void refreshSideData();
+          }
+        } catch {
+          // Ignore malformed websocket payloads.
+        }
+      };
+
+      ws.onerror = () => {
+        try {
+          ws.close();
+        } catch {
+          // ignore close errors
+        }
+      };
+
+      ws.onclose = () => {
+        if (wsPingTimerRef.current !== null) {
+          window.clearInterval(wsPingTimerRef.current);
+          wsPingTimerRef.current = null;
+        }
+        if (!wsShouldReconnectRef.current) return;
+        const delayMs = Math.min(30000, 1000 * 2 ** reconnectAttempt);
+        reconnectAttempt += 1;
+        wsReconnectTimerRef.current = window.setTimeout(connectWs, delayMs);
+      };
+    };
+
+    connectWs();
+
     return () => {
-      ws.close();
+      wsShouldReconnectRef.current = false;
+      clearWsTimers();
+      if (wsRef.current) {
+        try {
+          wsRef.current.close();
+        } catch {
+          // ignore close errors
+        }
+      }
+      wsRef.current = null;
     };
   }, [token, queryClient]);
 

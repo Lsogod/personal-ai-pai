@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,22 +32,74 @@ SEMANTIC_DUPLICATE_THRESHOLD = 0.82
 logger = logging.getLogger(__name__)
 
 
+class MemoryIdSelection(BaseModel):
+    ids: list[int] = Field(default_factory=list)
+
+
+class MemoryCandidateExtraction(BaseModel):
+    op: str = Field(default="save")
+    memory_type: str = Field(default="fact")
+    key: str = Field(default="")
+    content: str = Field(default="")
+    importance: int | None = Field(default=None)
+    confidence: float | None = Field(default=None)
+    ttl_days: int | None = Field(default=None)
+
+
+class MemoryExtractionResult(BaseModel):
+    memories: list[MemoryCandidateExtraction] = Field(default_factory=list)
+
+
+class MemoryRefineDecision(BaseModel):
+    index: int = Field(default=-1)
+    keep: bool = Field(default=False)
+    op: str = Field(default="save")
+    merge_target_id: int | None = Field(default=None)
+    memory_type: str = Field(default="fact")
+    key: str = Field(default="")
+    content: str = Field(default="")
+    importance: int | None = Field(default=None)
+    confidence: float | None = Field(default=None)
+    ttl_days: int | None = Field(default=None)
+
+
+class MemoryRefineResult(BaseModel):
+    decisions: list[MemoryRefineDecision] = Field(default_factory=list)
+
+
+class MemoryConsolidationDecision(BaseModel):
+    id: int = Field(default=-1)
+    keep: bool = Field(default=False)
+    merge_into_id: int | None = Field(default=None)
+    memory_type: str = Field(default="fact")
+    content: str = Field(default="")
+    importance: int | None = Field(default=None)
+    confidence: float | None = Field(default=None)
+    ttl_days: int | None = Field(default=None)
+
+
+class MemoryConsolidationResult(BaseModel):
+    decisions: list[MemoryConsolidationDecision] = Field(default_factory=list)
+
+
+async def _invoke_structured(
+    *,
+    schema: type[BaseModel],
+    messages: list[SystemMessage | HumanMessage],
+) -> BaseModel:
+    llm = get_llm(node_name="memory")
+    runnable = llm.with_structured_output(schema)
+    result = await runnable.ainvoke(messages)
+    if isinstance(result, BaseModel):
+        return result
+    if isinstance(result, dict):
+        return schema.model_validate(result)
+    return schema()
+
+
 def _is_reserved_identity_memory_type(memory_type: str) -> bool:
     # Identity/profile fields must stay in User profile as the single source of truth.
     return (memory_type or "").strip().lower() == "profile"
-
-
-def _parse_json_object(content: str) -> dict[str, Any]:
-    text = (content or "").strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if len(lines) >= 3:
-            text = "\n".join(lines[1:-1]).strip()
-    try:
-        data = json.loads(text)
-    except Exception:
-        return {}
-    return data if isinstance(data, dict) else {}
 
 
 def _normalize_memory_type(value: str) -> str:
@@ -223,7 +276,7 @@ async def _llm_select_relevant_memory_ids(
     if not rows or not (query or "").strip():
         return []
 
-    llm = get_llm(node_name="memory")
+    runnable_schema = MemoryIdSelection
     system = SystemMessage(
         content=(
             "You are a memory retriever. Return JSON only as {\"ids\":[...]}. "
@@ -261,11 +314,11 @@ async def _llm_select_relevant_memory_ids(
         )
     )
     try:
-        response = await llm.ainvoke([system, human])
-        payload = _parse_json_object(str(response.content))
-        raw_ids = payload.get("ids")
-        if not isinstance(raw_ids, list):
-            return []
+        parsed = await _invoke_structured(
+            schema=runnable_schema,
+            messages=[system, human],
+        )
+        raw_ids = list(getattr(parsed, "ids", []) or [])
         valid_ids = {int(item["id"]) for item in candidates}
         selected: list[int] = []
         for rid in raw_ids:
@@ -294,7 +347,6 @@ async def extract_memory_candidates(
     if not content:
         return []
 
-    llm = get_llm(node_name="memory")
     system = SystemMessage(
         content=(
             "You are a long-term memory extractor. Return JSON only as {\"memories\":[...]}. "
@@ -317,10 +369,12 @@ async def extract_memory_candidates(
         )
     )
     try:
-        response = await llm.ainvoke([system, human])
-        payload = _parse_json_object(str(response.content))
-        rows = payload.get("memories")
-        return rows if isinstance(rows, list) else []
+        parsed = await _invoke_structured(
+            schema=MemoryExtractionResult,
+            messages=[system, human],
+        )
+        rows = list(getattr(parsed, "memories", []) or [])
+        return [row.model_dump() if isinstance(row, BaseModel) else dict(row) for row in rows if row]
     except Exception:
         return []
 
@@ -335,7 +389,6 @@ async def _llm_refine_memory_candidates(
     if not prepared:
         return []
 
-    llm = get_llm(node_name="memory")
     system = SystemMessage(
         content=(
             "You are a memory consolidator. Decide final write operations for long-term memory. "
@@ -359,23 +412,22 @@ async def _llm_refine_memory_candidates(
         )
     )
     try:
-        response = await llm.ainvoke([system, human])
-        payload = _parse_json_object(str(response.content))
-        decisions = payload.get("decisions")
+        parsed = await _invoke_structured(
+            schema=MemoryRefineResult,
+            messages=[system, human],
+        )
+        decisions = list(getattr(parsed, "decisions", []) or [])
     except Exception:
-        return []
-    if not isinstance(decisions, list):
         return []
 
     by_index: dict[int, dict[str, Any]] = {}
     for item in decisions:
-        if not isinstance(item, dict):
-            continue
+        item_dict = item.model_dump() if isinstance(item, BaseModel) else dict(item or {})
         try:
-            idx = int(item.get("index"))
+            idx = int(item_dict.get("index"))
         except Exception:
             continue
-        by_index[idx] = item
+        by_index[idx] = item_dict
 
     refined: list[dict[str, Any]] = []
     for index, raw in enumerate(candidates):
@@ -580,7 +632,6 @@ async def consolidate_user_long_term_memories(
             await session.commit()
         return {"reviewed": len(rows), "updated": 0, "deleted": deleted, "merged": 0}
 
-    llm = get_llm(node_name="memory")
     system = SystemMessage(
         content=(
             "You are a long-term memory cleaner. Return JSON only as {\"decisions\":[...]}. "
@@ -594,13 +645,13 @@ async def consolidate_user_long_term_memories(
     )
     human = HumanMessage(content=json.dumps({"memories": _serialize_existing_memories(rows)}, ensure_ascii=False))
     try:
-        response = await llm.ainvoke([system, human])
-        payload = _parse_json_object(str(response.content))
-        decisions = payload.get("decisions")
+        parsed = await _invoke_structured(
+            schema=MemoryConsolidationResult,
+            messages=[system, human],
+        )
+        decisions = list(getattr(parsed, "decisions", []) or [])
     except Exception:
         logger.exception("memory consolidation llm call failed: user_id=%s", user_id)
-        return {"reviewed": len(rows), "updated": 0, "deleted": deleted, "merged": 0}
-    if not isinstance(decisions, list):
         return {"reviewed": len(rows), "updated": 0, "deleted": deleted, "merged": 0}
 
     by_id = {int(row.id): row for row in rows if row.id is not None}
@@ -610,16 +661,15 @@ async def consolidate_user_long_term_memories(
     # First pass: explicit deletions
     parsed: list[dict[str, Any]] = []
     for raw in decisions:
-        if not isinstance(raw, dict):
-            continue
+        raw_dict = raw.model_dump() if isinstance(raw, BaseModel) else dict(raw or {})
         try:
-            rid = int(raw.get("id"))
+            rid = int(raw_dict.get("id"))
         except Exception:
             continue
         if rid not in by_id:
             continue
-        parsed.append(raw)
-        keep = bool(raw.get("keep") is True)
+        parsed.append(raw_dict)
+        keep = bool(raw_dict.get("keep") is True)
         if not keep:
             row = by_id[rid]
             await session.delete(row)

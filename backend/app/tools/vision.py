@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, Field
 
 from app.services.llm import get_llm
 from app.core.config import get_settings
@@ -38,19 +39,16 @@ def _extract_amount_candidates(text: str) -> list[float]:
     return candidates[:5]
 
 
-def _parse_json_object(payload: str) -> dict[str, Any]:
-    text = (payload or "").strip()
-    if not text:
-        return {}
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if len(lines) >= 3:
-            text = "\n".join(lines[1:-1]).strip()
-    try:
-        data = json.loads(text)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+class VisionExtraction(BaseModel):
+    image_type: str = Field(default="other")
+    amount: float | None = Field(default=None)
+    amount_candidates: list[float] = Field(default_factory=list)
+    merchant: str = Field(default="")
+    category: str = Field(default="其他")
+    item: str = Field(default="")
+    confidence: float = Field(default=0.0)
+    evidence_text: str = Field(default="")
+    notes: str = Field(default="")
 
 
 def _normalize_mime_type(content_type: str | None, image_ref: str) -> str:
@@ -172,6 +170,7 @@ async def analyze_receipt(image_url: str) -> dict[str, Any]:
         return {"confidence": 0.0, "reason": reason or "image_resolve_failed"}
 
     llm = get_llm(model=settings.vision_model, node_name="vision")
+    runnable = llm.with_structured_output(VisionExtraction)
     system = SystemMessage(
         content=(
             "你是记账视觉解析器。你会收到一张图片，可能是小票，也可能是支付截图。"
@@ -194,11 +193,16 @@ async def analyze_receipt(image_url: str) -> dict[str, Any]:
     )
 
     try:
-        response = await llm.ainvoke([system, human])
+        parsed = await runnable.ainvoke([system, human])
     except Exception as exc:
         return {"confidence": 0.0, "reason": "vision_invoke_failed", "error": str(exc)}
-    data = _parse_json_object(str(response.content))
+    if isinstance(parsed, BaseModel):
+        data = parsed.model_dump()
+    elif isinstance(parsed, dict):
+        data = parsed
+    else:
+        data = {}
     if not data:
-        return {"confidence": 0.0, "reason": "invalid_vision_json", "raw": str(response.content)}
-    normalized = _normalize_vision_output(data, str(response.content))
+        return {"confidence": 0.0, "reason": "invalid_vision_json", "raw": ""}
+    normalized = _normalize_vision_output(data, json.dumps(data, ensure_ascii=False))
     return normalized

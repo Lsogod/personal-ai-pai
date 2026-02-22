@@ -1,33 +1,42 @@
 from __future__ import annotations
 
-import json
+import asyncio
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, Field
 
 from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
+from app.services.commands.router import route_command_intent
 from app.services.ledger_pending import has_pending_ledger
 from app.services.llm import get_llm
 from app.services.tool_registry import list_runtime_tool_metas
 
 
-VALID_INTENTS = {"skill_manager", "ledger_manager", "schedule_manager", "chat_manager", "help_center", "unknown"}
+VALID_INTENTS = {
+    "complex_task",
+    "skill_manager",
+    "ledger_manager",
+    "schedule_manager",
+    "chat_manager",
+    "help_center",
+    "unknown",
+}
 
 
-def _extract_json_object(text: str) -> dict:
-    payload = (text or "").strip()
-    if payload.startswith("```"):
-        lines = payload.splitlines()
-        if len(lines) >= 3:
-            payload = "\n".join(lines[1:-1]).strip()
-    try:
-        obj = json.loads(payload)
-        return obj if isinstance(obj, dict) else {}
-    except Exception:
-        return {}
+class RouterIntentExtraction(BaseModel):
+    intent: str = Field(default="unknown")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    reason: str = Field(default="")
+
+
+class ComplexRouteDecision(BaseModel):
+    use_complex: bool = Field(default=False)
+    reason: str = Field(default="")
 
 
 async def _classify_intent_with_llm(
+    *,
     content: str,
     has_image: bool,
     has_pending_ledger: bool,
@@ -35,54 +44,90 @@ async def _classify_intent_with_llm(
     runtime_tools: str,
 ) -> str:
     llm = get_llm(node_name="router")
+    runnable = llm.with_structured_output(RouterIntentExtraction)
     system = SystemMessage(
         content=(
-            "你是消息路由器。请将用户消息分类到一个意图，且只输出 JSON。"
-            "可选 intent 仅限: skill_manager, ledger_manager, schedule_manager, chat_manager, help_center, unknown。"
-            "当用户在管理技能（新增/创建/更新/发布/停用/列出技能）时，intent=skill_manager。"
-            "当用户记账、消费统计、小票识别、账单增删改查时，intent=ledger_manager。"
-            "当用户提醒、日程、定时任务、日历查询时，intent=schedule_manager。"
-            "当用户在询问怎么用、教程、帮助、命令说明、手册时，intent=help_center。"
-            "当用户询问“你能做什么/有哪些功能”时，也归类为 help_center（但应是简洁能力说明，不是命令手册）。"
-            "写作/翻译/润色/普通问答时，intent=chat_manager。"
-            "当用户要抓取网页、总结链接、调用 /fetch 或 /mcp 时，intent=chat_manager。"
-            "当用户在查询天气（如“现在武汉天气”）时，intent=chat_manager。"
-            "当用户询问“我刚才问了什么/之前聊了什么/你记得什么”这类回忆上下文问题时，intent=chat_manager。"
-            "必须优先依据 user_message 本身判断；conversation_context 仅作辅助。"
-            "可用工具信息可帮助判断是否属于 chat_manager（工具调用/外部信息查询）。"
-            "若不确定，intent=unknown。"
-            "如果 has_pending_ledger=true，优先判断为 ledger_manager，除非用户明确在取消该流程。"
-            "如果 has_image=true，优先判断为 ledger_manager 或 chat_manager（取决于用户是否在做账单/票据/支付分析）。"
+            "You are a routing classifier for an agent graph. Output structured JSON only.\n"
+            "Allowed intents: complex_task, skill_manager, ledger_manager, schedule_manager, chat_manager, help_center, unknown.\n"
+            "Routing rules:\n"
+            "1) complex_task: multi-goal, cross-domain workflow, dependency ordering, or conditional execution.\n"
+            "   Examples: '先查天气再给建议最后设提醒', '如果明天下雨就提醒我带伞'.\n"
+            "2) skill_manager: skill CRUD/list/show/publish/disable.\n"
+            "3) ledger_manager: ledger create/update/delete/query, receipt/bill accounting.\n"
+            "4) schedule_manager: reminder/calendar CRUD and schedule query.\n"
+            "5) help_center: usage docs/help/command manual/capabilities intro.\n"
+            "6) chat_manager: general Q&A, writing, translation, external lookup, weather query only.\n"
+            "7) unknown only when evidence is insufficient.\n"
+            "Use user_message as primary evidence. conversation_context and runtime_tools are auxiliary only.\n"
+            "If has_pending_ledger=true, prefer ledger_manager unless user clearly requests another domain."
         )
     )
     human = HumanMessage(
         content=(
             f"has_image={str(has_image).lower()}\n"
             f"has_pending_ledger={str(has_pending_ledger).lower()}\n"
-            f"runtime_tools={runtime_tools}\n"
-            f"conversation_context=\n{conversation_context}\n\n"
-            f"user_message={content}"
+            f"runtime_tools={runtime_tools}\n\n"
+            f"conversation_context:\n{conversation_context}\n\n"
+            f"user_message:\n{content}"
         )
     )
-    response = await llm.ainvoke([system, human])
-    data = _extract_json_object(str(response.content))
-    intent = str(data.get("intent") or "unknown").strip().lower()
-    return intent if intent in VALID_INTENTS else "unknown"
+    result = await asyncio.wait_for(runnable.ainvoke([system, human]), timeout=25)
+    intent = str(getattr(result, "intent", "") or "unknown").strip().lower()
+    if intent in VALID_INTENTS:
+        return intent
+    return "unknown"
+
+
+async def _should_route_complex_with_llm(
+    *,
+    content: str,
+    conversation_context: str,
+    primary_intent: str,
+) -> bool:
+    llm = get_llm(node_name="router")
+    runnable = llm.with_structured_output(ComplexRouteDecision)
+    system = SystemMessage(
+        content=(
+            "You are a complex-routing verifier. Output structured JSON only.\n"
+            "Decide whether this user request MUST go to complex_task.\n"
+            "use_complex=true when at least one is true:\n"
+            "1) multi-goal workflow with ordering/dependencies,\n"
+            "2) conditional execution based on tool evidence,\n"
+            "3) cross-domain orchestration where one step result drives another.\n"
+            "Examples that SHOULD be complex_task:\n"
+            "- 先查天气，再给建议，最后设提醒\n"
+            "- 如果明天下午下雨，就提醒我带伞\n"
+            "Simple single-shot CRUD/query should keep primary intent.\n"
+            "Be conservative: choose false unless clear complex orchestration is required."
+        )
+    )
+    human = HumanMessage(
+        content=(
+            f"primary_intent={primary_intent}\n\n"
+            f"user_message:\n{content}\n\n"
+            f"conversation_context:\n{conversation_context}"
+        )
+    )
+    result = await asyncio.wait_for(runnable.ainvoke([system, human]), timeout=25)
+    return bool(getattr(result, "use_complex", False))
 
 
 async def router_node(state: GraphState) -> GraphState:
     if state.get("user_setup_stage", 0) < 3:
         return state
+
     user_id = int(state.get("user_id") or 0)
     conversation_id = int(state.get("conversation_id") or 0)
     message = state["message"]
     content = (message.content or "").strip()
     if not content and not message.image_urls:
         return {**state, "intent": "chat_manager"}
+
     has_pending = False
     if user_id > 0 and conversation_id > 0:
         has_pending = await has_pending_ledger(user_id, conversation_id)
     context_text = render_conversation_context(state)
+
     try:
         runtime_tools = ", ".join(
             [
@@ -92,6 +137,7 @@ async def router_node(state: GraphState) -> GraphState:
         )
     except Exception:
         runtime_tools = ""
+
     try:
         intent = await _classify_intent_with_llm(
             content=content,
@@ -102,12 +148,21 @@ async def router_node(state: GraphState) -> GraphState:
         )
     except Exception:
         intent = "unknown"
-    if intent != "unknown":
-        return {**state, "intent": intent}
-    # Rule fallback when LLM is uncertain/unavailable.
-    if message.image_urls or has_pending:
-        return {**state, "intent": "ledger_manager"}
+
+    if intent in {"ledger_manager", "schedule_manager", "chat_manager", "help_center", "unknown"}:
+        try:
+            use_complex = await _should_route_complex_with_llm(
+                content=content,
+                conversation_context=context_text,
+                primary_intent=intent,
+            )
+            if use_complex:
+                return {**state, "intent": "complex_task"}
+        except Exception:
+            pass
+
     return {**state, "intent": intent}
+
 
 def route_intent(state: GraphState) -> str:
     message = state["message"]
@@ -116,20 +171,21 @@ def route_intent(state: GraphState) -> str:
         return "onboarding"
 
     routed = str(state.get("intent") or "").strip().lower()
-    if routed in {"skill_manager", "ledger_manager", "schedule_manager", "chat_manager", "help_center"}:
+    if routed in {
+        "complex_task",
+        "skill_manager",
+        "ledger_manager",
+        "schedule_manager",
+        "chat_manager",
+        "help_center",
+    }:
         return routed
 
-    content = (message.content or "").lower()
-    # Command fallback when LLM route fails.
-    if content.startswith("/help"):
-        return "help_center"
-    if content.startswith("/mcp") or content.startswith("/fetch") or content.startswith("/weather"):
-        return "chat_manager"
-    if content.startswith("/skill"):
-        return "skill_manager"
-    if message.image_urls or content.startswith("/ledger"):
-        return "ledger_manager"
-    if content.startswith("/calendar"):
-        return "schedule_manager"
-    # Default route fallback.
+    command_route = route_command_intent(
+        content=(message.content or ""),
+        has_images=bool(message.image_urls),
+    )
+    if command_route:
+        return command_route
+
     return "chat_manager"

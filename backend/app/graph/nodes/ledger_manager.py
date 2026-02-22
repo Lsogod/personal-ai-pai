@@ -209,9 +209,14 @@ def _clean_item(item: str) -> str:
         "",
         value,
     )
-    value = re.sub(r"^(错了|更正|改成|改为|修正|记错|不是|应该是)\s*", "", value)
+    value = re.sub(
+        r"^(错了|更正|修正|记错|不对|不是|把|改成|改为|应该是|应为|我说的是)\s*[，,:：]?\s*",
+        "",
+        value,
+    )
     value = re.sub(r"^(今天|刚才|刚刚)\s*", "", value)
     value = re.sub(r"\d+(?:\.\d{1,2})?", "", value)
+    value = re.sub(r"(应该是|应为|改成|改为)$", "", value)
     value = value.replace("元", "").replace("块", "").replace("记账", "").strip()
     value = value.replace("和", " ").replace("及", " ").replace("并且", " ")
     value = re.sub(r"\s+", " ", value).strip()
@@ -417,24 +422,26 @@ async def _understand_ledger_message(content: str, conversation_context: str) ->
     llm = get_llm(node_name="ledger_manager")
     system = SystemMessage(
         content=(
-            "你是记账意图解析器。只输出 JSON。"
-            "字段: intent, ledger_id, amount, item, category, query_scope, query_date, confidence。"
-            "intent 仅可为 insert, correct_latest, correct_by_id, delete_latest, delete_by_id, query, list, unknown。"
-            "若用户在纠正上一笔（例如“错了...”“改成...”），intent=correct_latest。"
-            "若用户在纠正指定账单（例如“把账单#12改成28元”），intent=correct_by_id，并给出 ledger_id。"
-            "若用户在删除最近一笔，intent=delete_latest。"
-            "若用户在删除指定账单（例如“删除账单#12”），intent=delete_by_id，并给出 ledger_id。"
-            "若用户在新增一笔支出，intent=insert。"
-            "若用户在问统计数据，intent=query。"
-            "若用户在要账单列表，intent=list。"
-            "无法确定时 intent=unknown。"
-            "amount 为数字；item 为简洁摘要，必须去掉“错了/改成”等词。"
-            "category 不确定填“其他”。"
+            "你是记账意图解析器，只输出 JSON。"
+            "字段: intent, ledger_id, target_ids, target_item, amount, item, category, query_scope, query_date, reference_mode, selection_mode, confidence。"
+            "intent 仅可为 insert, correct_latest, correct_by_id, correct_by_name, correct_by_scope, delete_latest, delete_by_id, delete_by_name, delete_by_scope, query, list, unknown。"
+            "若用户纠正最近一笔（如‘错了，改成30’）intent=correct_latest。"
+            "若用户纠正指定ID（如‘把账单#12改成28元’）intent=correct_by_id 并给 ledger_id。"
+            "若用户纠正某个名称/摘要（如‘不对，爬山门票应该是200元’）intent=correct_by_name，并提取 target_item。"
+            "若用户按范围纠正（如‘把今天餐饮都改成30’）intent=correct_by_scope。"
+            "若用户删除最近一笔 intent=delete_latest。"
+            "若用户删除指定ID intent=delete_by_id 并给 ledger_id。"
+            "若用户删除某个名称/摘要 intent=delete_by_name，并提取 target_item。"
+            "若用户按范围删除（如‘删除今天所有账单’）intent=delete_by_scope。"
+            "若用户新增支出/收入 intent=insert。"
+            "若用户查询统计 intent=query；若用户要列表 intent=list。无法确定时 intent=unknown。"
+            "amount 是数字；item 是简洁摘要；category 不确定时填‘其他’。"
             "query_scope 仅可为 today/week/month/date/recent/all/yesterday/day_before_yesterday/last_week。"
             "当 query_scope=date 时，query_date 输出 YYYY-MM-DD。"
-            "当用户说“我今天的账单/本周花了多少”等查询，必须输出 query_scope。"
-            "当用户说昨天/前天时，优先用 query_scope=yesterday/day_before_yesterday；"
-            "当用户说上周时，用 query_scope=last_week。"
+            "reference_mode 仅可为 by_id/by_name/by_scope/latest/last_result_set/auto。"
+            "当用户说‘这几笔/这些/刚才那几个’时，reference_mode=last_result_set。"
+            "selection_mode 仅可为 all/single/subset/auto。"
+            "confidence 范围 0~1。"
         )
     )
     human = HumanMessage(
@@ -445,6 +452,150 @@ async def _understand_ledger_message(content: str, conversation_context: str) ->
     )
     response = await llm.ainvoke([system, human])
     return _parse_json_object(str(response.content))
+
+
+def _build_ledger_target_payload(rows: list[Ledger]) -> dict[str, Any]:
+    return {
+        "candidates": [
+            {
+                "id": row.id,
+                "item": row.item,
+                "category": row.category,
+                "amount": round(float(row.amount), 2),
+                "currency": row.currency,
+                "datetime": _fmt_dt(row.transaction_date),
+            }
+            for row in rows[:120]
+        ]
+    }
+
+
+async def _select_ledger_id_by_llm(
+    *,
+    content: str,
+    conversation_context: str,
+    target_item: str,
+    operation: str,
+    candidates: list[Ledger],
+) -> int | None:
+    if not candidates:
+        return None
+    llm = get_llm(node_name="ledger_manager")
+    payload = _build_ledger_target_payload(candidates)
+    system = SystemMessage(
+        content=(
+            "你是账单目标选择器，只输出 JSON。"
+            "字段: ledger_id, confidence。"
+            "根据用户输入，从候选账单中选择唯一目标账单ID。"
+            "如果无法确定，ledger_id=null。"
+            "operation 仅用于语义参考（correct 或 delete）。"
+        )
+    )
+    human = HumanMessage(
+        content=(
+            f"operation: {operation}\n"
+            f"target_item_hint: {target_item or ''}\n\n"
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"用户输入:\n{content}\n\n"
+            f"候选账单(JSON):\n{json.dumps(payload, ensure_ascii=False)}"
+        )
+    )
+    response = await llm.ainvoke([system, human])
+    parsed = _parse_json_object(str(response.content))
+    selected = parsed.get("ledger_id")
+    try:
+        ledger_id = int(selected) if selected is not None else None
+    except Exception:
+        return None
+    valid_ids = {int(row.id) for row in candidates if int(row.id or 0) > 0}
+    return ledger_id if ledger_id in valid_ids else None
+
+
+async def _select_ledger_ids_by_llm(
+    *,
+    content: str,
+    conversation_context: str,
+    target_item: str,
+    operation: str,
+    selection_mode: str,
+    candidates: list[Ledger],
+) -> list[int]:
+    if not candidates:
+        return []
+    llm = get_llm(node_name="ledger_manager")
+    payload = _build_ledger_target_payload(candidates)
+    system = SystemMessage(
+        content=(
+            "你是账单目标批量选择器，只输出 JSON。"
+            "字段: ledger_ids, confidence。"
+            "根据用户输入，从候选账单中选择应操作的账单ID列表。"
+            "operation 仅为 correct 或 delete。"
+            "selection_mode 为 all/single/subset/auto。"
+            "若用户明确说‘全部/都/这几笔’，优先返回多个ID。"
+            "若用户表达单笔操作，返回一个ID。"
+            "无法确定时返回空数组。"
+        )
+    )
+    human = HumanMessage(
+        content=(
+            f"operation: {operation}\n"
+            f"selection_mode: {selection_mode}\n"
+            f"target_item_hint: {target_item or ''}\n\n"
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"用户输入:\n{content}\n\n"
+            f"候选账单(JSON):\n{json.dumps(payload, ensure_ascii=False)}"
+        )
+    )
+    response = await llm.ainvoke([system, human])
+    parsed = _parse_json_object(str(response.content))
+    raw_ids = parsed.get("ledger_ids")
+    if not isinstance(raw_ids, list):
+        picked = _parse_int_list(parsed.get("ledger_id"))
+        raw_ids = picked
+    valid_ids = {int(row.id) for row in candidates if int(row.id or 0) > 0}
+    result: list[int] = []
+    seen: set[int] = set()
+    for value in raw_ids:
+        try:
+            ledger_id = int(value)
+        except Exception:
+            continue
+        if ledger_id in valid_ids and ledger_id not in seen:
+            seen.add(ledger_id)
+            result.append(ledger_id)
+    if selection_mode == "single" and len(result) > 1:
+        return result[:1]
+    return result
+
+
+async def _select_ledger_ids_from_context(
+    *,
+    content: str,
+    conversation_context: str,
+    candidates: list[Ledger],
+) -> list[int]:
+    if not candidates:
+        return []
+    llm = get_llm(node_name="ledger_manager")
+    payload = _build_ledger_target_payload(candidates)
+    system = SystemMessage(
+        content=(
+            "你是账单上下文引用解析器，只输出 JSON。"
+            "字段: ledger_ids, confidence。"
+            "当用户使用代词（如‘这几笔/这些/刚才那些’）时，需结合会话上下文和候选列表选择目标ID。"
+            "若仍不确定，返回空数组。"
+        )
+    )
+    human = HumanMessage(
+        content=(
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"用户输入:\n{content}\n\n"
+            f"候选账单(JSON):\n{json.dumps(payload, ensure_ascii=False)}"
+        )
+    )
+    response = await llm.ainvoke([system, human])
+    parsed = _parse_json_object(str(response.content))
+    return _parse_int_list(parsed.get("ledger_ids"))
 
 
 def _to_utc_naive(local_dt: datetime, tz_name: str) -> datetime:
@@ -549,6 +700,121 @@ def _build_ledger_payload(rows: list[Ledger]) -> dict[str, Any]:
             for row in rows[:100]
         ]
     }
+
+
+def _parse_int_list(value: Any) -> list[int]:
+    if isinstance(value, list):
+        raw = value
+    elif value is None:
+        raw = []
+    else:
+        raw = [value]
+    picked: list[int] = []
+    seen: set[int] = set()
+    for item in raw:
+        try:
+            num = int(item)
+        except Exception:
+            continue
+        if num <= 0 or num in seen:
+            continue
+        seen.add(num)
+        picked.append(num)
+    return picked
+
+
+def _read_last_ledger_ids_from_state(state: GraphState) -> list[int]:
+    extra = dict(state.get("extra") or {})
+    payload = extra.get("ledger_last_query")
+    if not isinstance(payload, dict):
+        return []
+    return _parse_int_list(payload.get("ids"))
+
+
+async def _query_ledgers_by_ids(session, user_id: int, ledger_ids: list[int]) -> list[Ledger]:
+    valid_ids = _parse_int_list(ledger_ids)
+    if not valid_ids:
+        return []
+    result = await session.execute(
+        select(Ledger)
+        .where(Ledger.user_id == user_id, Ledger.id.in_(valid_ids))
+        .order_by(Ledger.transaction_date.desc(), Ledger.id.desc())
+    )
+    rows = list(result.scalars().all())
+    index_map = {int(row.id): row for row in rows if int(row.id or 0) > 0}
+    ordered: list[Ledger] = []
+    for lid in valid_ids:
+        row = index_map.get(lid)
+        if row is not None:
+            ordered.append(row)
+    return ordered
+
+
+async def _delete_ledgers_by_ids(
+    *,
+    session,
+    user_id: int,
+    user_platform: str,
+    ledger_ids: list[int],
+) -> tuple[int, list[Ledger]]:
+    rows = await _query_ledgers_by_ids(session, user_id, ledger_ids)
+    deleted: list[Ledger] = []
+    for row in rows:
+        removed = await delete_ledger(
+            session,
+            user_id=user_id,
+            ledger_id=int(row.id or 0),
+            platform=user_platform,
+        )
+        if removed:
+            deleted.append(removed)
+    return len(rows), deleted
+
+
+async def _update_ledgers_by_ids(
+    *,
+    session,
+    user_id: int,
+    user_platform: str,
+    ledger_ids: list[int],
+    amount: float,
+    category: str | None,
+    item: str | None,
+) -> tuple[int, list[Ledger]]:
+    rows = await _query_ledgers_by_ids(session, user_id, ledger_ids)
+    updated: list[Ledger] = []
+    for row in rows:
+        changed = await update_ledger(
+            session,
+            user_id=user_id,
+            ledger_id=int(row.id or 0),
+            amount=amount,
+            category=category,
+            item=item,
+            platform=user_platform,
+        )
+        if changed:
+            updated.append(changed)
+    return len(rows), updated
+
+
+def _with_last_ledger_query(
+    state: GraphState,
+    *,
+    rows: list[Ledger],
+    label: str,
+    scope: str,
+    category: str | None,
+) -> GraphState:
+    extra = dict(state.get("extra") or {})
+    extra["ledger_last_query"] = {
+        "ids": [int(row.id) for row in rows if int(row.id or 0) > 0][:200],
+        "label": label,
+        "scope": scope or "",
+        "category": category or "",
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+    return {**state, "extra": extra}
 
 
 async def _answer_ledger_with_llm(
@@ -939,8 +1205,12 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
         "insert",
         "correct_latest",
         "correct_by_id",
+        "correct_by_name",
+        "correct_by_scope",
         "delete_latest",
         "delete_by_id",
+        "delete_by_name",
+        "delete_by_scope",
         "query",
         "list",
         "unknown",
@@ -948,7 +1218,7 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
     if intent not in allowed_intents:
         intent = "unknown"
 
-    async def answer_ledger_query() -> str:
+    async def _resolve_query_rows() -> tuple[list[Ledger], str, str, str | None]:
         scope = str(parsed.get("query_scope") or "").strip().lower()
         query_date = str(parsed.get("query_date") or "").strip() or None
         llm_window = _resolve_ledger_window_from_fields(scope, query_date)
@@ -963,18 +1233,20 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
                 start_at=start_at,
                 end_at=end_at,
                 category=category_hint,
-                limit=80,
+                limit=120,
             )
-        else:
-            label = "最近"
-            rows = await _query_ledger_rows(
-                session,
-                user_id,
-                start_at=None,
-                end_at=None,
-                category=category_hint,
-                limit=20,
-            )
+            return rows, label, (scope or "date"), category_hint
+        rows = await _query_ledger_rows(
+            session,
+            user_id,
+            start_at=None,
+            end_at=None,
+            category=category_hint,
+            limit=40,
+        )
+        return rows, "最近", (scope or "recent"), category_hint
+
+    async def answer_ledger_query(rows: list[Ledger], label: str, category_hint: str | None) -> str:
         try:
             llm_text = await _answer_ledger_with_llm(
                 content=content,
@@ -994,6 +1266,9 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
         ledger_id = int(ledger_id) if ledger_id is not None else None
     except Exception:
         ledger_id = None
+    target_ids = _parse_int_list(parsed.get("target_ids"))
+    if ledger_id is not None and ledger_id not in target_ids:
+        target_ids = [ledger_id] + target_ids
 
     amount = parsed.get("amount")
     try:
@@ -1001,13 +1276,113 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
     except Exception:
         amount = None
 
-    item = _clean_item(str(parsed.get("item") or ""))
-    if not item:
-        item = _clean_item(content)
+    parsed_item = _clean_item(str(parsed.get("item") or ""))
+    item = parsed_item
 
     category = _normalize_category(str(parsed.get("category") or ""))
     if category == "其他":
         category = _normalize_category(content)
+
+    target_item = _clean_item(str(parsed.get("target_item") or ""))
+    if intent == "insert":
+        if not item:
+            item = _clean_item(content)
+        if not target_item:
+            target_item = item
+    else:
+        # For correction/delete flows, do not derive replacement item from whole sentence.
+        # Keep item empty unless the model explicitly extracted a new item field.
+        if not target_item:
+            target_item = parsed_item or _clean_item(content)
+    if intent.startswith("correct_") and item and target_item and item == target_item:
+        item = ""
+
+    reference_mode = str(parsed.get("reference_mode") or "auto").strip().lower()
+    if reference_mode not in {"by_id", "by_name", "by_scope", "latest", "last_result_set", "auto"}:
+        reference_mode = "auto"
+    selection_mode = str(parsed.get("selection_mode") or "auto").strip().lower()
+    if selection_mode not in {"all", "single", "subset", "auto"}:
+        selection_mode = "auto"
+
+    async def _resolve_operation_ledgers(operation: str) -> tuple[list[Ledger], str]:
+        # 1) explicit id(s)
+        if target_ids and (reference_mode in {"by_id", "auto"} or intent in {"delete_by_id", "correct_by_id"}):
+            rows = await _query_ledgers_by_ids(session, user_id, target_ids)
+            return rows, "by_id"
+
+        # 2) previous result set
+        if reference_mode == "last_result_set":
+            last_ids = _read_last_ledger_ids_from_state(state)
+            rows = await _query_ledgers_by_ids(session, user_id, last_ids)
+            return rows, "last_result_set"
+
+        # 3) scope based
+        if intent in {"delete_by_scope", "correct_by_scope"} or reference_mode == "by_scope":
+            scope = str(parsed.get("query_scope") or "").strip().lower()
+            query_date = str(parsed.get("query_date") or "").strip() or None
+            category_hint = _normalize_category(str(parsed.get("category") or ""))
+            if category_hint == "其他":
+                category_hint = None
+            llm_window = _resolve_ledger_window_from_fields(scope, query_date)
+            if llm_window:
+                start_at, end_at, _ = llm_window
+                rows = await _query_ledger_rows(
+                    session,
+                    user_id,
+                    start_at=start_at,
+                    end_at=end_at,
+                    category=category_hint,
+                    limit=300,
+                )
+                return rows, "by_scope"
+            # Fallback to last query if scope parse failed.
+            last_ids = _read_last_ledger_ids_from_state(state)
+            rows = await _query_ledgers_by_ids(session, user_id, last_ids)
+            return rows, "last_result_set"
+
+        # 4) latest
+        if intent in {"delete_latest", "correct_latest"} or reference_mode == "latest":
+            latest = await get_latest_ledger(session, user_id)
+            return ([latest] if latest else []), "latest"
+
+        # 5) by name or semantic selection from candidates
+        candidates = await _query_ledger_rows(
+            session,
+            user_id,
+            start_at=None,
+            end_at=None,
+            category=None,
+            limit=160,
+        )
+        if not candidates:
+            return [], "by_name"
+        picked_ids = await _select_ledger_ids_by_llm(
+            content=content,
+            conversation_context=context_text,
+            target_item=target_item,
+            operation=operation,
+            selection_mode=selection_mode,
+            candidates=candidates,
+        )
+        if not picked_ids:
+            picked_ids = await _select_ledger_ids_from_context(
+                content=content,
+                conversation_context=context_text,
+                candidates=candidates,
+            )
+        if not picked_ids and selection_mode != "single":
+            # one-shot fallback for single selection
+            maybe_one = await _select_ledger_id_by_llm(
+                content=content,
+                conversation_context=context_text,
+                target_item=target_item,
+                operation=operation,
+                candidates=candidates,
+            )
+            if maybe_one:
+                picked_ids = [maybe_one]
+        rows = await _query_ledgers_by_ids(session, user_id, picked_ids)
+        return rows, "by_name"
 
     if intent == "unknown":
         # LLM SQL fallback for long-tail ledger CRUD queries.
@@ -1042,94 +1417,82 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
         }
 
     if intent == "list":
-        reply = await answer_ledger_query()
-        return {**state, "responses": [reply]}
+        rows, label, scope_key, category_hint = await _resolve_query_rows()
+        reply = await answer_ledger_query(rows, label, category_hint)
+        next_state = _with_last_ledger_query(
+            state,
+            rows=rows,
+            label=label,
+            scope=scope_key,
+            category=category_hint,
+        )
+        return {**next_state, "responses": [reply]}
 
     if intent == "query":
-        reply = await answer_ledger_query()
-        return {**state, "responses": [reply]}
-
-    if intent == "delete_by_id":
-        if ledger_id is None:
-            return {**state, "responses": ["请指定账单 ID，例如：`删除账单#12`。"]}
-        deleted = await delete_ledger(
-            session,
-            user_id=user_id,
-            ledger_id=ledger_id,
-            platform=user_platform,
+        rows, label, scope_key, category_hint = await _resolve_query_rows()
+        reply = await answer_ledger_query(rows, label, category_hint)
+        next_state = _with_last_ledger_query(
+            state,
+            rows=rows,
+            label=label,
+            scope=scope_key,
+            category=category_hint,
         )
-        if not deleted:
-            return {**state, "responses": [f"未找到账单 #{ledger_id}，或它不属于你。"]}
+        return {**next_state, "responses": [reply]}
+
+    if intent in {"delete_by_name", "delete_by_id", "delete_latest", "delete_by_scope"}:
+        target_rows, source = await _resolve_operation_ledgers("delete")
+        matched_count, deleted_rows = await _delete_ledgers_by_ids(
+            session=session,
+            user_id=user_id,
+            user_platform=user_platform,
+            ledger_ids=[int(row.id or 0) for row in target_rows if int(row.id or 0) > 0],
+        )
+        deleted_count = len(deleted_rows)
+        if matched_count == 0:
+            return {
+                **state,
+                "responses": ["我还不能定位要删除的账单。请补充账单名称、ID、范围，或先查询后说“删这几笔”。"],
+            }
+        preview = ""
+        if deleted_rows:
+            head = deleted_rows[0]
+            preview = f" 示例：#{head.id} {head.item} {head.amount:.2f} {head.currency}（{_fmt_dt(head.transaction_date)}）。"
         return {
             **state,
-            "responses": [
-                f"已删除账单 #{deleted.id}：{deleted.item} {deleted.amount} {deleted.currency}，时间 {_fmt_dt(deleted.transaction_date)}。"
-            ],
-        }
-
-    if intent == "delete_latest":
-        latest = await get_latest_ledger(session, user_id)
-        if not latest:
-            return {**state, "responses": ["暂无可删除的账单。"]}
-        deleted = await delete_ledger(
-            session,
-            user_id=user_id,
-            ledger_id=latest.id,
-            platform=user_platform,
-        )
-        if not deleted:
-            return {**state, "responses": ["删除失败，请稍后重试。"]}
-        return {
-            **state,
-            "responses": [
-                f"已删除最近一笔：#{deleted.id} {deleted.item} {deleted.amount} {deleted.currency}，时间 {_fmt_dt(deleted.transaction_date)}。"
-            ],
+            "responses": [f"已定位 {matched_count} 条（来源：{source}），成功删除 {deleted_count} 条。{preview}".strip()],
         }
 
     if amount is None:
         return {**state, "responses": ["请告诉我金额，例如：今天晚饭 28 元。"]}
 
-    if intent == "correct_by_id":
-        if ledger_id is None:
-            return {**state, "responses": ["请指定账单 ID，例如：`把账单#12改成28元`。"]}
-        updated = await update_ledger(
-            session,
+    if intent in {"correct_by_name", "correct_by_id", "correct_latest", "correct_by_scope"}:
+        target_rows, source = await _resolve_operation_ledgers("correct")
+        if not target_rows:
+            return {
+                **state,
+                "responses": ["我还不能定位要更正的账单。请补充账单名称、ID、范围，或先查询后说“改这几笔”。"],
+            }
+        matched_count, updated_rows = await _update_ledgers_by_ids(
+            session=session,
             user_id=user_id,
-            ledger_id=ledger_id,
+            user_platform=user_platform,
+            ledger_ids=[int(row.id or 0) for row in target_rows if int(row.id or 0) > 0],
             amount=amount,
-            category=category if category != "其他" else None,
-            item=item or None,
-            platform=user_platform,
+            category=(category if category != "其他" else None),
+            item=(item or None),
         )
-        if not updated:
-            return {**state, "responses": [f"未找到账单 #{ledger_id}，或它不属于你。"]}
+        updated_count = len(updated_rows)
+        preview = ""
+        if updated_rows:
+            head = updated_rows[0]
+            preview = (
+                f" 示例：#{head.id} {head.item} {head.amount:.2f} {head.currency}，"
+                f"分类 {head.category}（{_fmt_dt(head.transaction_date)}）。"
+            )
         return {
             **state,
-            "responses": [
-                f"已更正账单 #{updated.id}：{updated.item} {updated.amount} {updated.currency}，分类 {updated.category}，时间 {_fmt_dt(updated.transaction_date)}。"
-            ],
-        }
-
-    if intent == "correct_latest":
-        latest = await get_latest_ledger(session, user_id)
-        if not latest:
-            return {**state, "responses": ["你还没有可更正的账单，请先记一笔。"]}
-        updated = await update_ledger(
-            session,
-            user_id=user_id,
-            ledger_id=latest.id,
-            amount=amount,
-            category=category if category != "其他" else None,
-            item=item or latest.item,
-            platform=user_platform,
-        )
-        if not updated:
-            return {**state, "responses": ["更正失败，请稍后重试。"]}
-        return {
-            **state,
-            "responses": [
-                f"已更正最近一笔：{updated.item} {updated.amount} {updated.currency}，分类 {updated.category}（账单 #{updated.id}，时间 {_fmt_dt(updated.transaction_date)}）。"
-            ],
+            "responses": [f"已定位 {matched_count} 条（来源：{source}），成功更正 {updated_count} 条。{preview}".strip()],
         }
 
     ledger = await insert_ledger(

@@ -6,6 +6,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from app.graph.state import GraphState
 from app.graph.nodes.router import route_intent, router_node
 from app.graph.nodes.onboarding import onboarding_node
+from app.graph.nodes.complex_task import complex_task_node
 from app.graph.nodes.ledger_manager import ledger_manager_node
 from app.graph.nodes.schedule_manager import schedule_manager_node
 from app.graph.nodes.chat_manager import chat_manager_node
@@ -23,6 +24,7 @@ def _build_graph(checkpointer):
 
     graph.add_node("router", router_node)
     graph.add_node("onboarding", onboarding_node)
+    graph.add_node("complex_task", complex_task_node)
     graph.add_node("ledger_manager", ledger_manager_node)
     graph.add_node("schedule_manager", schedule_manager_node)
     graph.add_node("chat_manager", chat_manager_node)
@@ -36,6 +38,7 @@ def _build_graph(checkpointer):
         route_intent,
         {
             "onboarding": "onboarding",
+            "complex_task": "complex_task",
             "ledger_manager": "ledger_manager",
             "schedule_manager": "schedule_manager",
             "chat_manager": "chat_manager",
@@ -45,6 +48,7 @@ def _build_graph(checkpointer):
     )
 
     graph.add_edge("onboarding", END)
+    graph.add_edge("complex_task", END)
     graph.add_edge("ledger_manager", END)
     graph.add_edge("schedule_manager", END)
     graph.add_edge("chat_manager", END)

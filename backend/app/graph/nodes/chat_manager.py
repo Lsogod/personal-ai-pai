@@ -12,12 +12,14 @@ from zoneinfo import ZoneInfo
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
+from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
 from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
 from app.models.user import User
+from app.services.commands.chat import execute_chat_command, parse_chat_command
 from app.services.audit import log_event
 from app.services.admin_tools import is_tool_enabled
 from app.services.llm import get_llm
@@ -34,6 +36,13 @@ from app.services.usage import log_tool_usage
 
 URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 VALID_CHAT_KINDS = {"general", "time", "external", "weather", "tooling", "unknown"}
+
+
+class ChatClassificationExtraction(BaseModel):
+    kind: str = Field(default="unknown")
+    tool_required: bool = Field(default=False)
+    weather_location: str = Field(default="")
+    confidence: float = Field(default=0.0)
 
 
 def _shorten_text(value: str, limit: int = 500) -> str:
@@ -116,6 +125,7 @@ async def _classify_chat_request_with_llm(
     runtime_tools: str,
 ) -> dict[str, Any]:
     llm = get_llm(node_name="chat_manager")
+    runnable = llm.with_structured_output(ChatClassificationExtraction)
     system = SystemMessage(
         content=(
             "你是 chat_manager 节点的请求分析器。只输出 JSON。"
@@ -137,15 +147,15 @@ async def _classify_chat_request_with_llm(
         )
     )
     try:
-        response = await llm.ainvoke([system, human])
-        data = _parse_json_object(str(response.content))
+        parsed = await runnable.ainvoke([system, human])
     except Exception:
-        data = {}
-    kind = str(data.get("kind") or "unknown").strip().lower()
+        parsed = ChatClassificationExtraction()
+
+    kind = str(getattr(parsed, "kind", "") or "unknown").strip().lower()
     if kind not in VALID_CHAT_KINDS:
         kind = "unknown"
-    weather_location = str(data.get("weather_location") or "").strip()
-    confidence_raw = data.get("confidence")
+    weather_location = str(getattr(parsed, "weather_location", "") or "").strip()
+    confidence_raw = getattr(parsed, "confidence", 0.0)
     try:
         confidence = float(confidence_raw)
     except Exception:
@@ -156,7 +166,7 @@ async def _classify_chat_request_with_llm(
         confidence = 1.0
     return {
         "kind": kind,
-        "tool_required": _coerce_bool(data.get("tool_required"), default=False),
+        "tool_required": _coerce_bool(getattr(parsed, "tool_required", False), default=False),
         "weather_location": weather_location,
         "confidence": confidence,
     }
@@ -800,66 +810,6 @@ async def _run_tool_agent(
     return "", 0
 
 
-async def _handle_command_fallback(
-    *,
-    user: User,
-    content: str,
-    context_text: str,
-    skills: str,
-) -> str | None:
-    settings = get_settings()
-    lower = content.lower()
-
-    if lower.startswith("/mcp list"):
-        if not settings.mcp_fetch_enabled:
-            return "系统级 MCP 未启用。"
-        try:
-            tools = await get_mcp_fetch_client().list_tools()
-            tools = filter_allowed_mcp_tools(tools)
-            return _format_mcp_tools(tools)
-        except MCPFetchError as exc:
-            return f"MCP 工具列表获取失败：{exc}"
-
-    if lower.startswith("/fetch"):
-        if not settings.mcp_fetch_enabled:
-            return "系统级 MCP 未启用。"
-        url = _extract_first_url(content)
-        if not url:
-            return "请提供要抓取的网址，例如：`/fetch https://example.com`。"
-        try:
-            fetched = await get_mcp_fetch_client().fetch(url=url)
-            return await _answer_with_fetched_content(
-                user=user,
-                content=content,
-                context_text=context_text,
-                skills=skills,
-                fetched_markdown=fetched,
-                source_url=url,
-            )
-        except MCPFetchError as exc:
-            return f"网页抓取失败：{exc}"
-
-    if lower.startswith("/weather"):
-        if not settings.mcp_fetch_enabled:
-            return "系统级 MCP 未启用。"
-        location = content[8:].strip() or "Wuhan"
-        try:
-            fetched, source_url = await _fetch_weather_via_mcp(location)
-            return await _answer_weather_with_time_context(
-                user=user,
-                content=content,
-                context_text=context_text,
-                skills=skills,
-                now_time_text=_render_now_time_tool_like_text(get_settings().timezone),
-                weather_output=fetched,
-                source_url=source_url,
-            )
-        except MCPFetchError as exc:
-            return f"天气抓取失败：{exc}"
-
-    return None
-
-
 async def _weather_fallback_fetch_and_answer(
     *,
     user: User,
@@ -946,14 +896,60 @@ async def chat_manager_node(state: GraphState) -> GraphState:
         runtime_tools = "无可用工具。"
 
     # Deterministic command fallback.
-    cmd = await _handle_command_fallback(
-        user=user,
-        content=content,
-        context_text=context_text,
-        skills=skills,
-    )
-    if cmd is not None:
-        return {**state, "responses": [cmd]}
+    parsed_cmd = parse_chat_command(content)
+    if parsed_cmd is not None:
+        settings = get_settings()
+
+        async def _on_mcp_list() -> str:
+            try:
+                tools = await get_mcp_fetch_client().list_tools()
+                tools = filter_allowed_mcp_tools(tools)
+                return _format_mcp_tools(tools)
+            except MCPFetchError as exc:
+                return f"MCP 工具列表获取失败：{exc}"
+
+        async def _on_fetch() -> str:
+            url = _extract_first_url(content)
+            if not url:
+                return "请提供要抓取的网址，例如：`/fetch https://example.com`。"
+            try:
+                fetched = await get_mcp_fetch_client().fetch(url=url)
+                return await _answer_with_fetched_content(
+                    user=user,
+                    content=content,
+                    context_text=context_text,
+                    skills=skills,
+                    fetched_markdown=fetched,
+                    source_url=url,
+                )
+            except MCPFetchError as exc:
+                return f"网页抓取失败：{exc}"
+
+        async def _on_weather(location_arg: str) -> str:
+            location = location_arg or "Wuhan"
+            try:
+                fetched, source_url = await _fetch_weather_via_mcp(location)
+                return await _answer_weather_with_time_context(
+                    user=user,
+                    content=content,
+                    context_text=context_text,
+                    skills=skills,
+                    now_time_text=_render_now_time_tool_like_text(get_settings().timezone),
+                    weather_output=fetched,
+                    source_url=source_url,
+                )
+            except MCPFetchError as exc:
+                return f"天气抓取失败：{exc}"
+
+        cmd_text = await execute_chat_command(
+            command=parsed_cmd,
+            mcp_fetch_enabled=settings.mcp_fetch_enabled,
+            on_mcp_list=_on_mcp_list,
+            on_fetch=_on_fetch,
+            on_weather=_on_weather,
+        )
+        if cmd_text is not None:
+            return {**state, "responses": [cmd_text]}
 
     try:
         classification = await _classify_chat_request_with_llm(

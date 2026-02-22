@@ -1,7 +1,8 @@
-import json
 import re
+from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, Field
 
 from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
@@ -19,19 +20,33 @@ def _extract_emoji(text: str) -> str | None:
     return match.group(0) if match else None
 
 
-def _parse_json_object(content: str) -> dict:
-    text = (content or "").strip()
-    if not text:
-        return {}
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if len(lines) >= 3:
-            text = "\n".join(lines[1:-1]).strip()
-    try:
-        data = json.loads(text)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+class NicknameExtraction(BaseModel):
+    nickname: str = Field(default="")
+
+
+class AIProfileExtraction(BaseModel):
+    ai_name: str = Field(default="")
+    ai_emoji: str = Field(default="")
+
+
+class BindingDecisionExtraction(BaseModel):
+    decision: Literal["has_account", "no_account", "continue", "unknown"] = "unknown"
+
+
+async def _invoke_structured(
+    *,
+    node_name: str,
+    schema: type[BaseModel],
+    messages: list[SystemMessage | HumanMessage],
+) -> BaseModel:
+    llm = get_llm(node_name=node_name)
+    runnable = llm.with_structured_output(schema)
+    result = await runnable.ainvoke(messages)
+    if isinstance(result, BaseModel):
+        return result
+    if isinstance(result, dict):
+        return schema.model_validate(result)
+    return schema()
 
 
 async def _extract_nickname_with_llm(raw: str, conversation_context: str) -> str:
@@ -39,7 +54,6 @@ async def _extract_nickname_with_llm(raw: str, conversation_context: str) -> str
     if not text:
         return "主人"
 
-    llm = get_llm(node_name="onboarding")
     system = SystemMessage(
         content=(
             "你是字段提取器。请从用户消息中提取用户昵称。"
@@ -58,9 +72,12 @@ async def _extract_nickname_with_llm(raw: str, conversation_context: str) -> str
     )
 
     try:
-        response = await llm.ainvoke([system, human])
-        data = _parse_json_object(str(response.content))
-        nickname = str(data.get("nickname") or "").strip()
+        parsed = await _invoke_structured(
+            node_name="onboarding",
+            schema=NicknameExtraction,
+            messages=[system, human],
+        )
+        nickname = str(parsed.nickname or "").strip()
         if nickname:
             return nickname
     except Exception:
@@ -74,7 +91,6 @@ async def _extract_ai_profile_with_llm(raw: str, conversation_context: str) -> t
     if not text:
         return "PAI", "🤖"
 
-    llm = get_llm(node_name="onboarding")
     system = SystemMessage(
         content=(
             "你是字段提取器。请从用户消息中提取 AI 名称和 AI 表情。"
@@ -94,10 +110,13 @@ async def _extract_ai_profile_with_llm(raw: str, conversation_context: str) -> t
     ai_name = ""
     ai_emoji = ""
     try:
-        response = await llm.ainvoke([system, human])
-        data = _parse_json_object(str(response.content))
-        ai_name = str(data.get("ai_name") or "").strip()
-        ai_emoji = str(data.get("ai_emoji") or "").strip()
+        parsed = await _invoke_structured(
+            node_name="onboarding",
+            schema=AIProfileExtraction,
+            messages=[system, human],
+        )
+        ai_name = str(parsed.ai_name or "").strip()
+        ai_emoji = str(parsed.ai_emoji or "").strip()
     except Exception:
         pass
 
@@ -111,7 +130,6 @@ async def _understand_binding_answer(raw: str, conversation_context: str) -> str
     text = (raw or "").strip()
     if not text:
         return "unknown"
-    llm = get_llm(node_name="onboarding")
     system = SystemMessage(
         content=(
             "你是绑定引导意图解析器。只输出 JSON。"
@@ -130,9 +148,12 @@ async def _understand_binding_answer(raw: str, conversation_context: str) -> str
         )
     )
     try:
-        response = await llm.ainvoke([system, human])
-        data = _parse_json_object(str(response.content))
-        decision = str(data.get("decision") or "").strip().lower()
+        parsed = await _invoke_structured(
+            node_name="onboarding",
+            schema=BindingDecisionExtraction,
+            messages=[system, human],
+        )
+        decision = str(parsed.decision or "").strip().lower()
         if decision in {"has_account", "no_account", "continue", "unknown"}:
             return decision
     except Exception:

@@ -3,6 +3,16 @@ from __future__ import annotations
 from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
 from app.models.user import User
+from app.services.commands.skills import (
+    builtin_update_block_text,
+    disable_usage_text,
+    no_dynamic_skill_text,
+    publish_usage_text,
+    publish_hint_text,
+    show_usage_text,
+    skill_help_text,
+    update_usage_text,
+)
 from app.services.audit import log_event
 from app.services.runtime_context import get_session
 from app.services.skills import (
@@ -62,7 +72,7 @@ async def skill_manager_node(state: GraphState) -> GraphState:
         if not rows:
             return {
                 **state,
-                "responses": ["你还没有动态技能。可发送：`/skill create 翻译专家` 来创建。"],
+                "responses": [no_dynamic_skill_text()],
             }
         lines = ["技能列表（含内置与用户）："]
         for row in rows:
@@ -75,7 +85,7 @@ async def skill_manager_node(state: GraphState) -> GraphState:
     if action in {"publish"}:
         slug = _extract_slug(target)
         if not slug:
-            return {**state, "responses": ["请指定要发布的技能，例如：`/skill publish translator`"]}
+            return {**state, "responses": [publish_usage_text()]}
         skill = await publish_skill(session, user.id, slug)
         if not skill:
             return {**state, "responses": [f"未找到技能 `{slug}`，或该技能没有可发布版本。"]}
@@ -91,7 +101,7 @@ async def skill_manager_node(state: GraphState) -> GraphState:
     if action in {"disable"}:
         slug = _extract_slug(target)
         if not slug:
-            return {**state, "responses": ["请指定要停用的技能，例如：`/skill disable translator`"]}
+            return {**state, "responses": [disable_usage_text()]}
         skill = await disable_skill(session, user.id, slug)
         if not skill:
             return {**state, "responses": [f"未找到技能 `{slug}`。"]}
@@ -109,7 +119,7 @@ async def skill_manager_node(state: GraphState) -> GraphState:
         if not slug:
             return {
                 **state,
-                "responses": ["请指定要查看的技能，例如：`/skill show builtin:translator` 或 `/skill show user:my-skill`。"],
+                "responses": [show_usage_text()],
             }
 
         if source == "builtin":
@@ -148,10 +158,10 @@ async def skill_manager_node(state: GraphState) -> GraphState:
             if not slug:
                 return {
                     **state,
-                    "responses": ["请指定要更新的技能，例如：`/skill update translator 新增术语保留规则`"],
+                    "responses": [update_usage_text()],
                 }
             if source == "builtin":
-                return {**state, "responses": ["内置技能不可直接更新，请先 `/skill create <新技能名>` 复制后再改。"]}
+                return {**state, "responses": [builtin_update_block_text()]}
             existing = await get_skill(session, user.id, slug)
             if not existing:
                 return {**state, "responses": [f"未找到技能 `{slug}`。"]}
@@ -185,7 +195,7 @@ async def skill_manager_node(state: GraphState) -> GraphState:
             "responses": [
                 (
                     f"已生成技能草稿 `{skill.slug}` v{version}（状态：{_skill_status_label('DRAFT')}）。\n"
-                    f"发送 `/skill publish {skill.slug}` 后生效。\n\n"
+                    f"{publish_hint_text(skill.slug)}\n\n"
                     f"草稿预览：\n{preview}"
                 )
             ],
@@ -193,15 +203,5 @@ async def skill_manager_node(state: GraphState) -> GraphState:
 
     return {
         **state,
-        "responses": [
-            (
-                "技能命令：\n"
-                "- `/skill list`\n"
-                "- `/skill create <技能名或需求>`\n"
-                "- `/skill update <slug> <更新需求>`\n"
-                "- `/skill show <slug>`\n"
-                "- `/skill publish <slug>`\n"
-                "- `/skill disable <slug>`"
-            )
-        ],
+        "responses": [skill_help_text()],
     }

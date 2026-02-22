@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import hashlib
 import re
 from dataclasses import dataclass
@@ -8,10 +7,12 @@ from pathlib import Path
 from typing import Iterable
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.skill import Skill, SkillStatus, SkillVersion
+from app.services.commands.skills import parse_skill_command_fallback
 from app.services.llm import get_llm
 
 
@@ -67,17 +68,12 @@ def _validate_skill_content(content: str) -> tuple[bool, list[str]]:
     return (len(errors) == 0), errors
 
 
-def _extract_json_object(text: str) -> dict:
-    payload = (text or "").strip()
-    if payload.startswith("```"):
-        lines = payload.splitlines()
-        if len(lines) >= 3:
-            payload = "\n".join(lines[1:-1]).strip()
-    try:
-        obj = json.loads(payload)
-        return obj if isinstance(obj, dict) else {}
-    except Exception:
-        return {}
+class SkillIntentExtraction(BaseModel):
+    action: str = Field(default="help")
+    skill_name: str = Field(default="")
+    skill_slug: str = Field(default="")
+    target: str = Field(default="")
+    request: str = Field(default="")
 
 
 def _iter_static_skill_files() -> Iterable[Path]:
@@ -341,6 +337,7 @@ async def parse_skill_intent(
 ) -> dict:
     text = (message_content or "").strip()
     llm = get_llm(node_name="skills")
+    runnable = llm.with_structured_output(SkillIntentExtraction)
     system = SystemMessage(
         content=(
             "你是意图解析器。将用户关于技能管理的消息解析为 JSON。"
@@ -358,31 +355,19 @@ async def parse_skill_intent(
     )
     allowed_actions = {"create", "update", "publish", "disable", "list", "show", "help"}
     try:
-        response = await llm.ainvoke([system, human])
-        data = _extract_json_object(str(response.content))
+        parsed = await runnable.ainvoke([system, human])
+        data = (
+            parsed.model_dump()
+            if isinstance(parsed, BaseModel)
+            else dict(parsed or {}) if isinstance(parsed, dict) else {}
+        )
         action = str(data.get("action") or "").strip().lower()
         if action in allowed_actions:
             return data
     except Exception:
         pass
 
-    # Deterministic command fallback.
-    if text.startswith("/skill"):
-        parts = text.split(maxsplit=2)
-        action = parts[1].lower() if len(parts) > 1 else "help"
-        remainder = parts[2].strip() if len(parts) > 2 else ""
-        if action not in allowed_actions:
-            return {"action": "help", "request": remainder or text}
-        if action == "update":
-            update_parts = remainder.split(maxsplit=1)
-            return {
-                "action": action,
-                "target": update_parts[0] if update_parts else "",
-                "request": update_parts[1] if len(update_parts) > 1 else "",
-            }
-        return {"action": action, "target": remainder, "request": remainder}
-
-    return {"action": "help", "request": text}
+    return parse_skill_command_fallback(text, allowed_actions)
 
 
 async def load_skills(
