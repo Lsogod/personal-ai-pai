@@ -7,6 +7,8 @@ from langchain_openai import ChatOpenAI
 
 from app.core.config import get_settings
 from app.services.runtime_context import (
+    get_llm_stream_nodes,
+    get_llm_streamer,
     get_tool_conversation_id,
     get_tool_platform,
     get_tool_user_id,
@@ -57,6 +59,26 @@ def _extract_token_usage(output: Any) -> tuple[int, int, int]:
     return prompt_tokens, completion_tokens, total_tokens
 
 
+def _extract_stream_text(chunk: Any) -> str:
+    content = getattr(chunk, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        texts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                texts.append(item)
+                continue
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    texts.append(text)
+        return "".join(texts)
+    if isinstance(chunk, str):
+        return chunk
+    return ""
+
+
 class TrackingChatOpenAI(ChatOpenAI):
     """带用量自动追踪的 ChatOpenAI 包装。
 
@@ -72,6 +94,41 @@ class TrackingChatOpenAI(ChatOpenAI):
     def _get_model_name(self) -> str:
         return str(getattr(self, "model_name", "") or getattr(self, "model", "") or "")
 
+    def _is_stream_enabled_for_current_call(self) -> bool:
+        streamer = get_llm_streamer()
+        if streamer is None:
+            return False
+        allowed_nodes = get_llm_stream_nodes()
+        if not allowed_nodes:
+            return False
+        return self._node_name in allowed_nodes
+
+    async def _ainvoke_with_stream(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
+        streamer = get_llm_streamer()
+        if streamer is None:
+            return await super().ainvoke(input, config=config, **kwargs)
+
+        full_output = None
+        async for chunk in super().astream(input, config=config, **kwargs):
+            text = _extract_stream_text(chunk)
+            if text:
+                try:
+                    await streamer(text)
+                except Exception:
+                    pass
+            if full_output is None:
+                full_output = chunk
+            else:
+                try:
+                    full_output = full_output + chunk
+                except Exception:
+                    # Keep the latest chunk if provider object doesn't support `+`.
+                    full_output = chunk
+
+        if full_output is not None:
+            return full_output
+        return await super().ainvoke(input, config=config, **kwargs)
+
     async def ainvoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
         started = time.perf_counter()
         user_id = get_tool_user_id()
@@ -79,7 +136,10 @@ class TrackingChatOpenAI(ChatOpenAI):
         conversation_id = get_tool_conversation_id()
         model_name = self._get_model_name()
         try:
-            output = await super().ainvoke(input, config=config, **kwargs)
+            if self._is_stream_enabled_for_current_call():
+                output = await self._ainvoke_with_stream(input, config=config, **kwargs)
+            else:
+                output = await super().ainvoke(input, config=config, **kwargs)
             prompt_tokens, completion_tokens, total_tokens = _extract_token_usage(output)
             await log_llm_usage(
                 user_id=user_id,

@@ -12,6 +12,10 @@ export interface ChatMessage {
   created_at: string;
 }
 
+type RenderChatMessage = ChatMessage & {
+  __streaming?: boolean;
+};
+
 interface Profile {
   ai_name?: string;
   ai_emoji?: string;
@@ -120,6 +124,7 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropAreaRef = useRef<HTMLDivElement>(null);
   const isComposingRef = useRef(false);
+  const streamingStartedAtRef = useRef<string>(new Date().toISOString());
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -136,6 +141,11 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
       el.scrollTop = el.scrollHeight;
     });
     return () => cancelAnimationFrame(frame);
+  }, [streamingReply]);
+
+  useEffect(() => {
+    if (streamingReply) return;
+    streamingStartedAtRef.current = new Date().toISOString();
   }, [streamingReply]);
 
   useEffect(() => {
@@ -273,10 +283,26 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
     }
   }
 
-  const allMessages = [
+  const lastHistory = history.length > 0 ? history[history.length - 1] : null;
+  const shouldShowStreaming =
+    !!streamingReply &&
+    !(
+      lastHistory &&
+      lastHistory.role === "assistant" &&
+      (lastHistory.content || "").trim() === (streamingReply || "").trim()
+    );
+
+  const allMessages: RenderChatMessage[] = [
     ...history,
-    ...(streamingReply
-      ? [{ role: "assistant", content: streamingReply, created_at: new Date().toISOString() }]
+    ...(shouldShowStreaming
+      ? [
+          {
+            role: "assistant",
+            content: streamingReply,
+            created_at: streamingStartedAtRef.current,
+            __streaming: true,
+          },
+        ]
       : []),
   ];
 
@@ -318,8 +344,8 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
           <div className="space-y-4 max-w-3xl mx-auto">
             {allMessages.map((msg, idx) => (
               <div
-                key={`${msg.created_at}-${idx}`}
-                className={`flex gap-3 animate-fade-in ${
+                key={msg.__streaming ? "streaming-assistant" : `${msg.created_at}-${idx}`}
+                className={`flex gap-3 ${msg.__streaming ? "" : "animate-fade-in"} ${
                   msg.role === "assistant" ? "justify-start" : "justify-end"
                 }`}
               >

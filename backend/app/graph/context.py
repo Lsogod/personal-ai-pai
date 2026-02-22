@@ -12,14 +12,21 @@ def _normalize_text(value: Any, limit: int = 220) -> str:
     return text[: limit - 1] + "..."
 
 
-def render_conversation_context(state: GraphState, max_messages: int = 16) -> str:
+def render_conversation_context(
+    state: GraphState,
+    max_messages: int = 16,
+    *,
+    include_summary: bool = True,
+    include_assistant_messages: bool = True,
+    include_long_term_memories: bool = True,
+) -> str:
     extra = state.get("extra") or {}
     summary = _normalize_text(extra.get("conversation_summary") or "", 300)
     raw_messages = extra.get("context_messages") or []
     raw_memories = extra.get("long_term_memories") or []
 
     lines: list[str] = []
-    if summary:
+    if include_summary and summary:
         lines.append(f"会话摘要: {summary}")
 
     normalized_messages: list[dict[str, str]] = []
@@ -33,6 +40,8 @@ def render_conversation_context(state: GraphState, max_messages: int = 16) -> st
                 continue
             if role not in {"user", "assistant", "system"}:
                 role = "user"
+            if not include_assistant_messages and role == "assistant":
+                continue
             normalized_messages.append({"role": role, "content": content})
 
     if normalized_messages:
@@ -41,7 +50,7 @@ def render_conversation_context(state: GraphState, max_messages: int = 16) -> st
             lines.append(f"- {item['role']}: {item['content']}")
 
     normalized_memories: list[str] = []
-    if isinstance(raw_memories, list):
+    if include_long_term_memories and isinstance(raw_memories, list):
         for item in raw_memories[:8]:
             if not isinstance(item, dict):
                 continue

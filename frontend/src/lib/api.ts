@@ -249,30 +249,77 @@ export async function streamSsePost(
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder("utf-8");
-  let buffer = "";
+  let lineBuffer = "";
+  let eventDataLines: string[] = [];
+  const flushEvent = (): boolean => {
+    if (eventDataLines.length === 0) return false;
+    const payloadText = eventDataLines.join("\n");
+    eventDataLines = [];
+    if (!payloadText) return false;
+    if (payloadText === "[DONE]") return true;
+    let payload: { chunk?: unknown; done?: unknown; error?: unknown } | null = null;
+    try {
+      payload = JSON.parse(payloadText) as {
+        chunk?: unknown;
+        done?: unknown;
+        error?: unknown;
+      };
+    } catch {
+      // Backward-compatible fallback for plain text data frames.
+      // If it looks like malformed JSON chunk payload, drop it to avoid raw blob rendering.
+      if (/^\s*\{/.test(payloadText) && payloadText.includes("\"chunk\"")) {
+        return false;
+      }
+      onChunk(payloadText);
+      return false;
+    }
+    if (payload.done === true) return true;
+    if (typeof payload.error === "string" && payload.error.trim()) {
+      throw new Error(payload.error);
+    }
+    if (typeof payload.chunk === "string" && payload.chunk) {
+      onChunk(payload.chunk);
+    }
+    return false;
+  };
+
+  const consumeLines = (): boolean => {
+    while (true) {
+      const nl = lineBuffer.indexOf("\n");
+      if (nl < 0) return false;
+      let line = lineBuffer.slice(0, nl);
+      lineBuffer = lineBuffer.slice(nl + 1);
+      if (line.endsWith("\r")) {
+        line = line.slice(0, -1);
+      }
+      if (line === "") {
+        if (flushEvent()) return true;
+        continue;
+      }
+      if (line.startsWith("data:")) {
+        eventDataLines.push(line.slice(5).trimStart());
+      }
+    }
+  };
 
   while (true) {
     const { value, done } = await reader.read();
     if (done) {
       break;
     }
-    buffer += decoder.decode(value, { stream: true });
-    const events = buffer.split("\n\n");
-    buffer = events.pop() || "";
-    for (const event of events) {
-      const lines = event.split("\n");
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) {
-          continue;
-        }
-        const chunk = line.slice(6);
-        if (chunk === "[DONE]") {
-          return;
-        }
-        onChunk(chunk);
-      }
+    lineBuffer += decoder.decode(value, { stream: true });
+    if (consumeLines()) return;
+  }
+  lineBuffer += decoder.decode();
+  if (consumeLines()) return;
+  if (lineBuffer.trim()) {
+    let line = lineBuffer;
+    if (line.endsWith("\r")) line = line.slice(0, -1);
+    if (line.startsWith("data:")) {
+      eventDataLines.push(line.slice(5).trimStart());
     }
   }
+  flushEvent();
 }
 
 export function fetchSkills(token: string | null | undefined) {
@@ -557,6 +604,8 @@ export interface AdminUserItem {
   platform: string;
   platform_id: string;
   email?: string | null;
+  ai_name?: string | null;
+  ai_emoji?: string | null;
   setup_stage: number;
   binding_stage: number;
   is_blocked: boolean;
@@ -576,6 +625,121 @@ export interface AdminPagedUsers {
   size: number;
   total: number;
   items: AdminUserItem[];
+}
+
+export interface AdminUserMemoryItem {
+  id: number;
+  memory_key: string;
+  memory_type: string;
+  content: string;
+  importance: number;
+  confidence: number;
+  conversation_id?: number | null;
+  source_message_id?: number | null;
+  last_accessed_at?: string;
+  expires_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminUserDetail {
+  id: number;
+  uuid: string;
+  nickname: string;
+  platform: string;
+  platform_id: string;
+  email?: string | null;
+  ai_name?: string | null;
+  ai_emoji?: string | null;
+  setup_stage: number;
+  binding_stage: number;
+  is_blocked: boolean;
+  blocked_reason: string;
+  daily_message_limit: number;
+  monthly_message_limit: number;
+  created_at: string;
+  updated_at: string;
+  last_active_at: string;
+  profile: {
+    nickname: string;
+    ai_name: string;
+    ai_emoji: string;
+    platform: string;
+    platform_id: string;
+    email?: string | null;
+    setup_stage: number;
+    binding_stage: number;
+    created_at: string;
+    updated_at: string;
+  };
+  identities: Array<{
+    platform: string;
+    platform_id: string;
+    created_at: string;
+  }>;
+  memories: AdminUserMemoryItem[];
+  stats: {
+    messages: number;
+    conversations: number;
+    ledgers: number;
+    schedules: number;
+    skills: number;
+    memories: number;
+    token_total: number;
+  };
+}
+
+export interface AdminMemoryConsolidateUserResponse {
+  ok: boolean;
+  scope: "user";
+  user_id: number;
+  max_scan: number;
+  reviewed: number;
+  updated: number;
+  deleted: number;
+  merged: number;
+  timestamp: string;
+}
+
+export interface AdminMemoryConsolidateAllItem {
+  user_id: number;
+  reviewed: number;
+  updated: number;
+  deleted: number;
+  merged: number;
+}
+
+export interface AdminMemoryConsolidateAllResponse {
+  ok: boolean;
+  scope: "all";
+  scanned_users: number;
+  limit_users: number;
+  max_scan: number;
+  totals: {
+    reviewed: number;
+    updated: number;
+    deleted: number;
+    merged: number;
+  };
+  items: AdminMemoryConsolidateAllItem[];
+  timestamp: string;
+}
+
+export interface AdminMemoryPurgeUserResponse {
+  ok: boolean;
+  scope: "user";
+  user_id: number;
+  deleted: number;
+  timestamp: string;
+}
+
+export interface AdminMemoryPurgeAllResponse {
+  ok: boolean;
+  scope: "all";
+  scanned_users: number;
+  limit_users: number;
+  deleted: number;
+  timestamp: string;
 }
 
 export interface AdminToolItem {
@@ -681,6 +845,74 @@ export function fetchAdminUsers(
   if (params.platform) search.set("platform", params.platform);
   if (typeof params.blocked === "boolean") search.set("blocked", String(params.blocked));
   return adminRequest(`/api/admin/v1/users?${search.toString()}`, {}, adminToken) as Promise<AdminPagedUsers>;
+}
+
+export function fetchAdminUserDetail(
+  adminToken: string,
+  userId: number,
+  memoryLimit = 50
+) {
+  return adminRequest(
+    `/api/admin/v1/users/${userId}?memory_limit=${Math.max(1, Math.floor(memoryLimit))}`,
+    {},
+    adminToken
+  ) as Promise<AdminUserDetail>;
+}
+
+export function adminConsolidateUserMemories(
+  adminToken: string,
+  userId: number,
+  maxScan = 200
+) {
+  return adminRequest(
+    `/api/admin/v1/users/${userId}/memories/consolidate?max_scan=${Math.max(10, Math.floor(maxScan))}`,
+    { method: "POST" },
+    adminToken
+  ) as Promise<AdminMemoryConsolidateUserResponse>;
+}
+
+export function adminConsolidateAllMemories(
+  adminToken: string,
+  payload: { limit_users?: number; max_scan?: number } = {}
+) {
+  return adminRequest(
+    "/api/admin/v1/memories/consolidate",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        limit_users: Math.max(1, Math.floor(payload.limit_users ?? 200)),
+        max_scan: Math.max(10, Math.floor(payload.max_scan ?? 200)),
+      }),
+    },
+    adminToken
+  ) as Promise<AdminMemoryConsolidateAllResponse>;
+}
+
+export function adminDeleteUserMemories(
+  adminToken: string,
+  userId: number
+) {
+  return adminRequest(
+    `/api/admin/v1/users/${userId}/memories`,
+    { method: "DELETE" },
+    adminToken
+  ) as Promise<AdminMemoryPurgeUserResponse>;
+}
+
+export function adminDeleteAllMemories(
+  adminToken: string,
+  payload: { limit_users?: number } = {}
+) {
+  return adminRequest(
+    "/api/admin/v1/memories/purge",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        limit_users: Math.max(1, Math.floor(payload.limit_users ?? 5000)),
+      }),
+    },
+    adminToken
+  ) as Promise<AdminMemoryPurgeAllResponse>;
 }
 
 export function adminSetUserBlock(

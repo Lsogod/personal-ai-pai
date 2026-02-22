@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bar,
@@ -17,6 +17,10 @@ import {
 } from "recharts";
 
 import {
+  adminConsolidateAllMemories,
+  adminConsolidateUserMemories,
+  adminDeleteAllMemories,
+  adminDeleteUserMemories,
   adminDisableSkill,
   adminSetToolSwitch,
   adminSetUserBlock,
@@ -27,17 +31,21 @@ import {
   fetchAdminConversationStats,
   fetchAdminDashboard,
   fetchAdminMiniappHomePopup,
+  fetchAdminUserDetail,
   fetchAdminScheduleDelivery,
   fetchAdminSkills,
   fetchAdminTools,
   fetchAdminUsers,
   saveAdminMiniappHomePopup,
   type AdminAuditItem,
+  type AdminMemoryConsolidateAllResponse,
+  type AdminMemoryPurgeAllResponse,
   type AdminConversationItem,
   type AdminConversationMessageItem,
   type AdminMiniappHomePopupConfig,
   type AdminSkillsItem,
   type AdminToolItem,
+  type AdminUserDetail,
   type AdminUserItem,
 } from "../../lib/api";
 import { Button } from "../../components/ui/button";
@@ -72,6 +80,13 @@ function fmtNum(n: number | null | undefined): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 10_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toLocaleString("en-US");
+}
+
+function fmtDateTime(value: string | null | undefined): string {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString();
 }
 
 function toDatetimeLocalValue(value: string | null | undefined): string {
@@ -173,6 +188,7 @@ export function AdminPage() {
   const [userBlocked, setUserBlocked] = useState("all");
   const [userPage, setUserPage] = useState(1);
   const userSize = 20;
+  const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
 
   const [conversationKeyword, setConversationKeyword] = useState("");
   const [conversationUserId, setConversationUserId] = useState("");
@@ -192,6 +208,7 @@ export function AdminPage() {
   const auditSize = 30;
   const [popupDraft, setPopupDraft] = useState<AdminMiniappHomePopupConfig | null>(null);
   const [popupSaveMessage, setPopupSaveMessage] = useState("");
+  const [memoryCleanMessage, setMemoryCleanMessage] = useState("");
 
   const dashboard = useQuery({
     queryKey: ["admin", "dashboard", token, days],
@@ -218,6 +235,12 @@ export function AdminPage() {
         blocked: userBlocked === "all" ? undefined : userBlocked === "true",
       }),
     enabled: !!token,
+  });
+
+  const userDetail = useQuery<AdminUserDetail>({
+    queryKey: ["admin", "user-detail", token, selectedUserId],
+    queryFn: () => fetchAdminUserDetail(token, selectedUserId as number, 120),
+    enabled: !!token && !!selectedUserId,
   });
 
   const conversations = useQuery({
@@ -301,6 +324,13 @@ export function AdminPage() {
   }, [activeSection, conversations.data, selectedConversationId]);
 
   useEffect(() => {
+    if (activeSection !== "users") return;
+    if (selectedUserId) return;
+    const first = users.data?.items?.[0]?.id;
+    if (first) setSelectedUserId(first);
+  }, [activeSection, users.data, selectedUserId]);
+
+  useEffect(() => {
     if (!miniappPopup.data) return;
     setPopupDraft(miniappPopup.data);
     setPopupSaveMessage("");
@@ -314,6 +344,7 @@ export function AdminPage() {
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["admin", "users", token] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "user-detail", token] });
     },
   });
 
@@ -329,6 +360,69 @@ export function AdminPage() {
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["admin", "users", token] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "user-detail", token] });
+    },
+  });
+
+  const consolidateUserMemoriesMutation = useMutation({
+    mutationFn: (payload: { userId: number; maxScan?: number }) =>
+      adminConsolidateUserMemories(token, payload.userId, payload.maxScan ?? 200),
+    onSuccess: async (res) => {
+      setMemoryCleanMessage(
+        `用户 #${res.user_id} 清洗完成：reviewed=${res.reviewed}, updated=${res.updated}, deleted=${res.deleted}, merged=${res.merged}`
+      );
+      await queryClient.invalidateQueries({ queryKey: ["admin", "users", token] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "user-detail", token] });
+    },
+    onError: (error) => {
+      if (error instanceof Error) setMemoryCleanMessage(`清洗失败：${error.message}`);
+      else setMemoryCleanMessage("清洗失败");
+    },
+  });
+
+  const consolidateAllMemoriesMutation = useMutation({
+    mutationFn: (payload: { limitUsers?: number; maxScan?: number }) =>
+      adminConsolidateAllMemories(token, {
+        limit_users: payload.limitUsers ?? 200,
+        max_scan: payload.maxScan ?? 200,
+      }),
+    onSuccess: async (res: AdminMemoryConsolidateAllResponse) => {
+      setMemoryCleanMessage(
+        `全量清洗完成：users=${res.scanned_users}, reviewed=${res.totals.reviewed}, updated=${res.totals.updated}, deleted=${res.totals.deleted}, merged=${res.totals.merged}`
+      );
+      await queryClient.invalidateQueries({ queryKey: ["admin", "users", token] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "user-detail", token] });
+    },
+    onError: (error) => {
+      if (error instanceof Error) setMemoryCleanMessage(`全量清洗失败：${error.message}`);
+      else setMemoryCleanMessage("全量清洗失败");
+    },
+  });
+
+  const deleteUserMemoriesMutation = useMutation({
+    mutationFn: (payload: { userId: number }) => adminDeleteUserMemories(token, payload.userId),
+    onSuccess: async (res) => {
+      setMemoryCleanMessage(`用户 #${res.user_id} 长期记忆已物理删除 ${res.deleted} 条`);
+      await queryClient.invalidateQueries({ queryKey: ["admin", "users", token] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "user-detail", token] });
+    },
+    onError: (error) => {
+      if (error instanceof Error) setMemoryCleanMessage(`物理删除失败：${error.message}`);
+      else setMemoryCleanMessage("物理删除失败");
+    },
+  });
+
+  const deleteAllMemoriesMutation = useMutation({
+    mutationFn: (payload: { limitUsers?: number }) =>
+      adminDeleteAllMemories(token, { limit_users: payload.limitUsers ?? 5000 }),
+    onSuccess: async (res: AdminMemoryPurgeAllResponse) => {
+      setMemoryCleanMessage(`全量长期记忆已物理删除 ${res.deleted} 条（用户数=${res.scanned_users}）`);
+      await queryClient.invalidateQueries({ queryKey: ["admin", "users", token] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "user-detail", token] });
+    },
+    onError: (error) => {
+      if (error instanceof Error) setMemoryCleanMessage(`全量物理删除失败：${error.message}`);
+      else setMemoryCleanMessage("全量物理删除失败");
     },
   });
 
@@ -601,13 +695,50 @@ export function AdminPage() {
                     <option value="true">已封禁</option>
                   </select>
                 </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="default"
+                    disabled={consolidateAllMemoriesMutation.isPending}
+                    onClick={() => {
+                      const ok = window.confirm("确认执行全量长期记忆清洗？该操作会去重并下线低价值记忆。");
+                      if (!ok) return;
+                      consolidateAllMemoriesMutation.mutate({
+                        limitUsers: 500,
+                        maxScan: 200,
+                      });
+                    }}
+                  >
+                    {consolidateAllMemoriesMutation.isPending ? "清洗中..." : "一键清洗全量长期记忆"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={deleteAllMemoriesMutation.isPending}
+                    onClick={() => {
+                      const ok = window.confirm("确认物理删除全量长期记忆？该操作不可恢复。");
+                      if (!ok) return;
+                      deleteAllMemoriesMutation.mutate({ limitUsers: 5000 });
+                    }}
+                  >
+                    {deleteAllMemoriesMutation.isPending ? "删除中..." : "物理删除全量长期记忆"}
+                  </Button>
+                  <div className="text-xs text-content-secondary">
+                    批量策略：最多 500 用户，每用户最多扫描 200 条活跃记忆
+                  </div>
+                </div>
+                {memoryCleanMessage ? (
+                  <div className="rounded-lg border border-border px-3 py-2 text-xs">{memoryCleanMessage}</div>
+                ) : null}
                 <div className="overflow-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-left text-content-secondary border-b border-border">
                         <th className="py-2 pr-2">ID</th>
                         <th className="py-2 pr-2">昵称</th>
+                        <th className="py-2 pr-2">AI</th>
                         <th className="py-2 pr-2">平台</th>
+                        <th className="py-2 pr-2">创建时间</th>
                         <th className="py-2 pr-2">消息</th>
                         <th className="py-2 pr-2">账单</th>
                         <th className="py-2 pr-2">技能</th>
@@ -618,10 +749,15 @@ export function AdminPage() {
                     </thead>
                     <tbody>
                       {(users.data?.items || []).map((row: AdminUserItem) => (
-                        <tr key={row.id} className="border-b border-border/60">
+                        <tr
+                          key={row.id}
+                          className={`border-b border-border/60 ${selectedUserId === row.id ? "bg-surface-hover" : ""}`}
+                        >
                           <td className="py-2 pr-2">#{row.id}</td>
                           <td className="py-2 pr-2">{row.nickname}</td>
+                          <td className="py-2 pr-2">{`${row.ai_name || "PAI"} ${row.ai_emoji || ""}`}</td>
                           <td className="py-2 pr-2">{row.platform}</td>
+                          <td className="py-2 pr-2">{fmtDateTime(row.created_at)}</td>
                           <td className="py-2 pr-2">{row.message_count}</td>
                           <td className="py-2 pr-2">{row.ledger_count}</td>
                           <td className="py-2 pr-2">{row.skill_count}</td>
@@ -660,6 +796,14 @@ export function AdminPage() {
                           <td className="py-2 pr-2">
                             <Button
                               size="sm"
+                              variant="ghost"
+                              className="mr-2"
+                              onClick={() => setSelectedUserId(row.id)}
+                            >
+                              详情
+                            </Button>
+                            <Button
+                              size="sm"
                               variant={row.is_blocked ? "default" : "danger"}
                               onClick={() =>
                                 blockMutation.mutate({
@@ -683,6 +827,88 @@ export function AdminPage() {
                   total={users.data?.total || 0}
                   onPageChange={setUserPage}
                 />
+                {selectedUserId ? (
+                  <div className="rounded-xl border border-border bg-surface-card p-3 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-semibold">用户档案与长期记忆</h3>
+                      <div className="flex items-center gap-2">
+                        <div className="text-xs text-content-secondary">用户ID: #{selectedUserId}</div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={consolidateUserMemoriesMutation.isPending}
+                          onClick={() =>
+                            consolidateUserMemoriesMutation.mutate({
+                              userId: selectedUserId,
+                              maxScan: 300,
+                            })
+                          }
+                        >
+                          {consolidateUserMemoriesMutation.isPending ? "清洗中..." : "清洗当前用户记忆"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          disabled={deleteUserMemoriesMutation.isPending}
+                          onClick={() => {
+                            const ok = window.confirm(`确认物理删除用户 #${selectedUserId} 的长期记忆？该操作不可恢复。`);
+                            if (!ok || !selectedUserId) return;
+                            deleteUserMemoriesMutation.mutate({ userId: selectedUserId });
+                          }}
+                        >
+                          {deleteUserMemoriesMutation.isPending ? "删除中..." : "物理删除当前用户记忆"}
+                        </Button>
+                      </div>
+                    </div>
+                    {userDetail.isLoading ? (
+                      <div className="text-sm text-content-secondary">加载中...</div>
+                    ) : userDetail.data ? (
+                      <div className="space-y-3">
+                        <div className="grid md:grid-cols-3 gap-2 text-xs">
+                          <div className="rounded-lg border border-border p-2">昵称: {userDetail.data.profile?.nickname || "-"}</div>
+                          <div className="rounded-lg border border-border p-2">AI: {userDetail.data.profile?.ai_name || "PAI"} {userDetail.data.profile?.ai_emoji || ""}</div>
+                          <div className="rounded-lg border border-border p-2">平台: {userDetail.data.profile?.platform || "-"}</div>
+                          <div className="rounded-lg border border-border p-2">创建时间: {fmtDateTime(userDetail.data.created_at)}</div>
+                          <div className="rounded-lg border border-border p-2">最后活跃: {fmtDateTime(userDetail.data.last_active_at)}</div>
+                          <div className="rounded-lg border border-border p-2">
+                            长期记忆数: {userDetail.data.stats?.memories ?? 0}
+                          </div>
+                        </div>
+                        <div className="overflow-auto max-h-[320px]">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="text-left text-content-secondary border-b border-border">
+                                <th className="py-2 pr-2">类型</th>
+                                <th className="py-2 pr-2">内容</th>
+                                <th className="py-2 pr-2">重要性</th>
+                                <th className="py-2 pr-2">置信度</th>
+                                <th className="py-2 pr-2">更新时间</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(userDetail.data.memories || []).map((memory) => (
+                                <tr key={memory.id} className="border-b border-border/60 align-top">
+                                  <td className="py-2 pr-2">{memory.memory_type}</td>
+                                  <td className="py-2 pr-2 whitespace-pre-wrap break-words">{memory.content}</td>
+                                  <td className="py-2 pr-2">{memory.importance}</td>
+                                  <td className="py-2 pr-2">{Number(memory.confidence || 0).toFixed(2)}</td>
+                                  <td className="py-2 pr-2">{fmtDateTime(memory.updated_at)}</td>
+                                </tr>
+                              ))}
+                              {(!userDetail.data.memories || userDetail.data.memories.length === 0) ? (
+                                <tr>
+                                  <td colSpan={5} className="py-3 text-content-secondary">暂无长期记忆</td>
+                                </tr>
+                              ) : null}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-sm text-content-secondary">未找到用户详情</div>
+                    )}
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
           ) : null}
@@ -1124,3 +1350,5 @@ export function AdminPage() {
     </div>
   );
 }
+
+

@@ -58,10 +58,19 @@ class Settings(BaseSettings):
 
     mcp_fetch_enabled: bool = True
     mcp_fetch_url: str = ""
+    mcp_maps_url: str = ""
     mcp_fetch_timeout_sec: int = 30
     mcp_fetch_default_max_length: int = 5000
-    # Comma-separated MCP tool allowlist. Empty means allow all tools.
-    mcp_allowed_tool_names: str = "maps_weather"
+    # Comma-separated MCP tool allowlist for non-maps tools. Empty means allow all.
+    mcp_allowed_tool_names: str = ""
+    # Comma-separated MCP tool allowlist for maps_* tools. Empty means allow all.
+    mcp_maps_allowed_tool_names: str = "maps_weather"
+    # complex_task DAG executor controls
+    complex_task_max_parallel: int = 4
+    complex_task_dependency_wait_cycles: int = 1
+    complex_task_dependency_wait_ms: int = 120
+    complex_task_tool_call_limit: int = 8
+    complex_task_tool_per_action_limit: int = 4
 
     long_term_memory_enabled: bool = True
     long_term_memory_min_confidence: float = 0.75
@@ -72,7 +81,6 @@ class Settings(BaseSettings):
 
     admin_token: str = ""
     dedup_ttl_seconds: int = 86400
-
     jwt_secret: str = "change_me"
     jwt_algorithm: str = "HS256"
     jwt_exp_minutes: int = 60 * 24 * 7

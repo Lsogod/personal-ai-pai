@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -27,6 +27,7 @@ from app.models.skill import Skill, SkillStatus, SkillVersion
 from app.models.tool_usage import ToolUsageLog
 from app.models.user import User
 from app.services.admin_tools import set_tool_enabled
+from app.services.memory import consolidate_user_long_term_memories
 from app.services.tool_registry import list_runtime_tool_metas
 
 
@@ -61,6 +62,15 @@ class MiniappHomePopupPayload(BaseModel):
     end_at: str | None = ""
     version: int = Field(default=1, ge=1, le=100000)
     primary_button_text: str = "我知道了"
+
+
+class MemoryConsolidateAllPayload(BaseModel):
+    limit_users: int = Field(default=200, ge=1, le=5000)
+    max_scan: int = Field(default=200, ge=10, le=2000)
+
+
+class MemoryPurgeAllPayload(BaseModel):
+    limit_users: int = Field(default=5000, ge=1, le=100000)
 
 
 router = APIRouter(prefix="/api/admin/v1", dependencies=[Depends(require_admin)])
@@ -363,6 +373,8 @@ async def admin_users(
                 "platform": row.platform,
                 "platform_id": row.platform_id,
                 "email": row.email,
+                "ai_name": row.ai_name,
+                "ai_emoji": row.ai_emoji,
                 "setup_stage": row.setup_stage,
                 "binding_stage": row.binding_stage,
                 "is_blocked": bool(row.is_blocked),
@@ -384,6 +396,7 @@ async def admin_users(
 @router.get("/users/{user_id}")
 async def admin_user_detail(
     user_id: int,
+    memory_limit: int = Query(default=50, ge=1, le=500),
     session: AsyncSession = Depends(get_session),
 ):
     user = await session.get(User, user_id)
@@ -467,6 +480,18 @@ async def admin_user_detail(
         ).scalar_one()
         or None
     )
+    memory_rows = (
+        (
+            await session.execute(
+                select(LongTermMemory)
+                .where(LongTermMemory.user_id == user_id)
+                .order_by(LongTermMemory.updated_at.desc(), LongTermMemory.id.desc())
+                .limit(memory_limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     return {
         "id": user.id,
@@ -486,6 +511,18 @@ async def admin_user_detail(
         "created_at": user.created_at.isoformat(),
         "updated_at": user.updated_at.isoformat(),
         "last_active_at": last_active_at.isoformat() if last_active_at else "",
+        "profile": {
+            "nickname": user.nickname,
+            "ai_name": user.ai_name,
+            "ai_emoji": user.ai_emoji,
+            "platform": user.platform,
+            "platform_id": user.platform_id,
+            "email": user.email,
+            "setup_stage": user.setup_stage,
+            "binding_stage": user.binding_stage,
+            "created_at": user.created_at.isoformat(),
+            "updated_at": user.updated_at.isoformat(),
+        },
         "identities": [
             {
                 "platform": row.platform,
@@ -493,6 +530,23 @@ async def admin_user_detail(
                 "created_at": row.created_at.isoformat(),
             }
             for row in identities
+        ],
+        "memories": [
+            {
+                "id": row.id,
+                "memory_key": row.memory_key,
+                "memory_type": row.memory_type,
+                "content": row.content,
+                "importance": int(row.importance or 0),
+                "confidence": float(row.confidence or 0.0),
+                "conversation_id": row.conversation_id,
+                "source_message_id": row.source_message_id,
+                "last_accessed_at": row.last_accessed_at.isoformat() if row.last_accessed_at else "",
+                "expires_at": row.expires_at.isoformat() if row.expires_at else "",
+                "created_at": row.created_at.isoformat() if row.created_at else "",
+                "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+            }
+            for row in memory_rows
         ],
         "stats": {
             "messages": message_count,
@@ -549,6 +603,135 @@ async def admin_user_quota(
         "user_id": user.id,
         "daily_message_limit": int(user.daily_message_limit or 0),
         "monthly_message_limit": int(user.monthly_message_limit or 0),
+    }
+
+
+@router.post("/users/{user_id}/memories/consolidate")
+async def admin_user_memories_consolidate(
+    user_id: int,
+    max_scan: int = Query(default=200, ge=10, le=2000),
+    session: AsyncSession = Depends(get_session),
+):
+    user = await session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="user not found")
+
+    result = await consolidate_user_long_term_memories(
+        session=session,
+        user_id=user_id,
+        max_scan=max_scan,
+    )
+    return {
+        "ok": True,
+        "scope": "user",
+        "user_id": user_id,
+        "max_scan": int(max_scan),
+        "reviewed": int(result.get("reviewed", 0)),
+        "updated": int(result.get("updated", 0)),
+        "deleted": int(result.get("deleted", 0)),
+        "merged": int(result.get("merged", 0)),
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@router.post("/memories/consolidate")
+async def admin_all_memories_consolidate(
+    payload: MemoryConsolidateAllPayload,
+    session: AsyncSession = Depends(get_session),
+):
+    stmt = select(LongTermMemory.user_id).distinct().order_by(LongTermMemory.user_id.desc())
+    stmt = stmt.limit(max(1, int(payload.limit_users)))
+    user_ids = [int(uid) for uid in (await session.execute(stmt)).scalars().all() if uid is not None]
+
+    items: list[dict[str, int]] = []
+    totals = {"reviewed": 0, "updated": 0, "deleted": 0, "merged": 0}
+    for uid in user_ids:
+        result = await consolidate_user_long_term_memories(
+            session=session,
+            user_id=uid,
+            max_scan=int(payload.max_scan),
+        )
+        reviewed = int(result.get("reviewed", 0))
+        updated = int(result.get("updated", 0))
+        deleted = int(result.get("deleted", 0))
+        merged = int(result.get("merged", 0))
+        items.append(
+            {
+                "user_id": uid,
+                "reviewed": reviewed,
+                "updated": updated,
+                "deleted": deleted,
+                "merged": merged,
+            }
+        )
+        totals["reviewed"] += reviewed
+        totals["updated"] += updated
+        totals["deleted"] += deleted
+        totals["merged"] += merged
+
+    return {
+        "ok": True,
+        "scope": "all",
+        "scanned_users": len(user_ids),
+        "limit_users": int(payload.limit_users),
+        "max_scan": int(payload.max_scan),
+        "totals": totals,
+        "items": items,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@router.delete("/users/{user_id}/memories")
+async def admin_user_memories_purge(
+    user_id: int,
+    session: AsyncSession = Depends(get_session),
+):
+    user = await session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="user not found")
+
+    result = await session.execute(
+        delete(LongTermMemory).where(LongTermMemory.user_id == user_id)
+    )
+    await session.commit()
+    return {
+        "ok": True,
+        "scope": "user",
+        "user_id": user_id,
+        "deleted": int(result.rowcount or 0),
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+@router.post("/memories/purge")
+async def admin_all_memories_purge(
+    payload: MemoryPurgeAllPayload,
+    session: AsyncSession = Depends(get_session),
+):
+    stmt = select(LongTermMemory.user_id).distinct().order_by(LongTermMemory.user_id.desc())
+    stmt = stmt.limit(max(1, int(payload.limit_users)))
+    user_ids = [int(uid) for uid in (await session.execute(stmt)).scalars().all() if uid is not None]
+    if not user_ids:
+        return {
+            "ok": True,
+            "scope": "all",
+            "scanned_users": 0,
+            "limit_users": int(payload.limit_users),
+            "deleted": 0,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+    result = await session.execute(
+        delete(LongTermMemory).where(LongTermMemory.user_id.in_(user_ids))
+    )
+    await session.commit()
+    return {
+        "ok": True,
+        "scope": "all",
+        "scanned_users": len(user_ids),
+        "limit_users": int(payload.limit_users),
+        "deleted": int(result.rowcount or 0),
+        "timestamp": datetime.utcnow().isoformat(),
     }
 
 

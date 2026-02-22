@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextvars import ContextVar
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +15,14 @@ _sender_ctx: ContextVar[Optional[UnifiedSender]] = ContextVar("pai_sender_ctx", 
 _tool_user_id_ctx: ContextVar[Optional[int]] = ContextVar("pai_tool_user_id_ctx", default=None)
 _tool_platform_ctx: ContextVar[Optional[str]] = ContextVar("pai_tool_platform_ctx", default=None)
 _tool_conversation_id_ctx: ContextVar[Optional[int]] = ContextVar("pai_tool_conversation_id_ctx", default=None)
+_llm_streamer_ctx: ContextVar[Optional[Callable[[str], Awaitable[None]]]] = ContextVar(
+    "pai_llm_streamer_ctx",
+    default=None,
+)
+_llm_stream_nodes_ctx: ContextVar[Optional[tuple[str, ...]]] = ContextVar(
+    "pai_llm_stream_nodes_ctx",
+    default=None,
+)
 
 
 def set_session(session: AsyncSession):
@@ -96,3 +104,41 @@ def reset_tool_conversation_id(token) -> None:
 
 def get_tool_conversation_id() -> int | None:
     return _tool_conversation_id_ctx.get()
+
+
+def set_llm_streamer(streamer: Callable[[str], Awaitable[None]] | None):
+    return _llm_streamer_ctx.set(streamer)
+
+
+def reset_llm_streamer(token) -> None:
+    _llm_streamer_ctx.reset(token)
+
+
+def get_llm_streamer() -> Callable[[str], Awaitable[None]] | None:
+    return _llm_streamer_ctx.get()
+
+
+def set_llm_stream_nodes(nodes: set[str] | tuple[str, ...] | list[str] | None):
+    if not nodes:
+        return _llm_stream_nodes_ctx.set(None)
+    normalized = tuple(
+        sorted(
+            {
+                str(item or "").strip().lower()
+                for item in nodes
+                if str(item or "").strip()
+            }
+        )
+    )
+    return _llm_stream_nodes_ctx.set(normalized or None)
+
+
+def reset_llm_stream_nodes(token) -> None:
+    _llm_stream_nodes_ctx.reset(token)
+
+
+def get_llm_stream_nodes() -> set[str] | None:
+    value = _llm_stream_nodes_ctx.get()
+    if not value:
+        return None
+    return set(value)

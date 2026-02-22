@@ -43,8 +43,6 @@ from app.services.runtime_context import (
     reset_session,
     set_scheduler,
     reset_scheduler,
-    set_sender,
-    reset_sender,
     set_tool_user_id,
     reset_tool_user_id,
     set_tool_platform,
@@ -494,7 +492,6 @@ async def handle_message(
             graph = await get_graph()
             session_token = set_session(session)
             scheduler_token = set_scheduler(_scheduler)
-            sender_token = set_sender(_sender)
             tool_user_token = set_tool_user_id(user_id)
             tool_platform_token = set_tool_platform(platform)
             tool_conv_token = set_tool_conversation_id(conversation.id)
@@ -512,7 +509,6 @@ async def handle_message(
                 reset_tool_conversation_id(tool_conv_token)
                 reset_tool_platform(tool_platform_token)
                 reset_tool_user_id(tool_user_token)
-                reset_sender(sender_token)
                 reset_scheduler(scheduler_token)
                 reset_session(session_token)
 
@@ -573,6 +569,7 @@ async def handle_message(
                 conversation_id=conversation.id,
                 source_message_id=user_message_row.id,
                 candidates=candidates,
+                user_text=message.content,
                 user_nickname=user.nickname or "",
                 user_ai_name=user.ai_name or "",
                 user_ai_emoji=user.ai_emoji or "",

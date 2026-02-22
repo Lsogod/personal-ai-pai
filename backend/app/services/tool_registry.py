@@ -5,7 +5,7 @@ from typing import TypedDict
 
 from app.core.config import get_settings
 from app.services.admin_tools import load_tool_enabled_map, make_tool_key
-from app.services.mcp_fetch import MCPFetchError, get_mcp_fetch_client
+from app.services.mcp_fetch import get_mcp_fetch_client
 
 
 class ToolMeta(TypedDict):
@@ -15,18 +15,39 @@ class ToolMeta(TypedDict):
     enabled: bool
 
 
-def get_allowed_mcp_tool_names() -> set[str]:
-    raw = str(get_settings().mcp_allowed_tool_names or "").strip()
-    if not raw:
+def _parse_allowlist(raw: str) -> set[str]:
+    text = str(raw or "").strip()
+    if not text:
         return set()
-    return {part.strip().lower() for part in raw.split(",") if part.strip()}
+    return {part.strip().lower() for part in text.split(",") if part.strip()}
+
+
+def get_allowed_mcp_tool_names() -> set[str]:
+    # Non-maps MCP tools.
+    allowed = _parse_allowlist(get_settings().mcp_allowed_tool_names)
+    return {name for name in allowed if not name.startswith("maps_")}
+
+
+def get_allowed_mcp_maps_tool_names() -> set[str]:
+    # maps_* MCP tools.
+    return _parse_allowlist(get_settings().mcp_maps_allowed_tool_names)
+
+
+def is_maps_mcp_tool(name: str) -> bool:
+    return str(name or "").strip().lower().startswith("maps_")
+
+
+def get_allowed_mcp_tool_names_for(name: str) -> set[str]:
+    if is_maps_mcp_tool(name):
+        return get_allowed_mcp_maps_tool_names()
+    return get_allowed_mcp_tool_names()
 
 
 def is_mcp_tool_allowed(name: str) -> bool:
-    allowed = get_allowed_mcp_tool_names()
     tool_name = (name or "").strip().lower()
     if not tool_name:
         return False
+    allowed = get_allowed_mcp_tool_names_for(tool_name)
     if not allowed:
         return True
     return tool_name in allowed
@@ -49,28 +70,40 @@ def list_builtin_tool_metas() -> list[ToolMeta]:
         {
             "name": "now_time",
             "source": "builtin",
-            "description": "按时区返回当前时间。",
+            "description": "Return current local time by timezone.",
             "enabled": True,
         },
         {
             "name": "fetch_url",
             "source": "builtin",
-            "description": "通过 MCP fetch 抓取网页或 JSON 内容。",
+            "description": "Fetch webpage or JSON content through MCP/direct fallback.",
             "enabled": True,
         },
         {
-            "name": "mcp_list_tools",
+            "name": "tool_list",
             "source": "builtin",
-            "description": "列出当前可用 MCP 工具。",
+            "description": "List available external tools.",
             "enabled": True,
         },
         {
-            "name": "mcp_call_tool",
+            "name": "tool_call",
             "source": "builtin",
-            "description": "按名称调用 MCP 工具（通用入口）。",
+            "description": "Call an external tool by name.",
             "enabled": True,
         },
     ]
+
+
+def _candidate_mcp_urls() -> list[str]:
+    settings = get_settings()
+    rows: list[str] = []
+    default_url = str(settings.mcp_fetch_url or "").strip()
+    maps_url = str(settings.mcp_maps_url or "").strip()
+    if default_url:
+        rows.append(default_url)
+    if maps_url and maps_url not in rows:
+        rows.append(maps_url)
+    return rows
 
 
 async def list_runtime_tool_metas() -> list[ToolMeta]:
@@ -82,17 +115,30 @@ async def list_runtime_tool_metas() -> list[ToolMeta]:
         row["enabled"] = bool(enabled_map.get(key, True))
     if not settings.mcp_fetch_enabled:
         return rows
-    try:
-        mcp_tools = await get_mcp_fetch_client().list_tools()
-    except Exception:
-        return rows
-    for item in filter_allowed_mcp_tools(mcp_tools):
+
+    all_mcp_tools: list[dict[str, Any]] = []
+    for url in _candidate_mcp_urls():
+        try:
+            tools = await get_mcp_fetch_client(url=url).list_tools()
+        except Exception:
+            continue
+        if isinstance(tools, list):
+            all_mcp_tools.extend(tools)
+
+    seen_names: set[str] = set()
+    for item in all_mcp_tools:
         if not isinstance(item, dict):
             continue
         name = str(item.get("name") or "").strip()
         if not name:
             continue
-        desc = str(item.get("description") or "").strip() or "无描述"
+        if not is_mcp_tool_allowed(name):
+            continue
+        normalized = name.lower()
+        if normalized in seen_names:
+            continue
+        seen_names.add(normalized)
+        desc = str(item.get("description") or "").strip() or "no description"
         rows.append(
             {
                 "name": name,

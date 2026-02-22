@@ -227,14 +227,14 @@ export function ChatPage() {
       setStreamingReply(streamBufferRef.current);
     },
     onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["profile"] });
+      await refreshSideData();
       streamBufferRef.current = "";
       if (streamFlushTimerRef.current !== null) {
         window.clearTimeout(streamFlushTimerRef.current);
         streamFlushTimerRef.current = null;
       }
       setStreamingReply("");
-      await queryClient.invalidateQueries({ queryKey: ["profile"] });
-      await refreshSideData();
     },
     onError: (_error, _payload, context) => {
       if (context?.previousHistory) {

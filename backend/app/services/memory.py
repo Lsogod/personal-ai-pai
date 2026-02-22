@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from datetime import datetime, timedelta
 from typing import Any
@@ -15,21 +16,8 @@ from app.models.memory import LongTermMemory
 from app.services.llm import get_llm
 
 VALID_MEMORY_TYPES = {"profile", "preference", "fact", "goal", "project", "constraint"}
-TOKEN_PATTERN = re.compile(r"[\u4e00-\u9fff]+|[a-zA-Z0-9_]{2,}")
-IDENTITY_KEYWORDS = {
-    "nickname",
-    "name",
-    "ai_name",
-    "ai_emoji",
-    "assistant_name",
-    "称呼",
-    "昵称",
-    "名字",
-    "助手名字",
-    "ai名称",
-    "ai表情",
-    "emoji",
-}
+CJK_RUN_PATTERN = re.compile(r"[\u4e00-\u9fff]+")
+ASCII_TOKEN_PATTERN = re.compile(r"[a-zA-Z0-9_]{2,}")
 IDENTITY_MEMORY_KEYS = {
     "preferred_name",
     "nickname",
@@ -37,6 +25,15 @@ IDENTITY_MEMORY_KEYS = {
     "ai_emoji",
     "assistant_name",
 }
+MEMORY_CONSOLIDATE_SCAN_LIMIT = 160
+SEMANTIC_DUPLICATE_THRESHOLD = 0.82
+
+logger = logging.getLogger(__name__)
+
+
+def _is_reserved_identity_memory_type(memory_type: str) -> bool:
+    # Identity/profile fields must stay in User profile as the single source of truth.
+    return (memory_type or "").strip().lower() == "profile"
 
 
 def _parse_json_object(content: str) -> dict[str, Any]:
@@ -66,16 +63,6 @@ def _normalize_key(value: str) -> str:
     return key[:160]
 
 
-def _looks_like_identity_text(value: str) -> bool:
-    text = (value or "").strip().lower()
-    if not text:
-        return False
-    for kw in IDENTITY_KEYWORDS:
-        if kw in text:
-            return True
-    return False
-
-
 def _is_identity_memory_candidate(
     *,
     memory_type: str,
@@ -88,19 +75,20 @@ def _is_identity_memory_candidate(
     key_tail = (memory_key.split(":", 1)[-1] if memory_key else "").strip().lower()
     if key_tail in IDENTITY_MEMORY_KEYS:
         return True
-    if _looks_like_identity_text(memory_key) or _looks_like_identity_text(content):
-        return True
     if memory_type == "profile":
-        nick = (user_nickname or "").strip()
-        ai_name = (user_ai_name or "").strip()
-        ai_emoji = (user_ai_emoji or "").strip()
-        c = (content or "").strip()
-        if nick and nick in c:
-            return True
-        if ai_name and ai_name in c:
-            return True
-        if ai_emoji and ai_emoji in c:
-            return True
+        return True
+    c = (content or "").strip()
+    if not c:
+        return False
+    nick = (user_nickname or "").strip()
+    ai_name = (user_ai_name or "").strip()
+    ai_emoji = (user_ai_emoji or "").strip()
+    if nick and nick in c:
+        return True
+    if ai_name and ai_name in c:
+        return True
+    if ai_emoji and ai_emoji in c:
+        return True
     return False
 
 
@@ -110,7 +98,101 @@ def _build_memory_key(memory_type: str, content: str) -> str:
 
 
 def _tokenize(text: str) -> set[str]:
-    return {token.lower() for token in TOKEN_PATTERN.findall((text or "").strip())}
+    raw = (text or "").strip().lower()
+    if not raw:
+        return set()
+
+    tokens: set[str] = {token for token in ASCII_TOKEN_PATTERN.findall(raw)}
+    for run in CJK_RUN_PATTERN.findall(raw):
+        run = run.strip()
+        if not run:
+            continue
+        if len(run) <= 2:
+            tokens.add(run)
+            continue
+        for i in range(len(run) - 1):
+            tokens.add(run[i : i + 2])
+    return tokens
+
+
+def _semantic_similarity(a: str, b: str) -> float:
+    ta = _tokenize(a)
+    tb = _tokenize(b)
+    if not ta or not tb:
+        return 0.0
+    inter = len(ta & tb)
+    if inter <= 0:
+        return 0.0
+    union = len(ta | tb)
+    return inter / max(1, union)
+
+
+def _parse_ttl_days(value: Any, *, fallback_days: int) -> int:
+    try:
+        ttl = int(value)
+    except Exception:
+        return fallback_days
+    if ttl <= 0:
+        return fallback_days
+    return ttl
+
+
+def _prepare_memory_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    prepared: list[dict[str, Any]] = []
+    for index, raw in enumerate(candidates):
+        if not isinstance(raw, dict):
+            continue
+        prepared.append(
+            {
+                "index": index,
+                "op": str(raw.get("op") or "save").strip().lower(),
+                "memory_type": str(raw.get("memory_type") or "fact").strip().lower(),
+                "key": str(raw.get("key") or "").strip(),
+                "content": str(raw.get("content") or "").strip(),
+                "importance": raw.get("importance"),
+                "confidence": raw.get("confidence"),
+                "ttl_days": raw.get("ttl_days"),
+            }
+        )
+    return prepared
+
+
+def _serialize_existing_memories(rows: list[LongTermMemory]) -> list[dict[str, Any]]:
+    serialized: list[dict[str, Any]] = []
+    for row in rows:
+        serialized.append(
+            {
+                "id": row.id,
+                "memory_type": row.memory_type,
+                "content": row.content,
+                "importance": int(row.importance or 3),
+                "confidence": float(row.confidence or 0.0),
+                "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+                "expires_at": row.expires_at.isoformat() if row.expires_at else "",
+            }
+        )
+    return serialized
+
+
+def _find_semantic_duplicate(
+    *,
+    memory_type: str,
+    content: str,
+    rows: list[LongTermMemory],
+    threshold: float = SEMANTIC_DUPLICATE_THRESHOLD,
+) -> LongTermMemory | None:
+    best_row: LongTermMemory | None = None
+    best_score = 0.0
+    for row in rows:
+        if str(row.memory_type or "").strip().lower() != memory_type:
+            continue
+        score = _semantic_similarity(content, str(row.content or ""))
+        if score > best_score:
+            best_score = score
+            best_row = row
+    if best_row is None or best_score < threshold:
+        return None
+    return best_row
 
 
 def _memory_score(query: str, row: LongTermMemory) -> float:
@@ -121,6 +203,8 @@ def _memory_score(query: str, row: LongTermMemory) -> float:
 
     content_tokens = _tokenize(row.content)
     overlap = len(q_tokens & content_tokens)
+    if overlap <= 0:
+        return 0.0
     overlap_score = overlap / max(1, len(q_tokens))
     importance_score = max(1, min(5, int(row.importance))) / 5
     recency_days = 365.0
@@ -128,6 +212,75 @@ def _memory_score(query: str, row: LongTermMemory) -> float:
         recency_days = max(0.0, (datetime.utcnow() - row.updated_at.replace(tzinfo=None)).days)
     recency_score = 1.0 / (1.0 + recency_days / 30.0)
     return overlap_score * 0.7 + importance_score * 0.2 + recency_score * 0.1
+
+
+async def _llm_select_relevant_memory_ids(
+    *,
+    query: str,
+    rows: list[LongTermMemory],
+    top_k: int,
+) -> list[int]:
+    if not rows or not (query or "").strip():
+        return []
+
+    llm = get_llm(node_name="memory")
+    system = SystemMessage(
+        content=(
+            "You are a memory retriever. Return JSON only as {\"ids\":[...]}. "
+            "Given a user query and candidate memories, select the most relevant memory ids. "
+            "Use semantic meaning (cross-lingual allowed), not only keyword overlap. "
+            "Prioritize stable user preferences/facts/goals over transient noise. "
+            "Return at most top_k ids in relevance order."
+        )
+    )
+    candidates: list[dict[str, Any]] = []
+    for row in rows[:120]:
+        if row.id is None:
+            continue
+        candidates.append(
+            {
+                "id": int(row.id),
+                "memory_type": str(row.memory_type or ""),
+                "content": str(row.content or ""),
+                "importance": int(row.importance or 3),
+                "confidence": float(row.confidence or 0.0),
+                "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+            }
+        )
+    if not candidates:
+        return []
+
+    human = HumanMessage(
+        content=json.dumps(
+            {
+                "query": (query or "").strip(),
+                "top_k": int(max(1, top_k)),
+                "candidates": candidates,
+            },
+            ensure_ascii=False,
+        )
+    )
+    try:
+        response = await llm.ainvoke([system, human])
+        payload = _parse_json_object(str(response.content))
+        raw_ids = payload.get("ids")
+        if not isinstance(raw_ids, list):
+            return []
+        valid_ids = {int(item["id"]) for item in candidates}
+        selected: list[int] = []
+        for rid in raw_ids:
+            try:
+                memory_id = int(rid)
+            except Exception:
+                continue
+            if memory_id not in valid_ids or memory_id in selected:
+                continue
+            selected.append(memory_id)
+            if len(selected) >= max(1, top_k):
+                break
+        return selected
+    except Exception:
+        return []
 
 
 async def extract_memory_candidates(
@@ -138,28 +291,29 @@ async def extract_memory_candidates(
 ) -> list[dict[str, Any]]:
     content = (user_text or "").strip()
     reply = (assistant_text or "").strip()
-    if not content or not reply:
+    if not content:
         return []
 
     llm = get_llm(node_name="memory")
     system = SystemMessage(
         content=(
-            "你是长期记忆提取器。"
-            "请从用户信息中提取对未来对话长期有价值、稳定且可复用的记忆。"
-            "只输出 JSON：{\"memories\":[...]}。"
-            "每项字段：op(memory op: save|delete), memory_type(profile|preference|fact|goal|project|constraint),"
-            " key(可空), content, importance(1-5), confidence(0-1), ttl_days(可空整数)。"
-            "当用户明确表达“请记住/记一下/别忘了”时，应优先提取该长期记忆。"
-            "不要提取昵称、AI 名称、AI 表情、称呼等身份设定，这些属于用户主档案。"
-            "不要保存一次性瞬时信息（例如‘今天中午12点开会一次’）。"
-            "如果没有可保存记忆，返回空数组。"
+            "You are a long-term memory extractor. Return JSON only as {\"memories\":[...]}. "
+            "Extract candidate memories from user_text only. assistant_text is context, not fact source. "
+            "Keep candidates only if they may remain useful after 30 days. "
+            "Preserve user wording and language; do not translate memory content to another language. "
+            "Do not save transient state, one-shot task status, weather snapshots, daily/weekly totals, "
+            "or operational/system/tooling internals. "
+            "Do not save raw database logs; prefer abstracted and reusable user-level semantics. "
+            "Do not output identity/profile memory (nickname/name/assistant name/emoji). "
+            "Each row fields: op(save|delete), memory_type(preference|fact|goal|project|constraint), "
+            "key(optional), content, importance(1-5), confidence(0-1), ttl_days(optional int)."
         )
     )
     human = HumanMessage(
         content=(
-            f"会话摘要:\n{conversation_summary}\n\n"
-            f"用户消息:\n{content}\n\n"
-            f"助手回复:\n{reply}"
+            f"conversation_summary:\n{conversation_summary}\n\n"
+            f"user_text:\n{content}\n\n"
+            f"assistant_text(reference only, not a fact source):\n{reply}"
         )
     )
     try:
@@ -171,6 +325,79 @@ async def extract_memory_candidates(
         return []
 
 
+async def _llm_refine_memory_candidates(
+    *,
+    user_text: str,
+    candidates: list[dict[str, Any]],
+    existing_rows: list[LongTermMemory],
+) -> list[dict[str, Any]]:
+    prepared = _prepare_memory_candidates(candidates)
+    if not prepared:
+        return []
+
+    llm = get_llm(node_name="memory")
+    system = SystemMessage(
+        content=(
+            "You are a memory consolidator. Decide final write operations for long-term memory. "
+            "Admission rule: keep only memories likely useful after 30 days. "
+            "Reject transient state, one-turn context, short-lived reports, tool outputs, and system internals. "
+            "Preserve original user language in content whenever possible; avoid unnecessary translation. "
+            "Use semantic judgment only. "
+            "Deduplicate against existing memories: if semantically the same, update existing memory instead of creating a new one. "
+            "For similar memories with different wording, produce one canonical abstract statement. "
+            "Return JSON only as {\"decisions\":[...]}. "
+            "Each decision fields: index(int), keep(bool), op(save|delete), merge_target_id(optional int), "
+            "memory_type(preference|fact|goal|project|constraint), key(optional), content, "
+            "importance(1-5), confidence(0-1), ttl_days(optional int)."
+        )
+    )
+    human = HumanMessage(
+        content=(
+            f"user_text:\n{(user_text or '').strip()}\n\n"
+            f"candidates_json:\n{json.dumps(prepared, ensure_ascii=False)}\n\n"
+            f"existing_memories_json:\n{json.dumps(_serialize_existing_memories(existing_rows), ensure_ascii=False)}"
+        )
+    )
+    try:
+        response = await llm.ainvoke([system, human])
+        payload = _parse_json_object(str(response.content))
+        decisions = payload.get("decisions")
+    except Exception:
+        return []
+    if not isinstance(decisions, list):
+        return []
+
+    by_index: dict[int, dict[str, Any]] = {}
+    for item in decisions:
+        if not isinstance(item, dict):
+            continue
+        try:
+            idx = int(item.get("index"))
+        except Exception:
+            continue
+        by_index[idx] = item
+
+    refined: list[dict[str, Any]] = []
+    for index, raw in enumerate(candidates):
+        decision = by_index.get(index)
+        if not decision or not bool(decision.get("keep") is True):
+            continue
+        if not isinstance(raw, dict):
+            continue
+        merged = {
+            "op": str(decision.get("op") or raw.get("op") or "save").strip().lower(),
+            "merge_target_id": decision.get("merge_target_id"),
+            "memory_type": _normalize_memory_type(str(decision.get("memory_type") or raw.get("memory_type") or "fact")),
+            "key": str(decision.get("key") or raw.get("key") or "").strip(),
+            "content": str(decision.get("content") or raw.get("content") or "").strip(),
+            "importance": decision.get("importance", raw.get("importance")),
+            "confidence": decision.get("confidence", raw.get("confidence")),
+            "ttl_days": decision.get("ttl_days", raw.get("ttl_days")),
+        }
+        refined.append(merged)
+    return refined
+
+
 async def upsert_long_term_memories(
     session: AsyncSession,
     *,
@@ -178,6 +405,7 @@ async def upsert_long_term_memories(
     conversation_id: int | None,
     source_message_id: int | None,
     candidates: list[dict[str, Any]],
+    user_text: str = "",
     user_nickname: str = "",
     user_ai_name: str = "",
     user_ai_emoji: str = "",
@@ -189,14 +417,36 @@ async def upsert_long_term_memories(
     if not candidates:
         return 0
 
-    processed = 0
     now = datetime.utcnow()
-    for raw in candidates[: max(1, settings.long_term_memory_max_write_items)]:
-        if not isinstance(raw, dict):
-            continue
+    scan_limit = max(settings.long_term_memory_retrieve_scan_limit, MEMORY_CONSOLIDATE_SCAN_LIMIT)
+    existing_stmt = (
+        select(LongTermMemory)
+        .where(
+            LongTermMemory.user_id == user_id,
+            or_(LongTermMemory.expires_at.is_(None), LongTermMemory.expires_at > now),
+        )
+        .order_by(LongTermMemory.updated_at.desc(), LongTermMemory.id.desc())
+        .limit(scan_limit)
+    )
+    existing_rows = list((await session.execute(existing_stmt)).scalars().all())
+    existing_by_id = {int(row.id): row for row in existing_rows if row.id is not None}
+    working_rows = list(existing_rows)
+
+    vetted = await _llm_refine_memory_candidates(
+        user_text=user_text,
+        candidates=candidates,
+        existing_rows=existing_rows,
+    )
+    if not vetted:
+        return 0
+
+    processed = 0
+    for raw in vetted[: max(1, settings.long_term_memory_max_write_items)]:
         op = str(raw.get("op") or "save").strip().lower()
         memory_type = _normalize_memory_type(str(raw.get("memory_type") or "fact"))
         content = str(raw.get("content") or "").strip()
+        if _is_reserved_identity_memory_type(memory_type):
+            continue
         try:
             confidence = float(raw.get("confidence") or 0.0)
         except Exception:
@@ -208,6 +458,12 @@ async def upsert_long_term_memories(
         importance = max(1, min(5, importance))
         raw_key = str(raw.get("key") or "").strip()
         memory_key = _normalize_key(raw_key) or _build_memory_key(memory_type, content)
+        merge_target_id: int | None = None
+        try:
+            if raw.get("merge_target_id") is not None:
+                merge_target_id = int(raw.get("merge_target_id"))
+        except Exception:
+            merge_target_id = None
         if _is_identity_memory_candidate(
             memory_type=memory_type,
             memory_key=memory_key,
@@ -219,16 +475,21 @@ async def upsert_long_term_memories(
             continue
 
         if op == "delete":
-            stmt = select(LongTermMemory).where(
-                LongTermMemory.user_id == user_id,
-                LongTermMemory.memory_key == memory_key,
-                LongTermMemory.is_active.is_(True),
-            )
-            existing = (await session.execute(stmt)).scalar_one_or_none()
+            existing: LongTermMemory | None = None
+            if merge_target_id and merge_target_id in existing_by_id:
+                existing = existing_by_id[merge_target_id]
+            if existing is None:
+                stmt = select(LongTermMemory).where(
+                    LongTermMemory.user_id == user_id,
+                    LongTermMemory.memory_key == memory_key,
+                )
+                existing = (await session.execute(stmt)).scalar_one_or_none()
             if existing:
-                existing.is_active = False
-                existing.updated_at = now
-                session.add(existing)
+                await session.delete(existing)
+                if existing in working_rows:
+                    working_rows.remove(existing)
+                if existing.id is not None:
+                    existing_by_id.pop(int(existing.id), None)
                 processed += 1
             continue
 
@@ -238,49 +499,195 @@ async def upsert_long_term_memories(
         if confidence < settings.long_term_memory_min_confidence:
             continue
 
-        ttl_days = raw.get("ttl_days")
-        expires_at = now + timedelta(days=settings.long_term_memory_default_ttl_days)
-        if isinstance(ttl_days, int) and ttl_days > 0:
-            expires_at = now + timedelta(days=ttl_days)
+        ttl_days = _parse_ttl_days(raw.get("ttl_days"), fallback_days=settings.long_term_memory_default_ttl_days)
+        expires_at = now + timedelta(days=ttl_days)
 
-        stmt = select(LongTermMemory).where(
-            LongTermMemory.user_id == user_id,
-            LongTermMemory.memory_key == memory_key,
-        )
-        existing = (await session.execute(stmt)).scalar_one_or_none()
+        existing: LongTermMemory | None = None
+        if merge_target_id and merge_target_id in existing_by_id:
+            existing = existing_by_id[merge_target_id]
+        if existing is None:
+            stmt = select(LongTermMemory).where(
+                LongTermMemory.user_id == user_id,
+                LongTermMemory.memory_key == memory_key,
+            )
+            existing = (await session.execute(stmt)).scalar_one_or_none()
+        if existing is None:
+            existing = _find_semantic_duplicate(memory_type=memory_type, content=content, rows=working_rows)
+
         if existing:
             existing.memory_type = memory_type
             existing.content = content
             existing.importance = importance
             existing.confidence = confidence
-            existing.is_active = True
             existing.expires_at = expires_at
             existing.conversation_id = conversation_id
             existing.source_message_id = source_message_id
             existing.updated_at = now
             session.add(existing)
+            if existing.id is not None:
+                existing_by_id[int(existing.id)] = existing
+            if existing not in working_rows:
+                working_rows.append(existing)
             processed += 1
             continue
 
-        session.add(
-            LongTermMemory(
-                user_id=user_id,
-                conversation_id=conversation_id,
-                source_message_id=source_message_id,
-                memory_key=memory_key,
-                memory_type=memory_type,
-                content=content,
-                importance=importance,
-                confidence=confidence,
-                is_active=True,
-                expires_at=expires_at,
-            )
+        new_row = LongTermMemory(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            source_message_id=source_message_id,
+            memory_key=memory_key,
+            memory_type=memory_type,
+            content=content,
+            importance=importance,
+            confidence=confidence,
+            expires_at=expires_at,
         )
+        session.add(new_row)
+        working_rows.append(new_row)
         processed += 1
 
     if processed > 0:
         await session.commit()
     return processed
+
+
+async def consolidate_user_long_term_memories(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    max_scan: int = 200,
+) -> dict[str, int]:
+    now = datetime.utcnow()
+    stmt = (
+        select(LongTermMemory)
+        .where(
+            LongTermMemory.user_id == user_id,
+            or_(LongTermMemory.expires_at.is_(None), LongTermMemory.expires_at > now),
+        )
+        .order_by(LongTermMemory.updated_at.desc(), LongTermMemory.id.desc())
+        .limit(max(1, max_scan))
+    )
+    rows_all = list((await session.execute(stmt)).scalars().all())
+    deleted = 0
+    # Legacy cleanup: physically delete rows previously soft-deactivated.
+    for row in rows_all:
+        if bool(getattr(row, "is_active", True)) is False:
+            await session.delete(row)
+            deleted += 1
+    rows = [row for row in rows_all if bool(getattr(row, "is_active", True))]
+    if len(rows) <= 1:
+        if deleted > 0:
+            await session.commit()
+        return {"reviewed": len(rows), "updated": 0, "deleted": deleted, "merged": 0}
+
+    llm = get_llm(node_name="memory")
+    system = SystemMessage(
+        content=(
+            "You are a long-term memory cleaner. Return JSON only as {\"decisions\":[...]}. "
+            "For each memory id, decide whether to keep it. Admission rule: keep only if still useful after 30 days. "
+            "Remove transient state, stale one-shot facts, system-internal statements, and duplicates. "
+            "If duplicate memories exist, keep one canonical memory and set merge_into_id for the others. "
+            "Each decision fields: id(int), keep(bool), merge_into_id(optional int), "
+            "memory_type(preference|fact|goal|project|constraint), content, importance(1-5), confidence(0-1), "
+            "ttl_days(optional int)."
+        )
+    )
+    human = HumanMessage(content=json.dumps({"memories": _serialize_existing_memories(rows)}, ensure_ascii=False))
+    try:
+        response = await llm.ainvoke([system, human])
+        payload = _parse_json_object(str(response.content))
+        decisions = payload.get("decisions")
+    except Exception:
+        logger.exception("memory consolidation llm call failed: user_id=%s", user_id)
+        return {"reviewed": len(rows), "updated": 0, "deleted": deleted, "merged": 0}
+    if not isinstance(decisions, list):
+        return {"reviewed": len(rows), "updated": 0, "deleted": deleted, "merged": 0}
+
+    by_id = {int(row.id): row for row in rows if row.id is not None}
+    updated = 0
+    merged = 0
+
+    # First pass: explicit deletions
+    parsed: list[dict[str, Any]] = []
+    for raw in decisions:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            rid = int(raw.get("id"))
+        except Exception:
+            continue
+        if rid not in by_id:
+            continue
+        parsed.append(raw)
+        keep = bool(raw.get("keep") is True)
+        if not keep:
+            row = by_id[rid]
+            await session.delete(row)
+            deleted += 1
+
+    # Second pass: merges / updates
+    for raw in parsed:
+        rid = int(raw.get("id"))
+        source = by_id.get(rid)
+        if source is None:
+            continue
+        if not bool(raw.get("keep") is True):
+            continue
+        merge_into_id = raw.get("merge_into_id")
+        target: LongTermMemory | None = None
+        try:
+            if merge_into_id is not None:
+                target = by_id.get(int(merge_into_id))
+        except Exception:
+            target = None
+
+        try:
+            importance = int(raw.get("importance") or source.importance or 3)
+        except Exception:
+            importance = int(source.importance or 3)
+        importance = max(1, min(5, importance))
+        try:
+            confidence = float(raw.get("confidence") or source.confidence or 0.0)
+        except Exception:
+            confidence = float(source.confidence or 0.0)
+        ttl_days = _parse_ttl_days(raw.get("ttl_days"), fallback_days=get_settings().long_term_memory_default_ttl_days)
+        expires_at = now + timedelta(days=ttl_days)
+        memory_type = _normalize_memory_type(str(raw.get("memory_type") or source.memory_type or "fact"))
+        content = str(raw.get("content") or source.content or "").strip()[:1000]
+        if not content:
+            continue
+
+        if target is not None and target.id != source.id:
+            target.memory_type = memory_type
+            target.content = content
+            target.importance = importance
+            target.confidence = confidence
+            target.expires_at = expires_at
+            target.updated_at = now
+            session.add(target)
+            updated += 1
+            await session.delete(source)
+            deleted += 1
+            merged += 1
+            continue
+
+        source.memory_type = memory_type
+        source.content = content
+        source.importance = importance
+        source.confidence = confidence
+        source.expires_at = expires_at
+        source.updated_at = now
+        session.add(source)
+        updated += 1
+
+    if updated > 0 or deleted > 0:
+        await session.commit()
+    return {
+        "reviewed": len(rows),
+        "updated": updated,
+        "deleted": deleted,
+        "merged": merged,
+    }
 
 
 async def deactivate_identity_memories_for_user(
@@ -290,7 +697,6 @@ async def deactivate_identity_memories_for_user(
 ) -> int:
     stmt = select(LongTermMemory).where(
         LongTermMemory.user_id == user_id,
-        LongTermMemory.is_active.is_(True),
     )
     rows = list((await session.execute(stmt)).scalars().all())
     if not rows:
@@ -304,9 +710,7 @@ async def deactivate_identity_memories_for_user(
             memory_key=str(row.memory_key or ""),
             content=str(row.content or ""),
         ):
-            row.is_active = False
-            row.updated_at = now
-            session.add(row)
+            await session.delete(row)
             changed += 1
     return changed
 
@@ -329,7 +733,6 @@ async def retrieve_relevant_long_term_memories(
         select(LongTermMemory)
         .where(
             LongTermMemory.user_id == user_id,
-            LongTermMemory.is_active.is_(True),
             or_(LongTermMemory.expires_at.is_(None), LongTermMemory.expires_at > now),
         )
         .order_by(LongTermMemory.importance.desc(), LongTermMemory.updated_at.desc())
@@ -339,9 +742,28 @@ async def retrieve_relevant_long_term_memories(
     if not rows:
         return []
 
-    ranked = sorted(rows, key=lambda item: _memory_score(query, item), reverse=True)[:top_k]
+    scored: list[tuple[LongTermMemory, float]] = [(row, _memory_score(query, row)) for row in rows]
+    query_tokens = _tokenize(query)
+    ranked: list[LongTermMemory] = []
+    if query_tokens:
+        lexical = [item for item in scored if item[1] >= 0.12]
+        if lexical:
+            ranked = [item[0] for item in sorted(lexical, key=lambda pair: pair[1], reverse=True)[:top_k]]
+        else:
+            # Fallback: if user has only a few memories, prefer returning them over empty recall.
+            # This avoids "memory exists but cannot recall" cases when wording/language differs.
+            if len(rows) <= 3:
+                ranked = rows[:top_k]
+    else:
+        ranked = [item[0] for item in sorted(scored, key=lambda pair: pair[1], reverse=True)[:top_k]]
     result: list[dict[str, Any]] = []
     for row in ranked:
+        if _is_identity_memory_candidate(
+            memory_type=str(row.memory_type or ""),
+            memory_key=str(row.memory_key or ""),
+            content=str(row.content or ""),
+        ):
+            continue
         row.last_accessed_at = now
         session.add(row)
         result.append(
@@ -355,3 +777,23 @@ async def retrieve_relevant_long_term_memories(
         )
     await session.commit()
     return result
+
+
+async def deactivate_all_identity_memories(session: AsyncSession) -> int:
+    stmt = select(LongTermMemory)
+    rows = list((await session.execute(stmt)).scalars().all())
+    if not rows:
+        return 0
+
+    changed = 0
+    for row in rows:
+        if _is_identity_memory_candidate(
+            memory_type=str(row.memory_type or ""),
+            memory_key=str(row.memory_key or ""),
+            content=str(row.content or ""),
+        ):
+            await session.delete(row)
+            changed += 1
+    if changed > 0:
+        await session.commit()
+    return changed
