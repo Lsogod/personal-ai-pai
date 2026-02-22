@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import get_settings
 from app.graph.atomic_actions import build_atomic_action_catalog, resolve_atomic_action_plan
+from app.graph.atomic_executor import execute_direct_atomic_action
 from app.graph.context import render_conversation_context
 from app.graph.nodes.chat_manager import chat_manager_node
 from app.graph.nodes.help_center import help_center_node
@@ -484,6 +485,14 @@ async def _execute_step(
     message = base_state["message"]
 
     if action.startswith("atomic."):
+        direct = await execute_direct_atomic_action(
+            action=action,
+            args=(resolved_args if isinstance(resolved_args, dict) else {}),
+            state=base_state,
+        )
+        if direct is not None:
+            return direct
+
         execution_plan = resolve_atomic_action_plan(
             action=action,
             args=(resolved_args if isinstance(resolved_args, dict) else {}),
