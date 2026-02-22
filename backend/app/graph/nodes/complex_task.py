@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import get_settings
+from app.graph.atomic_actions import build_atomic_action_catalog, resolve_atomic_action_plan
 from app.graph.context import render_conversation_context
 from app.graph.nodes.chat_manager import chat_manager_node
 from app.graph.nodes.help_center import help_center_node
@@ -49,7 +50,7 @@ class PlanStep(BaseModel):
 
 class ComplexTaskPlan(BaseModel):
     goal: str = Field(default="")
-    steps: list[PlanStep] = Field(default_factory=list, min_length=1, max_length=20)
+    steps: list[PlanStep] = Field(default_factory=list, min_length=1, max_length=24)
     final_response_style: str = Field(default="concise")
 
 
@@ -190,38 +191,6 @@ def _validate_plan(plan: ComplexTaskPlan) -> tuple[bool, str]:
     return True, ""
 
 
-def _build_action_catalog(runtime_tools: list[dict[str, Any]]) -> list[dict[str, str]]:
-    rows: list[dict[str, str]] = []
-    for node_name in sorted(NODE_ACTIONS.keys()):
-        rows.append(
-            {
-                "action": f"node.{node_name}",
-                "description": "Execute this domain node with args.input as the user message.",
-            }
-        )
-    for tool in runtime_tools:
-        source = str(tool.get("source") or "").strip().lower()
-        name = str(tool.get("name") or "").strip()
-        if not name:
-            continue
-        rows.append(
-            {
-                "action": f"tool.{name}",
-                "description": f"Call runtime tool `{name}` (source={source}).",
-            }
-        )
-    rows.append(
-        {
-            "action": "logic.weather_rain_check",
-            "description": (
-                "Determine whether precipitation is expected from weather output. "
-                "args supports weather_step|weather_output, target_date, period(day|night|afternoon|evening)."
-            ),
-        }
-    )
-    return rows
-
-
 async def _plan_complex_task(
     *,
     content: str,
@@ -244,10 +213,13 @@ async def _plan_complex_task(
             "Plan rules:\n"
             "1) Each step has unique step_id.\n"
             "2) Use only actions from the provided action catalog.\n"
+            "   Prefer atomic.* actions first for business operations.\n"
+            "   Use tool.* actions for direct runtime tool calls.\n"
+            "   Use node.* actions only as fallback handoff when no atomic action fits.\n"
             "3) Use depends_on for ordering.\n"
             "4) For conditional branching, use when={step_id, field, equals}.\n"
             "5) Use args placeholders to pass results, format: $<step_id> or $<step_id>.<field_path>.\n"
-            "6) Keep total steps <= 8.\n"
+            "6) Keep total steps <= 12.\n"
             "7) Prefer tool evidence first, then business actions, then synthesis by the engine.\n"
             "8) Never fabricate tool outputs.\n"
             "9) For weather tools that require city/adcode, use city/adcode only when explicitly provided "
@@ -510,6 +482,58 @@ async def _execute_step(
     resolved_args = _resolve_value(step.args, step_outputs)
     action = step.action.strip()
     message = base_state["message"]
+
+    if action.startswith("atomic."):
+        execution_plan = resolve_atomic_action_plan(
+            action=action,
+            args=(resolved_args if isinstance(resolved_args, dict) else {}),
+            fallback_input=str(message.content or "").strip(),
+        )
+        if execution_plan is None:
+            raise RuntimeError(f"unsupported atomic action: {action}")
+        if str(execution_plan.get("kind") or "") == "node":
+            node_action = str(execution_plan.get("node_action") or "").strip()
+            node_content = str(execution_plan.get("content") or "").strip() or str(message.content or "").strip()
+            responses, node_extra = await _execute_node_handoff(
+                node_action=node_action,
+                base_state=base_state,
+                content=node_content,
+            )
+            return {
+                "kind": "atomic.node",
+                "action": action,
+                "node_action": node_action,
+                "input": node_content,
+                "responses": responses,
+                "response_text": "\n".join(responses),
+                "extra": node_extra,
+            }
+        if str(execution_plan.get("kind") or "") == "tool":
+            tool_source = str(execution_plan.get("tool_source") or "builtin").strip().lower()
+            tool_name = str(execution_plan.get("tool_name") or "").strip()
+            tool_args = execution_plan.get("tool_args")
+            if not isinstance(tool_args, dict):
+                tool_args = {}
+            result = await execute_capability_with_usage(
+                source=tool_source,
+                name=tool_name,
+                args=tool_args,
+                user_id=int(base_state.get("user_id") or 0),
+                platform=str(message.platform or "unknown"),
+                conversation_id=int(base_state.get("conversation_id") or 0),
+            )
+            if not result["ok"]:
+                raise RuntimeError(str(result.get("error") or f"atomic tool `{tool_name}` failed"))
+            return {
+                "kind": "atomic.tool",
+                "action": action,
+                "tool": tool_name,
+                "source": tool_source,
+                "arguments": tool_args,
+                "output": str(result.get("output") or ""),
+                "latency_ms": int(result.get("latency_ms") or 0),
+            }
+        raise RuntimeError(f"invalid atomic execution plan: {action}")
 
     if action.startswith("node."):
         node_name = action.split(".", 1)[1].strip().lower()

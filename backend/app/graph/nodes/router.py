@@ -123,6 +123,13 @@ async def router_node(state: GraphState) -> GraphState:
     if not content and not message.image_urls:
         return {**state, "intent": "chat_manager"}
 
+    command_route = route_command_intent(
+        content=content,
+        has_images=bool(message.image_urls),
+    )
+    if command_route:
+        return {**state, "intent": command_route}
+
     has_pending = False
     if user_id > 0 and conversation_id > 0:
         has_pending = await has_pending_ledger(user_id, conversation_id)
@@ -138,30 +145,18 @@ async def router_node(state: GraphState) -> GraphState:
     except Exception:
         runtime_tools = ""
 
-    try:
-        intent = await _classify_intent_with_llm(
-            content=content,
-            has_image=bool(message.image_urls),
-            has_pending_ledger=has_pending,
-            conversation_context=context_text,
-            runtime_tools=runtime_tools,
-        )
-    except Exception:
-        intent = "unknown"
-
-    if intent in {"ledger_manager", "schedule_manager", "chat_manager", "help_center", "unknown"}:
-        try:
-            use_complex = await _should_route_complex_with_llm(
-                content=content,
-                conversation_context=context_text,
-                primary_intent=intent,
-            )
-            if use_complex:
-                return {**state, "intent": "complex_task"}
-        except Exception:
-            pass
-
-    return {**state, "intent": intent}
+    # Unified-agent mode:
+    # Natural language is handled by complex_task first, where planner picks atomic tools/actions.
+    # /xxx commands are already short-circuited above.
+    # Keep current context/runtime metadata available for downstream observability.
+    extra = dict(state.get("extra") or {})
+    extra["router"] = {
+        "has_pending_ledger": has_pending,
+        "runtime_tools": runtime_tools,
+        "conversation_context_preview": context_text[:500],
+        "routing_mode": "unified_complex_task",
+    }
+    return {**state, "intent": "complex_task", "extra": extra}
 
 
 def route_intent(state: GraphState) -> str:
