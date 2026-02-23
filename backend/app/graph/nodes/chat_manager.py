@@ -10,7 +10,6 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
 
@@ -21,21 +20,18 @@ from app.graph.state import GraphState
 from app.models.user import User
 from app.services.commands.chat import execute_chat_command, parse_chat_command
 from app.services.audit import log_event
-from app.services.admin_tools import is_tool_enabled
 from app.services.llm import get_llm
-from app.services.mcp_fetch import MCPFetchError, get_mcp_fetch_client
 from app.services.runtime_context import get_session
 from app.services.skills import load_skills
-from app.services.tool_registry import (
-    filter_allowed_mcp_tools,
-    get_allowed_mcp_tool_names,
-    is_mcp_tool_allowed,
-    list_runtime_tool_metas,
-)
+from app.services.langchain_tools import ToolInvocationContext
+from app.services.toolsets import build_node_langchain_tools, invoke_node_tool
+from app.services.tool_registry import list_runtime_tool_metas
 from app.services.usage import log_tool_usage
 
 URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 VALID_CHAT_KINDS = {"general", "time", "external", "weather", "tooling", "unknown"}
+IDENTITY_USER_PATTERN = re.compile(r"(我是谁|我叫什么|who\s+am\s+i)", re.IGNORECASE)
+IDENTITY_ASSISTANT_PATTERN = re.compile(r"(你是谁|你叫什么|who\s+are\s+you)", re.IGNORECASE)
 
 
 class ChatClassificationExtraction(BaseModel):
@@ -196,17 +192,6 @@ def _parse_json_object(text: str) -> dict[str, Any]:
         return {}
 
 
-def _format_mcp_tools(tools: list[dict]) -> str:
-    if not tools:
-        return "当前 MCP 服务未返回可用工具。"
-    lines = ["系统级 MCP 工具："]
-    for item in tools:
-        name = str(item.get("name") or "").strip() or "unknown"
-        desc = str(item.get("description") or "").strip() or "无描述"
-        lines.append(f"- `{name}`: {desc}")
-    return "\n".join(lines)
-
-
 def _format_runtime_tool_catalog(tools: list[dict]) -> str:
     if not tools:
         return "无可用工具。"
@@ -241,35 +226,29 @@ def _render_time_reply(content: str) -> str:
     return f"当前时间（{tz}）：{now.strftime('%Y-%m-%d %H:%M:%S')}"
 
 
-def _render_now_time_tool_like_text(timezone: str = "Asia/Shanghai") -> str:
-    tz = (timezone or "").strip() or "Asia/Shanghai"
-    try:
-        now = datetime.now(ZoneInfo(tz))
-        return f"{tz} 当前时间: {now.strftime('%Y-%m-%d %H:%M:%S')}"
-    except Exception:
-        now = datetime.utcnow()
-        return f"UTC 当前时间: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+def _detect_identity_query(content: str) -> tuple[bool, bool]:
+    text = (content or "").strip()
+    if not text:
+        return False, False
+    ask_user = bool(IDENTITY_USER_PATTERN.search(text))
+    ask_assistant = bool(IDENTITY_ASSISTANT_PATTERN.search(text))
+    return ask_user, ask_assistant
 
 
-def _pick_mcp_weather_tool_name() -> str:
-    allowed = sorted(get_allowed_mcp_tool_names())
-    if not allowed:
-        return "maps_weather"
-    if "maps_weather" in allowed:
-        return "maps_weather"
-    return allowed[0]
-
-
-async def _fetch_weather_via_mcp(location: str) -> tuple[str, str]:
-    city = (location or "").strip() or "Wuhan"
-    tool_name = _pick_mcp_weather_tool_name()
-    if not is_mcp_tool_allowed(tool_name):
-        raise MCPFetchError(f"weather tool `{tool_name}` is blocked by allowlist")
-    output = await get_mcp_fetch_client().call_tool(
-        name=tool_name,
-        arguments={"city": city},
-    )
-    return output, f"mcp:{tool_name}?city={quote(city)}"
+def _render_identity_reply(*, user: User, ask_user: bool, ask_assistant: bool) -> str:
+    lines: list[str] = []
+    if ask_user:
+        nickname = str(user.nickname or "").strip()
+        if nickname:
+            lines.append(f"你叫{nickname}。")
+        else:
+            lines.append("我这边还没有记录你的昵称，你可以说“以后叫我xxx”。")
+    if ask_assistant:
+        ai_name = str(user.ai_name or "").strip() or "AI 助手"
+        ai_emoji = str(user.ai_emoji or "").strip()
+        suffix = f" {ai_emoji}" if ai_emoji else ""
+        lines.append(f"我是{ai_name}{suffix}。")
+    return "\n".join(lines).strip()
 
 
 async def _answer_with_fetched_content(
@@ -346,322 +325,66 @@ def _build_chat_tools(
     platform: str,
     conversation_id: int | None,
 ) -> list:
-    @tool("now_time")
-    async def now_time_tool(timezone: str = "Asia/Shanghai") -> str:
-        """Get current local time by timezone name, for example: Asia/Shanghai."""
-        start = time.perf_counter()
-        args = {"timezone": timezone}
-        if not await is_tool_enabled("builtin", "now_time"):
-            text = "工具 now_time 已被管理员停用。"
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name="now_time",
-                tool_source="builtin",
-                arguments=args,
-                ok=False,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                error=text,
-            )
-            return text
-        tz = (timezone or "").strip() or "Asia/Shanghai"
-        text = _render_now_time_tool_like_text(tz)
+    return build_node_langchain_tools(
+        context=ToolInvocationContext(
+            user_id=user_id,
+            platform=platform,
+            conversation_id=conversation_id,
+            audit_hook=_audit_tool_call_bridge(user_id, platform, conversation_id),
+        ),
+        node_name="chat_manager",
+    )
+
+
+async def _invoke_chat_tool(
+    *,
+    user_id: int | None,
+    platform: str,
+    conversation_id: int | None,
+    tool_name: str,
+    args: dict[str, Any] | None = None,
+) -> str:
+    return await invoke_node_tool(
+        context=ToolInvocationContext(
+            user_id=user_id,
+            platform=platform,
+            conversation_id=conversation_id,
+            audit_hook=_audit_tool_call_bridge(user_id, platform, conversation_id),
+        ),
+        node_name="chat_manager",
+        tool_name=tool_name,
+        args=dict(args or {}),
+    )
+
+
+def _audit_tool_call_bridge(
+    user_id: int | None,
+    platform: str,
+    conversation_id: int | None,
+):
+    async def _audit_bridge(
+        source: str,
+        name: str,
+        args: dict[str, Any],
+        ok: bool,
+        latency_ms: int,
+        output: str,
+        error: str,
+    ) -> None:
         await _audit_tool_call(
             user_id=user_id,
             platform=platform,
             conversation_id=conversation_id,
-            tool_name="now_time",
-            tool_source="builtin",
+            tool_name=name,
+            tool_source=source,
             arguments=args,
-            ok=True,
-            latency_ms=int((time.perf_counter() - start) * 1000),
-            result_preview=text,
+            ok=ok,
+            latency_ms=latency_ms,
+            result_preview=output,
+            error=error,
         )
-        return text
 
-    @tool("mcp_list_tools")
-    async def mcp_list_tools_tool() -> str:
-        """List all system MCP tools and their descriptions."""
-        start = time.perf_counter()
-        args: dict[str, Any] = {}
-        if not await is_tool_enabled("builtin", "mcp_list_tools"):
-            text = "工具 mcp_list_tools 已被管理员停用。"
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name="mcp_list_tools",
-                tool_source="builtin",
-                arguments=args,
-                ok=False,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                error=text,
-            )
-            return text
-        settings = get_settings()
-        if not settings.mcp_fetch_enabled:
-            text = "MCP 未启用。"
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name="mcp_list_tools",
-                tool_source="builtin",
-                arguments=args,
-                ok=False,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                error=text,
-            )
-            return text
-        try:
-            tools = await get_mcp_fetch_client().list_tools()
-            tools = filter_allowed_mcp_tools(tools)
-            text = _format_mcp_tools(tools)
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name="mcp_list_tools",
-                tool_source="builtin",
-                arguments=args,
-                ok=True,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                result_preview=text,
-            )
-            return text
-        except Exception as exc:
-            err = f"MCP 工具列表获取失败：{exc}"
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name="mcp_list_tools",
-                tool_source="builtin",
-                arguments=args,
-                ok=False,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                error=err,
-            )
-            return err
-
-    @tool("mcp_call_tool")
-    async def mcp_call_tool_tool(tool_name: str, arguments_json: str = "{}") -> str:
-        """Call any MCP tool by tool name and JSON arguments string."""
-        start = time.perf_counter()
-        settings = get_settings()
-        audit_args = {"tool_name": tool_name, "arguments_json": arguments_json}
-        if not await is_tool_enabled("builtin", "mcp_call_tool"):
-            text = "工具 mcp_call_tool 已被管理员停用。"
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name="mcp_call_tool",
-                tool_source="builtin",
-                arguments=audit_args,
-                ok=False,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                error=text,
-            )
-            return text
-        if not settings.mcp_fetch_enabled:
-            text = "MCP 未启用。"
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name="mcp_call_tool",
-                tool_source="builtin",
-                arguments=audit_args,
-                ok=False,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                error=text,
-            )
-            return text
-        name = (tool_name or "").strip()
-        if not name:
-            text = "调用失败：缺少 tool_name。"
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name="mcp_call_tool",
-                tool_source="builtin",
-                arguments=audit_args,
-                ok=False,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                error=text,
-            )
-            return text
-        if not is_mcp_tool_allowed(name):
-            allowed = sorted(get_allowed_mcp_tool_names())
-            allowed_text = ", ".join(allowed) if allowed else "none"
-            text = f"MCP tool `{name}` is blocked by allowlist. Allowed tools: {allowed_text}."
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name=name,
-                tool_source="mcp",
-                arguments=audit_args,
-                ok=False,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                error=text,
-            )
-            return text
-        args = _parse_json_object(arguments_json)
-        if not await is_tool_enabled("mcp", name):
-            text = f"MCP 工具 `{name}` 已被管理员停用。"
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name=name,
-                tool_source="mcp",
-                arguments=args,
-                ok=False,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                error=text,
-            )
-            return text
-        try:
-            output = await get_mcp_fetch_client().call_tool(name=name, arguments=args)
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name=name,
-                tool_source="mcp",
-                arguments={"tool_name": name, "arguments": args},
-                ok=True,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                result_preview=output,
-            )
-            return output
-        except Exception as exc:
-            err = f"MCP 工具调用失败：{exc}"
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name=name,
-                tool_source="mcp",
-                arguments={"tool_name": name, "arguments": args},
-                ok=False,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                error=err,
-            )
-            return err
-
-    @tool("fetch_url")
-    async def fetch_url_tool(
-        url: str,
-        max_length: int = 5000,
-        start_index: int = 0,
-        raw: bool = False,
-    ) -> str:
-        """Fetch and extract URL content via MCP fetch tool."""
-        start = time.perf_counter()
-        settings = get_settings()
-        audit_args = {
-            "url": url,
-            "max_length": max_length,
-            "start_index": start_index,
-            "raw": raw,
-        }
-        if not await is_tool_enabled("builtin", "fetch_url"):
-            text = "工具 fetch_url 已被管理员停用。"
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name="fetch_url",
-                tool_source="builtin",
-                arguments=audit_args,
-                ok=False,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                error=text,
-            )
-            return text
-        if not settings.mcp_fetch_enabled:
-            text = "MCP 未启用。"
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name="fetch_url",
-                tool_source="builtin",
-                arguments=audit_args,
-                ok=False,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                error=text,
-            )
-            return text
-        target = (url or "").strip()
-        if not target:
-            text = "抓取失败：缺少 URL。"
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name="fetch_url",
-                tool_source="builtin",
-                arguments=audit_args,
-                ok=False,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                error=text,
-            )
-            return text
-        max_length = max(500, min(20000, int(max_length or settings.mcp_fetch_default_max_length)))
-        start_index = max(0, int(start_index or 0))
-        raw = bool(raw)
-        audit_args = {
-            "url": target,
-            "max_length": max_length,
-            "start_index": start_index,
-            "raw": raw,
-        }
-        try:
-            output = await get_mcp_fetch_client().fetch(
-                url=target,
-                max_length=max_length,
-                start_index=start_index,
-                raw=raw,
-            )
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name="fetch_url",
-                tool_source="builtin",
-                arguments=audit_args,
-                ok=True,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                result_preview=output,
-            )
-            return output
-        except Exception as exc:
-            err = f"抓取失败：{exc}"
-            await _audit_tool_call(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                tool_name="fetch_url",
-                tool_source="builtin",
-                arguments=audit_args,
-                ok=False,
-                latency_ms=int((time.perf_counter() - start) * 1000),
-                error=err,
-            )
-            return err
-
-    return [
-        now_time_tool,
-        mcp_list_tools_tool,
-        mcp_call_tool_tool,
-        fetch_url_tool,
-    ]
+    return _audit_bridge
 
 
 def _extract_ai_text_from_messages(messages: list[Any]) -> str:
@@ -820,36 +543,23 @@ async def _weather_fallback_fetch_and_answer(
     skills: str,
     weather_location: str,
 ) -> str | None:
-    settings = get_settings()
-    if not settings.mcp_fetch_enabled:
-        return None
     location = (weather_location or "").strip() or "Wuhan"
-    tool_name = _pick_mcp_weather_tool_name()
-    start = time.perf_counter()
     try:
-        fetched, source_url = await _fetch_weather_via_mcp(location)
-        now_time_text = _render_now_time_tool_like_text(get_settings().timezone)
-        await _audit_tool_call(
+        fetched = await _invoke_chat_tool(
             user_id=user.id,
             platform=platform,
             conversation_id=conversation_id,
-            tool_name=tool_name,
-            tool_source="mcp",
-            arguments={"city": location},
-            ok=True,
-            latency_ms=int((time.perf_counter() - start) * 1000),
-            result_preview=fetched,
+            tool_name="maps_weather",
+            args={"city": location},
         )
-        await _audit_tool_call(
+        if "not available" in fetched.lower() or "调用失败" in fetched:
+            return None
+        now_time_text = await _invoke_chat_tool(
             user_id=user.id,
             platform=platform,
             conversation_id=conversation_id,
             tool_name="now_time",
-            tool_source="builtin",
-            arguments={"timezone": get_settings().timezone},
-            ok=True,
-            latency_ms=0,
-            result_preview=now_time_text,
+            args={"timezone": get_settings().timezone},
         )
         return await _answer_weather_with_time_context(
             user=user,
@@ -858,20 +568,9 @@ async def _weather_fallback_fetch_and_answer(
             skills=skills,
             now_time_text=now_time_text,
             weather_output=fetched,
-            source_url=source_url,
+            source_url=f"mcp:maps_weather?city={quote(location)}",
         )
-    except Exception as exc:
-        await _audit_tool_call(
-            user_id=user.id,
-            platform=platform,
-            conversation_id=conversation_id,
-            tool_name=tool_name,
-            tool_source="mcp",
-            arguments={"city": location},
-            ok=False,
-            latency_ms=int((time.perf_counter() - start) * 1000),
-            error=str(exc),
-        )
+    except Exception:
         return None
 
 
@@ -883,6 +582,13 @@ async def chat_manager_node(state: GraphState) -> GraphState:
         return {**state, "responses": ["未找到用户信息。"]}
 
     content = (message.content or "").strip()
+    ask_user, ask_assistant = _detect_identity_query(content)
+    if ask_user or ask_assistant:
+        return {
+            **state,
+            "responses": [_render_identity_reply(user=user, ask_user=ask_user, ask_assistant=ask_assistant)],
+        }
+
     context_text = render_conversation_context(state)
     skills = await load_skills(
         session=session,
@@ -902,10 +608,13 @@ async def chat_manager_node(state: GraphState) -> GraphState:
 
         async def _on_mcp_list() -> str:
             try:
-                tools = await get_mcp_fetch_client().list_tools()
-                tools = filter_allowed_mcp_tools(tools)
-                return _format_mcp_tools(tools)
-            except MCPFetchError as exc:
+                return await _invoke_chat_tool(
+                    user_id=user.id,
+                    platform=(message.platform or "unknown"),
+                    conversation_id=state.get("conversation_id"),
+                    tool_name="mcp_list_tools",
+                )
+            except Exception as exc:
                 return f"MCP 工具列表获取失败：{exc}"
 
         async def _on_fetch() -> str:
@@ -913,7 +622,13 @@ async def chat_manager_node(state: GraphState) -> GraphState:
             if not url:
                 return "请提供要抓取的网址，例如：`/fetch https://example.com`。"
             try:
-                fetched = await get_mcp_fetch_client().fetch(url=url)
+                fetched = await _invoke_chat_tool(
+                    user_id=user.id,
+                    platform=(message.platform or "unknown"),
+                    conversation_id=state.get("conversation_id"),
+                    tool_name="fetch_url",
+                    args={"url": url},
+                )
                 return await _answer_with_fetched_content(
                     user=user,
                     content=content,
@@ -922,23 +637,37 @@ async def chat_manager_node(state: GraphState) -> GraphState:
                     fetched_markdown=fetched,
                     source_url=url,
                 )
-            except MCPFetchError as exc:
+            except Exception as exc:
                 return f"网页抓取失败：{exc}"
 
         async def _on_weather(location_arg: str) -> str:
             location = location_arg or "Wuhan"
             try:
-                fetched, source_url = await _fetch_weather_via_mcp(location)
+                fetched = await _invoke_chat_tool(
+                    user_id=user.id,
+                    platform=(message.platform or "unknown"),
+                    conversation_id=state.get("conversation_id"),
+                    tool_name="maps_weather",
+                    args={"city": location},
+                )
+                if "not available" in fetched.lower() or "调用失败" in fetched:
+                    return f"天气抓取失败：{fetched}"
                 return await _answer_weather_with_time_context(
                     user=user,
                     content=content,
                     context_text=context_text,
                     skills=skills,
-                    now_time_text=_render_now_time_tool_like_text(get_settings().timezone),
+                    now_time_text=await _invoke_chat_tool(
+                        user_id=user.id,
+                        platform=(message.platform or "unknown"),
+                        conversation_id=state.get("conversation_id"),
+                        tool_name="now_time",
+                        args={"timezone": get_settings().timezone},
+                    ),
                     weather_output=fetched,
-                    source_url=source_url,
+                    source_url=f"mcp:maps_weather?city={quote(location)}",
                 )
-            except MCPFetchError as exc:
+            except Exception as exc:
                 return f"天气抓取失败：{exc}"
 
         cmd_text = await execute_chat_command(

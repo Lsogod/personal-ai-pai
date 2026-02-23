@@ -93,6 +93,12 @@ from app.tools.finance import delete_ledger, insert_ledger, query_stats, update_
 from app.services.realtime import get_notification_hub
 from app.services.scheduler import get_scheduler
 from app.services.scheduler_tasks import send_reminder_job
+from app.services.runtime_context import (
+    set_llm_streamer,
+    reset_llm_streamer,
+    set_llm_stream_nodes,
+    reset_llm_stream_nodes,
+)
 
 
 router = APIRouter(prefix="/api")
@@ -636,9 +642,88 @@ async def _sse_stream(text: str):
     chunk_size = 32
     for i in range(0, len(text), chunk_size):
         chunk = text[i : i + chunk_size]
-        yield f"data: {chunk}\n\n"
-        await asyncio.sleep(0.03)
-    yield "data: [DONE]\n\n"
+        payload = json.dumps({"chunk": chunk}, ensure_ascii=False)
+        yield f"data: {payload}\n\n"
+        await asyncio.sleep(0.01)
+    yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+
+
+def _iter_text_chunks(text: str, *, chunk_size: int = 32):
+    size = max(1, int(chunk_size))
+    for i in range(0, len(text), size):
+        yield text[i : i + size]
+
+
+async def _sse_stream_live(
+    *,
+    source_platform: str,
+    normalized: dict,
+    session: AsyncSession,
+):
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    streamed_chunks: list[str] = []
+    result_holder: dict[str, dict] = {}
+    error_holder: dict[str, str] = {}
+
+    async def _on_stream_chunk(chunk: str) -> None:
+        if not chunk:
+            return
+        streamed_chunks.append(chunk)
+        await queue.put(chunk)
+
+    async def _runner() -> None:
+        streamer_token = set_llm_streamer(_on_stream_chunk)
+        # Stream only final natural-language generation nodes; avoid leaking
+        # structured-classifier/planner JSON fragments.
+        stream_nodes_token = set_llm_stream_nodes({"chat_manager", "help_center"})
+        try:
+            result_holder["result"] = await handle_message(source_platform, normalized, session)
+        except Exception as exc:
+            error_holder["error"] = str(exc)
+        finally:
+            reset_llm_stream_nodes(stream_nodes_token)
+            reset_llm_streamer(streamer_token)
+            await queue.put(None)
+
+    task = asyncio.create_task(_runner())
+    try:
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            payload = json.dumps({"chunk": item}, ensure_ascii=False)
+            yield f"data: {payload}\n\n"
+
+        await task
+        if error_holder.get("error"):
+            payload = json.dumps({"error": error_holder["error"], "done": True}, ensure_ascii=False)
+            yield f"data: {payload}\n\n"
+            return
+
+        result = result_holder.get("result") or {}
+        if not result.get("ok"):
+            err_text = str(result.get("error") or "failed")
+            payload = json.dumps({"error": err_text, "done": True}, ensure_ascii=False)
+            yield f"data: {payload}\n\n"
+            return
+
+        responses = result.get("responses") or []
+        joined = "\n".join(responses)
+        streamed_text = "".join(streamed_chunks)
+        if joined and not streamed_text:
+            for chunk in _iter_text_chunks(joined, chunk_size=32):
+                payload = json.dumps({"chunk": chunk}, ensure_ascii=False)
+                yield f"data: {payload}\n\n"
+        elif joined and streamed_text and joined.startswith(streamed_text):
+            suffix = joined[len(streamed_text) :]
+            for chunk in _iter_text_chunks(suffix, chunk_size=32):
+                payload = json.dumps({"chunk": chunk}, ensure_ascii=False)
+                yield f"data: {payload}\n\n"
+
+        yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+    finally:
+        if not task.done():
+            task.cancel()
 
 
 @router.post("/chat/send")
@@ -680,15 +765,13 @@ async def chat_send(
         "raw_data": {"source_platform": source_platform},
     }
 
-    result = await handle_message(source_platform, normalized, session)
-    if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error", "failed"))
-    responses = result.get("responses") or []
-    joined = "\n".join(responses)
-
     if stream:
         return StreamingResponse(
-            _sse_stream(joined),
+            _sse_stream_live(
+                source_platform=source_platform,
+                normalized=normalized,
+                session=session,
+            ),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -696,6 +779,11 @@ async def chat_send(
                 "X-Accel-Buffering": "no",
             },
         )
+
+    result = await handle_message(source_platform, normalized, session)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "failed"))
+    responses = result.get("responses") or []
 
     return ChatSendResponse(responses=responses)
 

@@ -1,35 +1,29 @@
 import json
 import re
-import time as _time
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.graph.context import render_conversation_context
+from app.graph.prompts.ledger_manager_prompts import (
+    build_ledger_intent_messages,
+    build_ledger_pending_selection_messages,
+)
 from app.graph.state import GraphState
 from app.models.ledger import Ledger
 from app.models.user import User
+from app.services.langchain_tools import ToolInvocationContext
 from app.services.llm import get_llm
 from app.services.runtime_context import get_session
-from app.services.usage import log_tool_usage
+from app.services.toolsets import invoke_node_tool
 from app.services.ledger_pending import (
     clear_pending_ledger,
     get_pending_ledger,
     set_pending_ledger,
 )
-from app.tools.finance import (
-    delete_ledger,
-    get_latest_ledger,
-    insert_ledger,
-    list_recent_ledgers,
-    update_ledger,
-)
-from app.tools.ledger_text2sql import try_execute_ledger_text2sql as _raw_text2sql
-from app.tools.vision import analyze_receipt as _raw_analyze_receipt
 
 
 async def _tracked_analyze_receipt(
@@ -39,34 +33,31 @@ async def _tracked_analyze_receipt(
     platform: str = "",
     conversation_id: int | None = None,
 ) -> dict[str, Any]:
-    """analyze_receipt 的用量追踪包装。"""
-    started = _time.perf_counter()
-    try:
-        result = await _raw_analyze_receipt(image_ref)
-        ok = float(result.get("confidence") or 0) > 0
-        await log_tool_usage(
+    output = await invoke_node_tool(
+        context=ToolInvocationContext(
             user_id=user_id,
-            platform=platform,
+            platform=platform or "unknown",
             conversation_id=conversation_id,
-            tool_source="builtin",
-            tool_name="analyze_receipt",
-            success=ok,
-            latency_ms=int((_time.perf_counter() - started) * 1000),
-            error=str(result.get("reason") or "") if not ok else "",
-        )
-        return result
-    except Exception as exc:
-        await log_tool_usage(
-            user_id=user_id,
-            platform=platform,
-            conversation_id=conversation_id,
-            tool_source="builtin",
-            tool_name="analyze_receipt",
-            success=False,
-            latency_ms=int((_time.perf_counter() - started) * 1000),
-            error=str(exc)[:500],
-        )
-        raise
+        ),
+        node_name="ledger_manager",
+        tool_name="analyze_receipt",
+        args={"image_ref": image_ref},
+    )
+    if _looks_like_tool_error(output):
+        raise RuntimeError(output)
+    payload = _parse_json_object(str(output or ""))
+    if payload:
+        return payload
+    return {
+        "image_type": "other",
+        "confidence": 0.0,
+        "amount": None,
+        "amount_candidates": [],
+        "category": "其他",
+        "item": "消费",
+        "merchant": "",
+        "reason": str(output or ""),
+    }
 
 
 async def _tracked_text2sql(
@@ -77,44 +68,43 @@ async def _tracked_text2sql(
     platform: str = "",
     conversation_id: int | None = None,
 ) -> str | None:
-    """try_execute_ledger_text2sql 的用量追踪包装。"""
-    started = _time.perf_counter()
-    try:
-        result = await _raw_text2sql(
+    output = await invoke_node_tool(
+        context=ToolInvocationContext(
             user_id=user_id,
-            message=message,
-            conversation_context=conversation_context,
-        )
-        await log_tool_usage(
-            user_id=user_id,
-            platform=platform,
+            platform=platform or "unknown",
             conversation_id=conversation_id,
-            tool_source="builtin",
-            tool_name="ledger_text2sql",
-            success=result is not None,
-            latency_ms=int((_time.perf_counter() - started) * 1000),
-        )
-        return result
-    except Exception as exc:
-        await log_tool_usage(
-            user_id=user_id,
-            platform=platform,
-            conversation_id=conversation_id,
-            tool_source="builtin",
-            tool_name="ledger_text2sql",
-            success=False,
-            latency_ms=int((_time.perf_counter() - started) * 1000),
-            error=str(exc)[:500],
-        )
-        raise
+        ),
+        node_name="ledger_manager",
+        tool_name="ledger_text2sql",
+        args={
+            "message": message,
+            "conversation_context": conversation_context,
+        },
+    )
+    if _looks_like_tool_error(output):
+        raise RuntimeError(output)
+    text = str(output or "").strip()
+    return text or None
 
 
 DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
 TECHNICAL_LEAK_PATTERN = re.compile(r"(json|payload|字段|数组|schema|schedules|ledgers)", re.IGNORECASE)
-PENDING_INDEX_PATTERN = re.compile(r"(?:第\s*([1-9]\d*)\s*(?:个|笔|项)|选\s*([1-9]\d*)|#([1-9]\d*))")
-PENDING_CN_INDEX_PATTERN = re.compile(r"第\s*([一二三四五六七八九十两])\s*(?:个|笔|项)")
+PENDING_INDEX_PATTERN = re.compile(r"(?:第\s*([1-9]\d*)\s*(?:个|条)?|选\s*([1-9]\d*)|#([1-9]\d*))")
+PENDING_CN_INDEX_PATTERN = re.compile(r"第\s*([一二三四五六七八九十两])\s*(?:个|条)?")
 PENDING_BATCH_SELECT_PATTERN = re.compile(r"选\s*([1-9]\d*(?:\s*[,，、和及]\s*[1-9]\d*)+)")
-CN_NUM_MAP = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+CN_NUM_MAP = {
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+}
 
 CATEGORY_MAP = {
     "餐饮": "餐饮",
@@ -173,6 +163,122 @@ def _parse_json_object(content: str) -> dict:
     except Exception:
         return {}
 
+def _parse_json_list(content: str) -> list[dict[str, Any]]:
+    text = (content or "").strip()
+    if not text:
+        return []
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if len(lines) >= 3:
+            text = "\n".join(lines[1:-1]).strip()
+    try:
+        data = json.loads(text)
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
+
+
+def _looks_like_tool_error(text: str) -> bool:
+    raw = (text or "").strip().lower()
+    if not raw:
+        return False
+    tokens = (
+        "tool `",
+        "failed",
+        "not available",
+        "missing required arg",
+        "invalid ",
+        "unsupported ",
+        "is disabled",
+        "blocked by allowlist",
+    )
+    return any(token in raw for token in tokens)
+
+
+def _ledger_from_payload(payload: dict[str, Any]) -> Ledger | None:
+    if not isinstance(payload, dict):
+        return None
+    try:
+        ledger_id = int(payload.get("id") or 0)
+        user_id = int(payload.get("user_id") or 0)
+        amount = float(payload.get("amount") or 0.0)
+    except Exception:
+        return None
+    if ledger_id <= 0 or user_id <= 0:
+        return None
+    transaction_raw = str(payload.get("transaction_date") or "").strip().replace("T", " ")
+    transaction_date = None
+    if transaction_raw:
+        try:
+            transaction_date = datetime.fromisoformat(transaction_raw)
+        except Exception:
+            transaction_date = None
+    if transaction_date is None:
+        transaction_date = datetime.utcnow()
+    return Ledger(
+        id=ledger_id,
+        user_id=user_id,
+        amount=amount,
+        currency=str(payload.get("currency") or "CNY"),
+        category=str(payload.get("category") or ""),
+        item=str(payload.get("item") or ""),
+        image_url=str(payload.get("image_url") or "") or None,
+        transaction_date=transaction_date,
+    )
+
+
+async def _invoke_ledger_tool(
+    *,
+    user_id: int | None,
+    platform: str,
+    conversation_id: int | None,
+    tool_name: str,
+    args: dict[str, Any] | None = None,
+) -> str:
+    return await invoke_node_tool(
+        context=ToolInvocationContext(
+            user_id=user_id,
+            platform=platform or "unknown",
+            conversation_id=conversation_id,
+        ),
+        node_name="ledger_manager",
+        tool_name=tool_name,
+        args=dict(args or {}),
+    )
+
+
+async def _insert_ledger_via_tool(
+    *,
+    user_id: int,
+    platform: str,
+    conversation_id: int | None,
+    amount: float,
+    category: str,
+    item: str,
+    transaction_date: datetime | None = None,
+    image_url: str = "",
+) -> Ledger | None:
+    payload = {
+        "user_id": user_id,
+        "amount": amount,
+        "category": category,
+        "item": item,
+        "image_url": image_url,
+    }
+    if transaction_date is not None:
+        payload["transaction_date"] = transaction_date.isoformat(sep=" ", timespec="seconds")
+    output = await _invoke_ledger_tool(
+        user_id=user_id,
+        platform=platform,
+        conversation_id=conversation_id,
+        tool_name="ledger_insert",
+        args=payload,
+    )
+    return _ledger_from_payload(_parse_json_object(output))
+
+
 
 def _sanitize_llm_text(text: str) -> str:
     raw = (text or "").strip()
@@ -204,13 +310,9 @@ def _clean_item(item: str) -> str:
     value = (item or "").strip()
     if not value:
         return ""
+    value = re.sub(r"(?:第\s*\d+\s*(?:个|条)?|#\s*\d+)", "", value)
     value = re.sub(
-        r"(?:第\s*(?:[1-9]\d*|[一二三四五六七八九十两])\s*(?:个|笔|项)|选\s*[1-9]\d*|#[1-9]\d*)",
-        "",
-        value,
-    )
-    value = re.sub(
-        r"^(错了|更正|修正|记错|不对|不是|把|改成|改为|应该是|应为|我说的是)\s*[，,:：]?\s*",
+        r"^(错了|更正|修正|记错|不对|不是|把|改成|改为|应该是|应为|我说的是)\s*[:：]?\s*",
         "",
         value,
     )
@@ -220,7 +322,7 @@ def _clean_item(item: str) -> str:
     value = value.replace("元", "").replace("块", "").replace("记账", "").strip()
     value = value.replace("和", " ").replace("及", " ").replace("并且", " ")
     value = re.sub(r"\s+", " ", value).strip()
-    value = value.strip("，,。.!！?？")
+    value = value.strip("：:，,。.!！？?;；")
     if value in {"和", "及", "跟"}:
         return ""
     return value
@@ -286,7 +388,7 @@ def _extract_pending_indices(content: str, max_len: int) -> list[int]:
     # Loose fallback for "1 2" / "1和2" / "1,2" style selection.
     if not indices:
         has_decimal = bool(re.search(r"\d+\.\d+", source))
-        has_currency = bool(re.search(r"(?:元|块|¥|￥|rmb|RMB|人民币)", source))
+        has_currency = bool(re.search(r"(?:元|块|rmb|RMB|人民币)", source))
         if not has_decimal and not has_currency:
             tokens = re.findall(r"(?<!\d)(\d+)(?!\d)", source)
             parsed = [int(token) for token in tokens]
@@ -344,29 +446,14 @@ async def _understand_pending_selection(
     conversation_context: str,
 ) -> dict:
     llm = get_llm(node_name="ledger_manager")
-    system = SystemMessage(
-        content=(
-            "你是待确认记账解析器。只输出 JSON。"
-            "字段: mode, indexes, amount, category, item。"
-            "mode 仅可为 indexes, amount, cancel, unknown。"
-            "若用户选择候选项（如“1 2”“第二个和第三个”“选2和3”“前两个”），mode=indexes，indexes 输出数组。"
-            "若用户给出直接金额（如“28.50”），mode=amount，amount 输出数字。"
-            "若用户表示取消（如“取消/算了/不记了”），mode=cancel。"
-            "若不确定，mode=unknown。"
-            "category 仅在用户明确提到分类时填写（餐饮/交通/购物/居家/娱乐/医疗/其他），否则留空。"
-            "item 仅在用户明确给出摘要时填写，否则留空。"
-        )
+    messages = build_ledger_pending_selection_messages(
+        content=content,
+        candidates=candidates,
+        detected_item=str(pending.get("item") or pending.get("merchant") or "消费"),
+        default_category=str(pending.get("category") or "其他"),
+        conversation_context=conversation_context,
     )
-    human = HumanMessage(
-        content=(
-            f"会话上下文:\n{conversation_context}\n\n"
-            f"候选金额列表（序号从1开始）: {candidates}\n"
-            f"识别来源摘要: {pending.get('item') or pending.get('merchant') or '消费'}\n"
-            f"默认分类: {pending.get('category') or '其他'}\n"
-            f"用户回复: {content}"
-        )
-    )
-    response = await llm.ainvoke([system, human])
+    response = await llm.ainvoke(messages)
     return _parse_json_object(str(response.content))
 
 
@@ -420,37 +507,11 @@ def _parse_vision_result(result: dict) -> dict:
 
 async def _understand_ledger_message(content: str, conversation_context: str) -> dict:
     llm = get_llm(node_name="ledger_manager")
-    system = SystemMessage(
-        content=(
-            "你是记账意图解析器，只输出 JSON。"
-            "字段: intent, ledger_id, target_ids, target_item, amount, item, category, query_scope, query_date, reference_mode, selection_mode, confidence。"
-            "intent 仅可为 insert, correct_latest, correct_by_id, correct_by_name, correct_by_scope, delete_latest, delete_by_id, delete_by_name, delete_by_scope, query, list, unknown。"
-            "若用户纠正最近一笔（如‘错了，改成30’）intent=correct_latest。"
-            "若用户纠正指定ID（如‘把账单#12改成28元’）intent=correct_by_id 并给 ledger_id。"
-            "若用户纠正某个名称/摘要（如‘不对，爬山门票应该是200元’）intent=correct_by_name，并提取 target_item。"
-            "若用户按范围纠正（如‘把今天餐饮都改成30’）intent=correct_by_scope。"
-            "若用户删除最近一笔 intent=delete_latest。"
-            "若用户删除指定ID intent=delete_by_id 并给 ledger_id。"
-            "若用户删除某个名称/摘要 intent=delete_by_name，并提取 target_item。"
-            "若用户按范围删除（如‘删除今天所有账单’）intent=delete_by_scope。"
-            "若用户新增支出/收入 intent=insert。"
-            "若用户查询统计 intent=query；若用户要列表 intent=list。无法确定时 intent=unknown。"
-            "amount 是数字；item 是简洁摘要；category 不确定时填‘其他’。"
-            "query_scope 仅可为 today/week/month/date/recent/all/yesterday/day_before_yesterday/last_week。"
-            "当 query_scope=date 时，query_date 输出 YYYY-MM-DD。"
-            "reference_mode 仅可为 by_id/by_name/by_scope/latest/last_result_set/auto。"
-            "当用户说‘这几笔/这些/刚才那几个’时，reference_mode=last_result_set。"
-            "selection_mode 仅可为 all/single/subset/auto。"
-            "confidence 范围 0~1。"
-        )
+    messages = build_ledger_intent_messages(
+        content=content,
+        conversation_context=conversation_context,
     )
-    human = HumanMessage(
-        content=(
-            f"会话上下文:\n{conversation_context}\n\n"
-            f"用户输入:\n{content}"
-        )
-    )
-    response = await llm.ainvoke([system, human])
+    response = await llm.ainvoke(messages)
     return _parse_json_object(str(response.content))
 
 
@@ -668,22 +729,45 @@ def _resolve_ledger_window_from_fields(scope: str, query_date: str | None) -> tu
 
 
 async def _query_ledger_rows(
-    session,
     user_id: int,
     *,
+    platform: str,
+    conversation_id: int | None,
     start_at: datetime | None,
     end_at: datetime | None,
     category: str | None,
+    item_like: str | None = None,
     limit: int,
 ) -> list[Ledger]:
-    stmt = select(Ledger).where(Ledger.user_id == user_id)
-    if start_at is not None and end_at is not None:
-        stmt = stmt.where(Ledger.transaction_date >= start_at, Ledger.transaction_date < end_at)
+    args: dict[str, Any] = {
+        "user_id": user_id,
+        "limit": limit,
+        "order": "desc",
+    }
+    if start_at is not None:
+        args["start_at"] = start_at.isoformat(sep=" ", timespec="seconds")
+    if end_at is not None:
+        args["end_at"] = end_at.isoformat(sep=" ", timespec="seconds")
     if category:
-        stmt = stmt.where(Ledger.category == category)
-    stmt = stmt.order_by(Ledger.transaction_date.desc(), Ledger.id.desc()).limit(limit)
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
+        args["category"] = category
+    if item_like:
+        args["item_like"] = item_like
+
+    output = await _invoke_ledger_tool(
+        user_id=user_id,
+        platform=platform,
+        conversation_id=conversation_id,
+        tool_name="ledger_list",
+        args=args,
+    )
+    return [
+        row
+        for row in (
+            _ledger_from_payload(item)
+            for item in _parse_json_list(output)
+        )
+        if row is not None
+    ]
 
 
 def _build_ledger_payload(rows: list[Ledger]) -> dict[str, Any]:
@@ -731,16 +815,36 @@ def _read_last_ledger_ids_from_state(state: GraphState) -> list[int]:
     return _parse_int_list(payload.get("ids"))
 
 
-async def _query_ledgers_by_ids(session, user_id: int, ledger_ids: list[int]) -> list[Ledger]:
+async def _query_ledgers_by_ids(
+    user_id: int,
+    ledger_ids: list[int],
+    *,
+    platform: str,
+    conversation_id: int | None,
+) -> list[Ledger]:
     valid_ids = _parse_int_list(ledger_ids)
     if not valid_ids:
         return []
-    result = await session.execute(
-        select(Ledger)
-        .where(Ledger.user_id == user_id, Ledger.id.in_(valid_ids))
-        .order_by(Ledger.transaction_date.desc(), Ledger.id.desc())
+    output = await _invoke_ledger_tool(
+        user_id=user_id,
+        platform=platform,
+        conversation_id=conversation_id,
+        tool_name="ledger_list",
+        args={
+            "user_id": user_id,
+            "ledger_ids": valid_ids,
+            "limit": max(100, len(valid_ids) * 3),
+            "order": "desc",
+        },
     )
-    rows = list(result.scalars().all())
+    rows = [
+        row
+        for row in (
+            _ledger_from_payload(item)
+            for item in _parse_json_list(output)
+        )
+        if row is not None
+    ]
     index_map = {int(row.id): row for row in rows if int(row.id or 0) > 0}
     ordered: list[Ledger] = []
     for lid in valid_ids:
@@ -752,20 +856,27 @@ async def _query_ledgers_by_ids(session, user_id: int, ledger_ids: list[int]) ->
 
 async def _delete_ledgers_by_ids(
     *,
-    session,
     user_id: int,
     user_platform: str,
+    conversation_id: int | None,
     ledger_ids: list[int],
 ) -> tuple[int, list[Ledger]]:
-    rows = await _query_ledgers_by_ids(session, user_id, ledger_ids)
+    rows = await _query_ledgers_by_ids(
+        user_id,
+        ledger_ids,
+        platform=user_platform,
+        conversation_id=conversation_id,
+    )
     deleted: list[Ledger] = []
     for row in rows:
-        removed = await delete_ledger(
-            session,
+        output = await _invoke_ledger_tool(
             user_id=user_id,
-            ledger_id=int(row.id or 0),
             platform=user_platform,
+            conversation_id=conversation_id,
+            tool_name="ledger_delete",
+            args={"user_id": user_id, "ledger_id": int(row.id or 0)},
         )
+        removed = _ledger_from_payload(_parse_json_object(output))
         if removed:
             deleted.append(removed)
     return len(rows), deleted
@@ -773,26 +884,36 @@ async def _delete_ledgers_by_ids(
 
 async def _update_ledgers_by_ids(
     *,
-    session,
     user_id: int,
     user_platform: str,
+    conversation_id: int | None,
     ledger_ids: list[int],
     amount: float,
     category: str | None,
     item: str | None,
 ) -> tuple[int, list[Ledger]]:
-    rows = await _query_ledgers_by_ids(session, user_id, ledger_ids)
+    rows = await _query_ledgers_by_ids(
+        user_id,
+        ledger_ids,
+        platform=user_platform,
+        conversation_id=conversation_id,
+    )
     updated: list[Ledger] = []
     for row in rows:
-        changed = await update_ledger(
-            session,
+        output = await _invoke_ledger_tool(
             user_id=user_id,
-            ledger_id=int(row.id or 0),
-            amount=amount,
-            category=category,
-            item=item,
             platform=user_platform,
+            conversation_id=conversation_id,
+            tool_name="ledger_update",
+            args={
+                "user_id": user_id,
+                "ledger_id": int(row.id or 0),
+                "amount": amount,
+                "category": category or "",
+                "item": item or "",
+            },
         )
+        changed = _ledger_from_payload(_parse_json_object(output))
         if changed:
             updated.append(changed)
     return len(rows), updated
@@ -873,15 +994,23 @@ def _render_ledger_fallback(rows: list[Ledger], label: str, category: str | None
 async def _handle_ledger_command(
     *,
     content: str,
-    session,
     user_id: int,
     user_platform: str,
+    conversation_id: int | None,
 ) -> list[str] | None:
     if not content.startswith("/ledger"):
         return None
 
     if content.startswith("/ledger list"):
-        rows = await list_recent_ledgers(session, user_id, limit=10)
+        list_output = await _invoke_ledger_tool(
+            user_id=user_id,
+            platform=user_platform,
+            conversation_id=conversation_id,
+            tool_name="ledger_list_recent",
+            args={"user_id": user_id, "limit": 10},
+        )
+        rows = [_ledger_from_payload(item) for item in _parse_json_list(list_output)]
+        rows = [row for row in rows if row is not None]
         if not rows:
             return ["暂无账单记录。"]
         lines = ["最近账单："]
@@ -911,15 +1040,20 @@ async def _handle_ledger_command(
             category = _normalize_category(parts[0])
             item = parts[1] if len(parts) > 1 else ""
 
-        updated = await update_ledger(
-            session,
+        updated_output = await _invoke_ledger_tool(
             user_id=user_id,
-            ledger_id=ledger_id,
-            amount=amount,
-            category=category if category != "其他" else None,
-            item=item or None,
             platform=user_platform,
+            conversation_id=conversation_id,
+            tool_name="ledger_update",
+            args={
+                "user_id": user_id,
+                "ledger_id": ledger_id,
+                "amount": amount,
+                "category": category,
+                "item": item or "",
+            },
         )
+        updated = _ledger_from_payload(_parse_json_object(updated_output))
         if not updated:
             return [f"未找到账单 #{ledger_id}，或它不属于你。"]
         return [
@@ -932,15 +1066,24 @@ async def _handle_ledger_command(
             return ["用法：`/ledger delete <id|latest>`，例如 `/ledger delete 12`。"]
         target = m.group(1).strip().lower().lstrip("#")
         if target == "latest":
-            latest = await get_latest_ledger(session, user_id)
+            latest_output = await _invoke_ledger_tool(
+                user_id=user_id,
+                platform=user_platform,
+                conversation_id=conversation_id,
+                tool_name="ledger_get_latest",
+                args={"user_id": user_id},
+            )
+            latest = _ledger_from_payload(_parse_json_object(latest_output))
             if not latest:
                 return ["暂无可删除的账单。"]
-            deleted = await delete_ledger(
-                session,
+            deleted_output = await _invoke_ledger_tool(
                 user_id=user_id,
-                ledger_id=latest.id,
                 platform=user_platform,
+                conversation_id=conversation_id,
+                tool_name="ledger_delete",
+                args={"user_id": user_id, "ledger_id": int(latest.id or 0)},
             )
+            deleted = _ledger_from_payload(_parse_json_object(deleted_output))
             if not deleted:
                 return ["删除失败，请稍后重试。"]
             return [
@@ -949,12 +1092,14 @@ async def _handle_ledger_command(
         if not target.isdigit():
             return ["用法：`/ledger delete <id|latest>`，例如 `/ledger delete 12`。"]
         ledger_id = int(target)
-        deleted = await delete_ledger(
-            session,
+        deleted_output = await _invoke_ledger_tool(
             user_id=user_id,
-            ledger_id=ledger_id,
             platform=user_platform,
+            conversation_id=conversation_id,
+            tool_name="ledger_delete",
+            args={"user_id": user_id, "ledger_id": ledger_id},
         )
+        deleted = _ledger_from_payload(_parse_json_object(deleted_output))
         if not deleted:
             return [f"未找到账单 #{ledger_id}，或它不属于你。"]
         return [
@@ -1034,16 +1179,18 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
             if len(item) > 40:
                 item = item[:40]
 
-            ledger = await insert_ledger(
-                session,
+            ledger = await _insert_ledger_via_tool(
                 user_id=user_id,
-                amount=amount,
+                platform=user_platform,
+                conversation_id=conversation_id,
+                amount=float(amount),
                 category=category,
                 item=item,
                 transaction_date=datetime.utcnow(),
                 image_url=str(pending.get("image_url") or ""),
-                platform=user_platform,
             )
+            if ledger is None:
+                return {**state, "responses": ["记账失败，请稍后重试。"]}
             await clear_pending_ledger(user_id=user_id, conversation_id=conversation_id)
             return {
                 **state,
@@ -1073,17 +1220,18 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
                 confidence = float(parsed.get("confidence") or 0.0)
                 threshold = float(parsed.get("threshold") or 1.0)
                 if amount is not None and float(amount) > 0 and confidence >= threshold:
-                    ledger = await insert_ledger(
-                        session,
+                    ledger = await _insert_ledger_via_tool(
                         user_id=user_id,
+                        platform=user_platform,
+                        conversation_id=conversation_id,
                         amount=float(amount),
                         category=str(parsed.get("category") or "其他"),
                         item=str(parsed.get("item") or "消费"),
                         transaction_date=datetime.utcnow(),
                         image_url=str(parsed.get("image_url") or ""),
-                        platform=user_platform,
                     )
-                    created_rows.append((parsed, ledger))
+                    if ledger is not None:
+                        created_rows.append((parsed, ledger))
                 else:
                     unresolved_rows.append(parsed)
 
@@ -1147,16 +1295,18 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
         if amount is not None and float(amount) > 0 and confidence >= threshold:
             if conversation_id > 0:
                 await clear_pending_ledger(user_id=user_id, conversation_id=conversation_id)
-            ledger = await insert_ledger(
-                session,
+            ledger = await _insert_ledger_via_tool(
                 user_id=user_id,
+                platform=user_platform,
+                conversation_id=conversation_id,
                 amount=float(amount),
                 category=str(parsed_single.get("category") or "其他"),
                 item=str(parsed_single.get("item") or "消费"),
                 transaction_date=datetime.utcnow(),
                 image_url=image_inputs[0] if image_inputs else message.image_urls[0],
-                platform=user_platform,
             )
+            if ledger is None:
+                return {**state, "responses": ["记账失败，请稍后重试。"]}
             source_hint = "（支付截图识别）" if image_type == "payment_screenshot" else ""
             return {
                 **state,
@@ -1228,8 +1378,9 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
         if llm_window:
             start_at, end_at, label = llm_window
             rows = await _query_ledger_rows(
-                session,
                 user_id,
+                platform=user_platform,
+                conversation_id=conversation_id,
                 start_at=start_at,
                 end_at=end_at,
                 category=category_hint,
@@ -1237,8 +1388,9 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
             )
             return rows, label, (scope or "date"), category_hint
         rows = await _query_ledger_rows(
-            session,
             user_id,
+            platform=user_platform,
+            conversation_id=conversation_id,
             start_at=None,
             end_at=None,
             category=category_hint,
@@ -1280,8 +1432,13 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
     item = parsed_item
 
     category = _normalize_category(str(parsed.get("category") or ""))
-    if category == "其他":
-        category = _normalize_category(content)
+    if intent == "insert":
+        if category == "其他":
+            category = _normalize_category(content)
+    elif category == "其他":
+        # For correction/delete/query flows, never derive category from full sentence.
+        # This avoids accidental category overwrite such as "不对是45" -> category.
+        category = ""
 
     target_item = _clean_item(str(parsed.get("target_item") or ""))
     if intent == "insert":
@@ -1307,13 +1464,23 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
     async def _resolve_operation_ledgers(operation: str) -> tuple[list[Ledger], str]:
         # 1) explicit id(s)
         if target_ids and (reference_mode in {"by_id", "auto"} or intent in {"delete_by_id", "correct_by_id"}):
-            rows = await _query_ledgers_by_ids(session, user_id, target_ids)
+            rows = await _query_ledgers_by_ids(
+                user_id,
+                target_ids,
+                platform=user_platform,
+                conversation_id=conversation_id,
+            )
             return rows, "by_id"
 
         # 2) previous result set
         if reference_mode == "last_result_set":
             last_ids = _read_last_ledger_ids_from_state(state)
-            rows = await _query_ledgers_by_ids(session, user_id, last_ids)
+            rows = await _query_ledgers_by_ids(
+                user_id,
+                last_ids,
+                platform=user_platform,
+                conversation_id=conversation_id,
+            )
             return rows, "last_result_set"
 
         # 3) scope based
@@ -1327,8 +1494,9 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
             if llm_window:
                 start_at, end_at, _ = llm_window
                 rows = await _query_ledger_rows(
-                    session,
                     user_id,
+                    platform=user_platform,
+                    conversation_id=conversation_id,
                     start_at=start_at,
                     end_at=end_at,
                     category=category_hint,
@@ -1337,18 +1505,31 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
                 return rows, "by_scope"
             # Fallback to last query if scope parse failed.
             last_ids = _read_last_ledger_ids_from_state(state)
-            rows = await _query_ledgers_by_ids(session, user_id, last_ids)
+            rows = await _query_ledgers_by_ids(
+                user_id,
+                last_ids,
+                platform=user_platform,
+                conversation_id=conversation_id,
+            )
             return rows, "last_result_set"
 
         # 4) latest
         if intent in {"delete_latest", "correct_latest"} or reference_mode == "latest":
-            latest = await get_latest_ledger(session, user_id)
+            latest_output = await _invoke_ledger_tool(
+                user_id=user_id,
+                platform=user_platform,
+                conversation_id=conversation_id,
+                tool_name="ledger_get_latest",
+                args={"user_id": user_id},
+            )
+            latest = _ledger_from_payload(_parse_json_object(latest_output))
             return ([latest] if latest else []), "latest"
 
         # 5) by name or semantic selection from candidates
         candidates = await _query_ledger_rows(
-            session,
             user_id,
+            platform=user_platform,
+            conversation_id=conversation_id,
             start_at=None,
             end_at=None,
             category=None,
@@ -1381,7 +1562,12 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
             )
             if maybe_one:
                 picked_ids = [maybe_one]
-        rows = await _query_ledgers_by_ids(session, user_id, picked_ids)
+        rows = await _query_ledgers_by_ids(
+            user_id,
+            picked_ids,
+            platform=user_platform,
+            conversation_id=conversation_id,
+        )
         return rows, "by_name"
 
     if intent == "unknown":
@@ -1402,9 +1588,9 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
         # Deterministic command fallback.
         command_responses = await _handle_ledger_command(
             content=content,
-            session=session,
             user_id=user_id,
             user_platform=user_platform,
+            conversation_id=conversation_id,
         )
         if command_responses:
             return {**state, "responses": command_responses}
@@ -1443,9 +1629,9 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
     if intent in {"delete_by_name", "delete_by_id", "delete_latest", "delete_by_scope"}:
         target_rows, source = await _resolve_operation_ledgers("delete")
         matched_count, deleted_rows = await _delete_ledgers_by_ids(
-            session=session,
             user_id=user_id,
             user_platform=user_platform,
+            conversation_id=conversation_id,
             ledger_ids=[int(row.id or 0) for row in target_rows if int(row.id or 0) > 0],
         )
         deleted_count = len(deleted_rows)
@@ -1474,12 +1660,12 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
                 "responses": ["我还不能定位要更正的账单。请补充账单名称、ID、范围，或先查询后说“改这几笔”。"],
             }
         matched_count, updated_rows = await _update_ledgers_by_ids(
-            session=session,
             user_id=user_id,
             user_platform=user_platform,
+            conversation_id=conversation_id,
             ledger_ids=[int(row.id or 0) for row in target_rows if int(row.id or 0) > 0],
             amount=amount,
-            category=(category if category != "其他" else None),
+            category=(category if category and category != "其他" else None),
             item=(item or None),
         )
         updated_count = len(updated_rows)
@@ -1495,15 +1681,17 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
             "responses": [f"已定位 {matched_count} 条（来源：{source}），成功更正 {updated_count} 条。{preview}".strip()],
         }
 
-    ledger = await insert_ledger(
-        session,
+    ledger = await _insert_ledger_via_tool(
         user_id=user_id,
-        amount=amount,
+        platform=user_platform,
+        conversation_id=conversation_id,
+        amount=float(amount),
         category=category,
         item=item or "消费",
         transaction_date=datetime.utcnow(),
-        platform=user_platform,
     )
+    if ledger is None:
+        return {**state, "responses": ["记账失败，请稍后重试。"]}
     return {
         **state,
         "responses": [

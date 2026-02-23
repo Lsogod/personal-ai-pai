@@ -1,139 +1,275 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 980" font-family="Segoe UI, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 880" font-family="Inter, system-ui, sans-serif">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0b1324" />
-      <stop offset="100%" stop-color="#101c33" />
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f0f14"/>
+      <stop offset="100%" stop-color="#1a1a28"/>
     </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+    <linearGradient id="orange" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fb923c"/>
+      <stop offset="100%" stop-color="#f97316"/>
+    </linearGradient>
+    <linearGradient id="pink" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f472b6"/>
+      <stop offset="100%" stop-color="#ec4899"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+    <linearGradient id="red" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f87171"/>
+      <stop offset="100%" stop-color="#ef4444"/>
+    </linearGradient>
+    <linearGradient id="purple" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
     <style>
-      .title { fill: #edf3ff; font-size: 30px; font-weight: 700; }
-      .subtitle { fill: #a2b4d2; font-size: 14px; }
-      .section { fill: #d6e5ff; font-size: 16px; font-weight: 700; }
-      .stepTitle { fill: #f8fbff; font-size: 14px; font-weight: 700; }
-      .stepText { fill: #bfd0ea; font-size: 12px; }
-      .note { fill: #8ea5cc; font-size: 11px; }
-      .line { stroke: #79a0de; stroke-width: 2; fill: none; marker-end: url(#arrow); }
-      .dashed { stroke: #79a0de; stroke-width: 2; fill: none; stroke-dasharray: 8 6; marker-end: url(#arrow); }
+      @keyframes dash { to { stroke-dashoffset: -20; } }
+      @keyframes pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+      @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+      .flow-line { stroke-dasharray: 6 4; animation: dash 1.5s linear infinite; }
+      .pulse-node { animation: pulse 3s ease-in-out infinite; }
+      .float-box { animation: float 4s ease-in-out infinite; }
     </style>
-    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
-      <polygon points="0,0 10,4 0,8" fill="#8fb1e8" />
-    </marker>
   </defs>
 
-  <rect x="0" y="0" width="1200" height="980" fill="url(#bg)" />
-  <text x="600" y="48" text-anchor="middle" class="title">PAI Agent Workflow</text>
-  <text x="600" y="72" text-anchor="middle" class="subtitle">Actual execution path in current codebase</text>
+  <rect width="960" height="880" rx="16" fill="url(#bgGrad)"/>
 
-  <rect x="40" y="100" width="1120" height="840" rx="16" fill="#111f39" stroke="#2b4372" />
+  <text x="480" y="42" text-anchor="middle" fill="#e2e8f0" font-size="20" font-weight="700">PAI · 智能体决策调度流程</text>
+  <text x="480" y="62" text-anchor="middle" fill="#64748b" font-size="11">LangGraph StateGraph · LLM 意图分类 · MCP 工具协议 · 条件边路由 · Redis Checkpointer</text>
 
-  <text x="64" y="132" class="section">Request Lifecycle</text>
+  <g class="float-box">
+    <rect x="380" y="84" width="200" height="44" rx="22" fill="#1e1e2e" stroke="url(#accent)" stroke-width="2" filter="url(#shadow)"/>
+    <text x="480" y="111" text-anchor="middle" fill="#c7d2fe" font-size="13" font-weight="700">▶  Entry Point</text>
+  </g>
+  <circle cx="480" cy="106" r="2.5" fill="#818cf8" class="pulse-node"/>
 
-  <rect x="80" y="156" width="460" height="84" rx="12" fill="#1d3356" stroke="#4b73b8" />
-  <text x="100" y="184" class="stepTitle">1) Receive message</text>
-  <text x="100" y="202" class="stepText">UnifiedMessage normalization + dedup + user/conversation load</text>
-  <text x="100" y="220" class="stepText">store user message + emit websocket event for non-web channels</text>
+  <rect x="610" y="84" width="170" height="44" rx="12" fill="#818cf810" stroke="#818cf830" stroke-width="1"/>
+  <text x="695" y="103" text-anchor="middle" fill="#818cf8" font-size="10" font-weight="600">set_entry_point</text>
+  <text x="695" y="118" text-anchor="middle" fill="#64748b" font-size="9">graph.ainvoke(state)</text>
 
-  <rect x="80" y="266" width="460" height="84" rx="12" fill="#1d3356" stroke="#4b73b8" />
-  <text x="100" y="294" class="stepTitle">2) Pre-graph checks</text>
-  <text x="100" y="312" class="stepText">rebind-intent guard, command handling, quota/block checks</text>
-  <text x="100" y="330" class="stepText">if command matched then return command result directly</text>
+  <line x1="480" y1="128" x2="480" y2="166" stroke="#818cf860" stroke-width="1.5" class="flow-line"/>
 
-  <rect x="80" y="376" width="460" height="112" rx="12" fill="#234063" stroke="#5f8fca" />
-  <text x="100" y="404" class="stepTitle">3) Long-term memory retrieval mode switch</text>
-  <text x="100" y="422" class="stepText">A. List-query intent: detect via regex, wait brief settle window,</text>
-  <text x="100" y="440" class="stepText">   call list_long_term_memories() and answer directly</text>
-  <text x="100" y="458" class="stepText">B. Normal query: call retrieve_relevant_long_term_memories(top-k)</text>
-  <text x="100" y="476" class="stepText">   and put result into state.extra.long_term_memories</text>
+  <rect x="280" y="162" width="400" height="84" rx="14" fill="#1e1e2e" stroke="url(#green)" stroke-width="2" filter="url(#shadow)"/>
+  <text x="480" y="190" text-anchor="middle" fill="#34d399" font-size="14" font-weight="700">🔀 Router · 意图路由器</text>
+  <text x="480" y="208" text-anchor="middle" fill="#94a3b8" font-size="10">router_node() 意图分类  →  route_intent() 条件路由</text>
+  <text x="480" y="224" text-anchor="middle" fill="#64748b" font-size="9">上下文增强: conversation_context · has_image · has_pending_ledger · tool_catalog</text>
+  <circle cx="480" cy="190" r="2.5" fill="#34d399" class="pulse-node"/>
 
-  <rect x="80" y="514" width="460" height="112" rx="12" fill="#1f355a" stroke="#537fc5" />
-  <text x="100" y="542" class="stepTitle">4) Graph execution (normal mode)</text>
-  <text x="100" y="560" class="stepText">router_node classifies intent by LLM structured output</text>
-  <text x="100" y="578" class="stepText">route_intent dispatches to onboarding/ledger/schedule/chat/skill/help/complex</text>
-  <text x="100" y="596" class="stepText">node runs domain logic and tool calls, returns response list</text>
-  <text x="100" y="614" class="stepText">message_handler sends responses and stores assistant messages</text>
+  <rect x="726" y="120" width="212" height="168" rx="12" fill="#1e1e2e" stroke="#34d39950" stroke-width="1" filter="url(#shadow)"/>
+  <text x="832" y="140" text-anchor="middle" fill="#34d399" font-size="10" font-weight="600">🧠 路由分层决策</text>
+  <line x1="740" y1="148" x2="924" y2="148" stroke="#34d39930" stroke-width="1"/>
+  <text x="740" y="163" fill="#fbbf24" font-size="9" font-weight="600">① 前置拦截 (router_node)</text>
+  <text x="750" y="176" fill="#94a3b8" font-size="8.5">setup_stage &lt; 3 → 跳过(由③处理)</text>
+  <text x="750" y="188" fill="#94a3b8" font-size="8.5">空消息且无图 → chat_manager</text>
+  <text x="740" y="203" fill="#fbbf24" font-size="9" font-weight="600">② LLM 意图分类</text>
+  <text x="750" y="215" fill="#94a3b8" font-size="8.5">_classify_intent_with_llm()</text>
+  <text x="750" y="227" fill="#94a3b8" font-size="8.5">+context · +image · +pending · +tools</text>
+  <text x="750" y="239" fill="#94a3b8" font-size="8.5">unknown → image/pending→ledger_manager</text>
+  <text x="740" y="254" fill="#fbbf24" font-size="9" font-weight="600">③ 命令兜底 (route_intent)</text>
+  <text x="750" y="266" fill="#94a3b8" font-size="8.5">setup&lt;3→onboarding</text>
+  <text x="750" y="278" fill="#94a3b8" font-size="8.5">/help /skill /ledger /calendar /mcp /fetch /weather</text>
 
-  <rect x="80" y="652" width="460" height="112" rx="12" fill="#2a2f4f" stroke="#7a7fc2" />
-  <text x="100" y="680" class="stepTitle">5) Async memory write pipeline (post-response)</text>
-  <text x="100" y="698" class="stepText">extract_memory_candidates(user_text, assistant_text, summary)</text>
-  <text x="100" y="716" class="stepText">upsert_long_term_memories with dedupe/confidence/filter checks</text>
-  <text x="100" y="734" class="stepText">runs in background task for lower user-facing latency</text>
-  <text x="100" y="752" class="stepText">next memory-list query can optionally wait for this pipeline briefly</text>
+  <line x1="680" y1="200" x2="726" y2="200" stroke="#34d39940" stroke-width="1" class="flow-line"/>
 
-  <path d="M310 240 V266" class="line" />
-  <path d="M310 350 V376" class="line" />
-  <path d="M310 488 V514" class="line" />
-  <path d="M310 626 V652" class="line" />
+  <text x="480" y="262" text-anchor="middle" fill="#64748b" font-size="9" font-weight="500">add_conditional_edges("router", route_intent)</text>
 
-  <text x="620" y="132" class="section">Router and Node Execution</text>
+  <line x1="330" y1="246" x2="88" y2="312" stroke="#a78bfa50" stroke-width="1" class="flow-line" style="animation-delay:.1s"/>
+  <line x1="390" y1="246" x2="240" y2="312" stroke="#34d39950" stroke-width="1" class="flow-line" style="animation-delay:.2s"/>
+  <line x1="450" y1="246" x2="390" y2="312" stroke="#60a5fa50" stroke-width="1" class="flow-line" style="animation-delay:.3s"/>
+  <line x1="510" y1="246" x2="533" y2="312" stroke="#f472b650" stroke-width="1" class="flow-line" style="animation-delay:.4s"/>
+  <line x1="570" y1="246" x2="684" y2="312" stroke="#fb923c50" stroke-width="1" class="flow-line" style="animation-delay:.5s"/>
+  <line x1="630" y1="246" x2="851" y2="312" stroke="#22d3ee50" stroke-width="1" class="flow-line" style="animation-delay:.6s"/>
+  <line x1="665" y1="246" x2="842" y2="456" stroke="#fbbf2450" stroke-width="1" class="flow-line" style="animation-delay:.7s"/>
 
-  <rect x="600" y="156" width="520" height="94" rx="12" fill="#1d3557" stroke="#4d78be" />
-  <text x="620" y="184" class="stepTitle">router_node</text>
-  <text x="620" y="202" class="stepText">inputs: user message, context summary, runtime tool catalog, pending ledger flag</text>
-  <text x="620" y="220" class="stepText">outputs: intent + use_complex + optional tool_catalog in state.extra</text>
-  <text x="620" y="238" class="stepText">fallback: command intent mapper when LLM intent is unknown</text>
+  <text x="192" y="286" fill="#a78bfa" font-size="7.5" font-weight="600" transform="rotate(-15,192,286)">setup&lt;3</text>
+  <text x="302" y="286" fill="#34d399" font-size="7.5" font-weight="600">ledger_mgr</text>
+  <text x="400" y="282" fill="#60a5fa" font-size="7.5" font-weight="600">schedule_mgr</text>
+  <text x="510" y="282" fill="#f472b6" font-size="7.5" font-weight="600">chat_mgr</text>
+  <text x="638" y="286" fill="#fb923c" font-size="7.5" font-weight="600">skill_mgr</text>
+  <text x="756" y="286" fill="#22d3ee" font-size="7.5" font-weight="600">help_center</text>
+  <text x="804" y="330" fill="#fbbf24" font-size="7.5" font-weight="600">complex_task</text>
 
-  <rect x="600" y="276" width="160" height="84" rx="12" fill="#1f355a" stroke="#5b8fd2" />
-  <text x="680" y="304" text-anchor="middle" class="stepTitle">ledger_manager</text>
-  <text x="680" y="322" text-anchor="middle" class="note">ledger CRUD</text>
-  <text x="680" y="338" text-anchor="middle" class="note">corrections</text>
+  <g class="float-box" style="animation-delay:0s">
+    <rect x="26" y="310" width="124" height="140" rx="12" fill="#1e1e2e" stroke="#a78bfa50" stroke-width="1.5" filter="url(#shadow)"/>
+    <text x="88" y="334" text-anchor="middle" fill="#a78bfa" font-size="11" font-weight="700">🚀 Onboarding</text>
+    <text x="88" y="348" text-anchor="middle" fill="#64748b" font-size="8">新用户引导</text>
+    <line x1="38" y1="354" x2="138" y2="354" stroke="#a78bfa20" stroke-width="1"/>
+    <text x="42" y="368" fill="#94a3b8" font-size="7.5">Step 1 设置昵称</text>
+    <text x="42" y="382" fill="#94a3b8" font-size="7.5">Step 2 命名 AI</text>
+    <text x="42" y="396" fill="#94a3b8" font-size="7.5">Step 3 选择表情</text>
+    <line x1="38" y1="403" x2="138" y2="403" stroke="#a78bfa20" stroke-width="1"/>
+    <text x="42" y="417" fill="#64748b" font-size="7" font-style="italic">LLM 提取 → User 模型</text>
+    <text x="42" y="430" fill="#64748b" font-size="7" font-style="italic">stage 0→1→2→3</text>
+  </g>
 
-  <rect x="776" y="276" width="160" height="84" rx="12" fill="#1f355a" stroke="#5b8fd2" />
-  <text x="856" y="304" text-anchor="middle" class="stepTitle">schedule_manager</text>
-  <text x="856" y="322" text-anchor="middle" class="note">reminder/calendar</text>
-  <text x="856" y="338" text-anchor="middle" class="note">weather conditional</text>
+  <g class="float-box" style="animation-delay:.3s">
+    <rect x="164" y="310" width="152" height="140" rx="12" fill="#1e1e2e" stroke="#34d39950" stroke-width="1.5" filter="url(#shadow)"/>
+    <text x="240" y="334" text-anchor="middle" fill="#34d399" font-size="11" font-weight="700">💰 Ledger Mgr</text>
+    <text x="240" y="348" text-anchor="middle" fill="#64748b" font-size="8">ledger_manager_node()</text>
+    <line x1="176" y1="354" x2="304" y2="354" stroke="#34d39920" stroke-width="1"/>
+    <text x="180" y="368" fill="#94a3b8" font-size="7.5">LLM 解析金额/分类</text>
+    <text x="180" y="382" fill="#94a3b8" font-size="7.5">小票 OCR (Vision)</text>
+    <text x="180" y="396" fill="#94a3b8" font-size="7.5">增/删/改/查 · Text2SQL</text>
+    <line x1="176" y1="403" x2="304" y2="403" stroke="#34d39920" stroke-width="1"/>
+    <text x="180" y="417" fill="#64748b" font-size="7" font-style="italic">pending_ledger 确认</text>
+    <text x="180" y="430" fill="#64748b" font-size="7" font-style="italic">analyze_receipt()</text>
+  </g>
 
-  <rect x="952" y="276" width="160" height="84" rx="12" fill="#1f355a" stroke="#5b8fd2" />
-  <text x="1032" y="304" text-anchor="middle" class="stepTitle">chat_manager</text>
-  <text x="1032" y="322" text-anchor="middle" class="note">general chat</text>
-  <text x="1032" y="338" text-anchor="middle" class="note">tool-grounded replies</text>
+  <g class="float-box" style="animation-delay:.6s">
+    <rect x="330" y="310" width="120" height="140" rx="12" fill="#1e1e2e" stroke="#60a5fa50" stroke-width="1.5" filter="url(#shadow)"/>
+    <text x="390" y="334" text-anchor="middle" fill="#60a5fa" font-size="11" font-weight="700">📅 Schedule Mgr</text>
+    <text x="390" y="348" text-anchor="middle" fill="#64748b" font-size="8">schedule_manager_node()</text>
+    <line x1="342" y1="354" x2="438" y2="354" stroke="#60a5fa20" stroke-width="1"/>
+    <text x="346" y="368" fill="#94a3b8" font-size="7.5">自然语言→时间</text>
+    <text x="346" y="382" fill="#94a3b8" font-size="7.5">APScheduler 持久化</text>
+    <text x="346" y="396" fill="#94a3b8" font-size="7.5">日历查询(日/周/月)</text>
+    <line x1="342" y1="403" x2="438" y2="403" stroke="#60a5fa20" stroke-width="1"/>
+    <text x="346" y="417" fill="#64748b" font-size="7" font-style="italic">send_reminder_job()</text>
+    <text x="346" y="430" fill="#64748b" font-size="7" font-style="italic">多端广播 + 投递记录</text>
+  </g>
 
-  <rect x="600" y="380" width="160" height="84" rx="12" fill="#1f355a" stroke="#5b8fd2" />
-  <text x="680" y="408" text-anchor="middle" class="stepTitle">skill_manager</text>
-  <text x="680" y="426" text-anchor="middle" class="note">skill lifecycle</text>
+  <g class="float-box" style="animation-delay:.9s">
+    <rect x="464" y="310" width="138" height="140" rx="12" fill="#1e1e2e" stroke="url(#pink)" stroke-width="2" filter="url(#shadow)"/>
+    <text x="533" y="334" text-anchor="middle" fill="#f472b6" font-size="11" font-weight="700">✍️ Chat Mgr + MCP</text>
+    <text x="533" y="348" text-anchor="middle" fill="#64748b" font-size="8">chat_manager_node()</text>
+    <line x1="476" y1="354" x2="590" y2="354" stroke="#f472b620" stroke-width="1"/>
+    <text x="480" y="368" fill="#94a3b8" font-size="7.5">翻译/润色/写作/问答</text>
+    <text x="480" y="382" fill="#94a3b8" font-size="7.5">天气查询 · 技能注入</text>
+    <text x="480" y="396" fill="#94a3b8" font-size="7.5">unknown → 兜底</text>
+    <line x1="476" y1="403" x2="590" y2="403" stroke="#f472b620" stroke-width="1"/>
+    <text x="480" y="417" fill="#f472b6" font-size="7" font-weight="600">↓ create_react_agent()</text>
+    <text x="480" y="430" fill="#64748b" font-size="7" font-style="italic">tool_registry 动态发现</text>
+  </g>
 
-  <rect x="776" y="380" width="160" height="84" rx="12" fill="#1f355a" stroke="#5b8fd2" />
-  <text x="856" y="408" text-anchor="middle" class="stepTitle">help_center</text>
-  <text x="856" y="426" text-anchor="middle" class="note">help/capability docs</text>
+  <g class="float-box" style="animation-delay:1.2s">
+    <rect x="616" y="310" width="136" height="140" rx="12" fill="#1e1e2e" stroke="#fb923c50" stroke-width="1.5" filter="url(#shadow)"/>
+    <text x="684" y="334" text-anchor="middle" fill="#fb923c" font-size="11" font-weight="700">🎯 Skill Mgr</text>
+    <text x="684" y="348" text-anchor="middle" fill="#64748b" font-size="8">skill_manager_node()</text>
+    <line x1="628" y1="354" x2="740" y2="354" stroke="#fb923c20" stroke-width="1"/>
+    <text x="632" y="368" fill="#94a3b8" font-size="7.5">创建/更新技能草稿</text>
+    <text x="632" y="382" fill="#94a3b8" font-size="7.5">发布 / 停用技能</text>
+    <text x="632" y="396" fill="#94a3b8" font-size="7.5">查看技能版本内容</text>
+    <line x1="628" y1="403" x2="740" y2="403" stroke="#fb923c20" stroke-width="1"/>
+    <text x="632" y="417" fill="#64748b" font-size="7" font-style="italic">parse_skill_intent()</text>
+    <text x="632" y="430" fill="#64748b" font-size="7" font-style="italic">SKILL.md 模板</text>
+  </g>
 
-  <rect x="952" y="380" width="160" height="84" rx="12" fill="#2b2d4f" stroke="#8f78ca" />
-  <text x="1032" y="408" text-anchor="middle" class="stepTitle">complex_task</text>
-  <text x="1032" y="426" text-anchor="middle" class="note">cross-node orchestration</text>
+  <g class="float-box" style="animation-delay:1.5s">
+    <rect x="766" y="310" width="170" height="140" rx="12" fill="#1e1e2e" stroke="#22d3ee50" stroke-width="1.5" filter="url(#shadow)"/>
+    <text x="851" y="334" text-anchor="middle" fill="#22d3ee" font-size="11" font-weight="700">📖 Help Center</text>
+    <text x="851" y="348" text-anchor="middle" fill="#64748b" font-size="8">help_center_node()</text>
+    <line x1="778" y1="354" x2="924" y2="354" stroke="#22d3ee20" stroke-width="1"/>
+    <text x="782" y="368" fill="#94a3b8" font-size="7.5">AGENT_GUIDE.md 知识库</text>
+    <text x="782" y="382" fill="#94a3b8" font-size="7.5">命令帮助说明</text>
+    <text x="782" y="396" fill="#94a3b8" font-size="7.5">工具能力概览</text>
+    <line x1="778" y1="403" x2="924" y2="403" stroke="#22d3ee20" stroke-width="1"/>
+    <text x="782" y="417" fill="#64748b" font-size="7" font-style="italic">_load_help_doc()</text>
+    <text x="782" y="430" fill="#64748b" font-size="7" font-style="italic">tool_registry 注入</text>
+  </g>
 
-  <path d="M860 250 V276" class="line" />
-  <path d="M860 250 L680 276" class="dashed" />
-  <path d="M860 250 L1032 276" class="dashed" />
-  <path d="M860 250 L680 380" class="dashed" />
-  <path d="M860 250 V380" class="dashed" />
-  <path d="M860 250 L1032 380" class="dashed" />
+  <g class="float-box" style="animation-delay:1.7s">
+    <rect x="748" y="456" width="188" height="76" rx="12" fill="#1e1e2e" stroke="#fbbf2450" stroke-width="1.5" filter="url(#shadow)"/>
+    <text x="842" y="478" text-anchor="middle" fill="#fbbf24" font-size="11" font-weight="700">🧠 Complex Task</text>
+    <text x="842" y="492" text-anchor="middle" fill="#64748b" font-size="8">complex_task_node()</text>
+    <line x1="760" y1="498" x2="924" y2="498" stroke="#fbbf2420" stroke-width="1"/>
+    <text x="764" y="512" fill="#94a3b8" font-size="7.5">JSON 计划 (Schema) + 依赖调度</text>
+    <text x="764" y="526" fill="#64748b" font-size="7" font-style="italic">跨节点编排后统一汇总回复</text>
+  </g>
 
-  <text x="620" y="500" class="section">Tool and Data Integration</text>
+  <line x1="533" y1="450" x2="533" y2="478" stroke="#f472b680" stroke-width="1.5" class="flow-line"/>
 
-  <rect x="600" y="524" width="520" height="100" rx="12" fill="#21395c" stroke="#5a89c8" />
-  <text x="620" y="552" class="stepTitle">Tool access model</text>
-  <text x="620" y="570" class="stepText">router stores runtime tool metadata in state.extra.tool_catalog</text>
-  <text x="620" y="588" class="stepText">nodes call tools via registry/toolsets wrappers (invoke_node_tool + LangChain tools)</text>
-  <text x="620" y="606" class="stepText">common tools + node-scoped tools + MCP-backed tools</text>
+  <rect x="468" y="478" width="130" height="34" rx="12" fill="#1e1e2e" stroke="url(#pink)" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="533" y="500" text-anchor="middle" fill="#f472b6" font-size="10" font-weight="700">🤖 ReAct Agent</text>
+  <circle cx="533" cy="495" r="2" fill="#f472b6" class="pulse-node"/>
 
-  <rect x="600" y="644" width="250" height="120" rx="12" fill="#1f3557" stroke="#5b87c2" />
-  <text x="725" y="672" text-anchor="middle" class="stepTitle">PostgreSQL</text>
-  <text x="620" y="692" class="stepText">user/profile</text>
-  <text x="620" y="710" class="stepText">messages/conversations</text>
-  <text x="620" y="728" class="stepText">ledgers/schedules/reminders</text>
-  <text x="620" y="746" class="stepText">long_term_memories</text>
+  <line x1="533" y1="512" x2="380" y2="542" stroke="#fbbf2450" stroke-width="1" class="flow-line"/>
+  <line x1="533" y1="512" x2="472" y2="542" stroke="#fbbf2450" stroke-width="1" class="flow-line"/>
+  <line x1="533" y1="512" x2="564" y2="542" stroke="#fbbf2450" stroke-width="1" class="flow-line"/>
+  <line x1="533" y1="512" x2="656" y2="542" stroke="#fbbf2450" stroke-width="1" class="flow-line"/>
 
-  <rect x="870" y="644" width="250" height="120" rx="12" fill="#1f3557" stroke="#5b87c2" />
-  <text x="995" y="672" text-anchor="middle" class="stepTitle">Redis + MCP</text>
-  <text x="890" y="692" class="stepText">graph checkpoint state</text>
-  <text x="890" y="710" class="stepText">pending caches</text>
-  <text x="890" y="728" class="stepText">weather/fetch/custom tools</text>
+  <rect x="338" y="542" width="84" height="30" rx="8" fill="#1e1e2e" stroke="#fbbf2440" stroke-width="1"/>
+  <text x="380" y="561" text-anchor="middle" fill="#fbbf24" font-size="9" font-weight="600">⏱ now_time</text>
 
-  <path d="M680 464 V524" class="line" />
-  <path d="M1032 464 V524" class="line-dashed" />
-  <path d="M860 624 L725 644" class="line" />
-  <path d="M860 624 L995 644" class="line" />
+  <rect x="430" y="542" width="84" height="30" rx="8" fill="#1e1e2e" stroke="#fbbf2440" stroke-width="1"/>
+  <text x="472" y="561" text-anchor="middle" fill="#fbbf24" font-size="9" font-weight="600">📋 list_tools</text>
 
-  <text x="600" y="812" class="section">Why memory list now works reliably</text>
-  <rect x="600" y="834" width="520" height="80" rx="12" fill="#24304d" stroke="#7687b9" />
-  <text x="620" y="860" class="stepText">- Memory listing requests bypass semantic top-k retrieval.</text>
-  <text x="620" y="878" class="stepText">- Handler calls list_long_term_memories() with larger limit and direct rendering.</text>
-  <text x="620" y="896" class="stepText">- Optional settle wait reduces read-after-write gaps from async upsert pipeline.</text>
+  <rect x="522" y="542" width="84" height="30" rx="8" fill="#1e1e2e" stroke="#fbbf2440" stroke-width="1"/>
+  <text x="564" y="561" text-anchor="middle" fill="#fbbf24" font-size="9" font-weight="600">🔧 call_tool</text>
+
+  <rect x="614" y="542" width="84" height="30" rx="8" fill="#1e1e2e" stroke="#fbbf2440" stroke-width="1"/>
+  <text x="656" y="561" text-anchor="middle" fill="#fbbf24" font-size="9" font-weight="600">🌐 fetch_url</text>
+
+  <line x1="472" y1="572" x2="533" y2="600" stroke="#22d3ee50" stroke-width="1" class="flow-line"/>
+  <line x1="564" y1="572" x2="533" y2="600" stroke="#22d3ee50" stroke-width="1" class="flow-line"/>
+  <line x1="656" y1="572" x2="533" y2="600" stroke="#22d3ee50" stroke-width="1" class="flow-line"/>
+
+  <rect x="468" y="600" width="130" height="34" rx="12" fill="#1e1e2e" stroke="url(#cyan)" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="533" y="622" text-anchor="middle" fill="#22d3ee" font-size="10" font-weight="700">🔌 MCP Fetch Server</text>
+  <circle cx="533" cy="617" r="2" fill="#22d3ee" class="pulse-node"/>
+
+  <text x="612" y="622" fill="#64748b" font-size="7" font-style="italic">Streamable HTTP · JSON-RPC 2.0</text>
+
+  <line x1="88" y1="450" x2="88" y2="672" stroke="#a78bfa40" stroke-width="1" class="flow-line"/>
+  <line x1="240" y1="450" x2="240" y2="672" stroke="#34d39940" stroke-width="1" class="flow-line"/>
+  <line x1="390" y1="450" x2="390" y2="672" stroke="#60a5fa40" stroke-width="1" class="flow-line"/>
+  <line x1="684" y1="450" x2="684" y2="672" stroke="#fb923c40" stroke-width="1" class="flow-line"/>
+  <line x1="851" y1="450" x2="851" y2="672" stroke="#22d3ee40" stroke-width="1" class="flow-line"/>
+  <line x1="842" y1="532" x2="842" y2="672" stroke="#fbbf2440" stroke-width="1" class="flow-line"/>
+
+  <line x1="533" y1="634" x2="533" y2="672" stroke="#f472b640" stroke-width="1" class="flow-line"/>
+
+  <line x1="88" y1="672" x2="851" y2="672" stroke="#64748b30" stroke-width="1.5"/>
+  <text x="480" y="668" text-anchor="middle" fill="#64748b" font-size="8">add_edge("node", END)</text>
+
+  <line x1="480" y1="672" x2="480" y2="702" stroke="#64748b50" stroke-width="1.5" class="flow-line"/>
+
+  <g filter="url(#glow)">
+    <rect x="410" y="700" width="140" height="40" rx="20" fill="#1e1e2e" stroke="url(#red)" stroke-width="2"/>
+    <text x="480" y="725" text-anchor="middle" fill="#f87171" font-size="13" font-weight="700">🏁  END</text>
+  </g>
+  <circle cx="480" cy="720" r="2.5" fill="#f87171" class="pulse-node"/>
+
+  <line x1="480" y1="740" x2="480" y2="764" stroke="#f8717140" stroke-width="1" class="flow-line"/>
+  <text x="480" y="778" text-anchor="middle" fill="#94a3b8" font-size="10">responses: List[str] → UnifiedSender → 多平台投递</text>
+
+  <rect x="30" y="800" width="280" height="58" rx="12" fill="#1e1e2e" stroke="#818cf830" stroke-width="1" filter="url(#shadow)"/>
+  <text x="52" y="821" fill="#818cf8" font-size="10" font-weight="600">📦 GraphState</text>
+  <text x="52" y="836" fill="#64748b" font-size="8" font-family="monospace">user_id · conversation_id · user_setup_stage</text>
+  <text x="52" y="850" fill="#64748b" font-size="8" font-family="monospace">message · intent · responses · extra</text>
+
+  <rect x="340" y="800" width="280" height="58" rx="12" fill="#1e1e2e" stroke="#34d39930" stroke-width="1" filter="url(#shadow)"/>
+  <text x="362" y="821" fill="#34d399" font-size="10" font-weight="600">🗄️ 数据存储</text>
+  <text x="362" y="836" fill="#64748b" font-size="8" font-family="monospace">PostgreSQL: users / ledgers / schedules / skills / memory</text>
+  <text x="362" y="850" fill="#64748b" font-size="8" font-family="monospace">Redis: checkpointer · pending_ledger · dedup</text>
+
+  <rect x="650" y="800" width="280" height="58" rx="12" fill="#1e1e2e" stroke="#818cf830" stroke-width="1" filter="url(#shadow)"/>
+  <text x="672" y="821" fill="#818cf8" font-size="10" font-weight="600">📐 图例</text>
+  <line x1="712" y1="820" x2="742" y2="820" stroke="#34d399" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="750" y="823" fill="#94a3b8" font-size="8">条件边 (conditional_edges)</text>
+  <line x1="712" y1="836" x2="742" y2="836" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="750" y="839" fill="#94a3b8" font-size="8">工具调用 (ReAct → MCP)</text>
+  <circle cx="720" cy="852" r="2.5" fill="#818cf8" class="pulse-node"/>
+  <text x="750" y="855" fill="#94a3b8" font-size="8">脉冲节点 = 核心决策点</text>
+
 </svg>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -14,6 +15,8 @@ from app.services.tool_registry import list_runtime_tool_metas
 
 
 HELP_DOC_PATH = Path(__file__).resolve().parents[2] / "knowledge" / "AGENT_GUIDE.md"
+IDENTITY_USER_PATTERN = re.compile(r"(我是谁|我叫什么|who\s+am\s+i)", re.IGNORECASE)
+IDENTITY_ASSISTANT_PATTERN = re.compile(r"(你是谁|你叫什么|who\s+are\s+you)", re.IGNORECASE)
 
 
 def _skill_status_label(value: str | None) -> str:
@@ -63,6 +66,31 @@ def _build_tool_context(tools: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _detect_identity_query(content: str) -> tuple[bool, bool]:
+    text = (content or "").strip()
+    if not text:
+        return False, False
+    ask_user = bool(IDENTITY_USER_PATTERN.search(text))
+    ask_assistant = bool(IDENTITY_ASSISTANT_PATTERN.search(text))
+    return ask_user, ask_assistant
+
+
+def _render_identity_reply(*, user: User, ask_user: bool, ask_assistant: bool) -> str:
+    lines: list[str] = []
+    if ask_user:
+        nickname = str(user.nickname or "").strip()
+        if nickname:
+            lines.append(f"你叫{nickname}。")
+        else:
+            lines.append("我这边还没有记录你的昵称，你可以说“以后叫我xxx”。")
+    if ask_assistant:
+        ai_name = str(user.ai_name or "").strip() or "AI 助手"
+        ai_emoji = str(user.ai_emoji or "").strip()
+        suffix = f" {ai_emoji}" if ai_emoji else ""
+        lines.append(f"我是{ai_name}{suffix}。")
+    return "\n".join(lines).strip()
+
+
 async def help_center_node(state: GraphState) -> GraphState:
     message = state["message"]
     content = (message.content or "").strip()
@@ -73,6 +101,13 @@ async def help_center_node(state: GraphState) -> GraphState:
     if not user:
         return {**state, "responses": ["未找到用户信息。"]}
 
+    ask_user, ask_assistant = _detect_identity_query(content)
+    if ask_user or ask_assistant:
+        return {
+            **state,
+            "responses": [_render_identity_reply(user=user, ask_user=ask_user, ask_assistant=ask_assistant)],
+        }
+
     skills = await list_skills_with_source(session, user.id)
     skill_context = _build_skill_context(skills)
     tool_context = _build_tool_context(await list_runtime_tool_metas())
@@ -82,7 +117,7 @@ async def help_center_node(state: GraphState) -> GraphState:
     llm = get_llm(node_name="help_center")
     system = SystemMessage(
         content=(
-            "你是 PAI 的帮助与能力说明助手。"
+            f"你是{user.nickname}的私人助理{user.ai_name} {user.ai_emoji}，负责帮助与能力说明。"
             "你必须基于提供的《平台说明文档》与《当前用户技能上下文》回答。"
             "如果用户问到之前聊过什么，必须优先参考会话上下文作答。"
             "不要编造文档外功能。"

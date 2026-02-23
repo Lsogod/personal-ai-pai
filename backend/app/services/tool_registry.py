@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any
 from typing import TypedDict
 
@@ -13,6 +15,12 @@ class ToolMeta(TypedDict):
     source: str
     description: str
     enabled: bool
+
+
+_RUNTIME_TOOL_CACHE_TTL_SEC = 30.0
+_runtime_tool_cache_lock = asyncio.Lock()
+_runtime_tool_cache_rows: list[ToolMeta] | None = None
+_runtime_tool_cache_expire_at: float = 0.0
 
 
 def _parse_allowlist(raw: str) -> set[str]:
@@ -91,6 +99,78 @@ def list_builtin_tool_metas() -> list[ToolMeta]:
             "description": "Call an external tool by name.",
             "enabled": True,
         },
+        {
+            "name": "analyze_receipt",
+            "source": "builtin",
+            "description": "Analyze receipt/payment image and return structured fields.",
+            "enabled": True,
+        },
+        {
+            "name": "ledger_text2sql",
+            "source": "builtin",
+            "description": "Execute natural-language ledger CRUD/query with guarded SQL pipeline.",
+            "enabled": True,
+        },
+        {
+            "name": "ledger_insert",
+            "source": "builtin",
+            "description": "Create one ledger record.",
+            "enabled": True,
+        },
+        {
+            "name": "ledger_update",
+            "source": "builtin",
+            "description": "Update one ledger record by id.",
+            "enabled": True,
+        },
+        {
+            "name": "ledger_delete",
+            "source": "builtin",
+            "description": "Delete one ledger record by id.",
+            "enabled": True,
+        },
+        {
+            "name": "ledger_get_latest",
+            "source": "builtin",
+            "description": "Get latest ledger record.",
+            "enabled": True,
+        },
+        {
+            "name": "ledger_list_recent",
+            "source": "builtin",
+            "description": "List recent ledger records.",
+            "enabled": True,
+        },
+        {
+            "name": "ledger_list",
+            "source": "builtin",
+            "description": "List ledger records with optional id/date/category/item filters.",
+            "enabled": True,
+        },
+        {
+            "name": "schedule_insert",
+            "source": "builtin",
+            "description": "Create one schedule/reminder row and schedule trigger job.",
+            "enabled": True,
+        },
+        {
+            "name": "schedule_update",
+            "source": "builtin",
+            "description": "Update one schedule/reminder row.",
+            "enabled": True,
+        },
+        {
+            "name": "schedule_delete",
+            "source": "builtin",
+            "description": "Delete one schedule/reminder row.",
+            "enabled": True,
+        },
+        {
+            "name": "schedule_list",
+            "source": "builtin",
+            "description": "List schedule/reminder rows by id/status/time window/content filters.",
+            "enabled": True,
+        },
     ]
 
 
@@ -107,6 +187,23 @@ def _candidate_mcp_urls() -> list[str]:
 
 
 async def list_runtime_tool_metas() -> list[ToolMeta]:
+    global _runtime_tool_cache_rows, _runtime_tool_cache_expire_at
+    now = time.monotonic()
+    if _runtime_tool_cache_rows is not None and now < _runtime_tool_cache_expire_at:
+        return [dict(item) for item in _runtime_tool_cache_rows]
+
+    async with _runtime_tool_cache_lock:
+        now = time.monotonic()
+        if _runtime_tool_cache_rows is not None and now < _runtime_tool_cache_expire_at:
+            return [dict(item) for item in _runtime_tool_cache_rows]
+
+        rows = await _list_runtime_tool_metas_uncached()
+        _runtime_tool_cache_rows = [dict(item) for item in rows]
+        _runtime_tool_cache_expire_at = now + _RUNTIME_TOOL_CACHE_TTL_SEC
+        return [dict(item) for item in _runtime_tool_cache_rows]
+
+
+async def _list_runtime_tool_metas_uncached() -> list[ToolMeta]:
     settings = get_settings()
     enabled_map = await load_tool_enabled_map()
     rows = list_builtin_tool_metas()

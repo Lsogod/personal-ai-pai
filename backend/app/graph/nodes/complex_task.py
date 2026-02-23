@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import get_settings
+from app.db.session import AsyncSessionLocal
 from app.graph.context import render_conversation_context
 from app.graph.nodes.chat_manager import chat_manager_node
 from app.graph.nodes.help_center import help_center_node
@@ -21,6 +22,7 @@ from app.graph.nodes.schedule_manager import schedule_manager_node
 from app.graph.nodes.skill_manager import skill_manager_node
 from app.graph.state import GraphState
 from app.schemas.unified import UnifiedMessage
+from app.services.audit import log_event
 from app.services.llm import get_llm
 from app.services.tool_executor import execute_capability_with_usage
 from app.services.tool_registry import list_runtime_tool_metas
@@ -693,6 +695,43 @@ def _collect_runtime_tools(raw_rows: list[dict[str, Any]]) -> list[dict[str, Any
     return rows
 
 
+def _render_planning_json(planning: ComplexTaskPlanExtraction) -> str:
+    payload = planning.model_dump()
+    text = json.dumps(payload, ensure_ascii=False, indent=2)
+    if len(text) > 12000:
+        text = text[:12000] + "\n... (truncated)"
+    return f"```json\n{text}\n```"
+
+
+async def _audit_planning_json(
+    *,
+    state: GraphState,
+    planning: ComplexTaskPlanExtraction,
+) -> None:
+    message = state.get("message")
+    if message is None:
+        return
+    user_id = int(state.get("user_id") or 0) or None
+    conversation_id = int(state.get("conversation_id") or 0) or None
+    detail = {
+        "conversation_id": conversation_id,
+        "need_complex": bool(planning.need_complex),
+        "reason": str(planning.reason or ""),
+        "plan": planning.plan.model_dump() if planning.plan is not None else None,
+    }
+    try:
+        async with AsyncSessionLocal() as session:
+            await log_event(
+                session=session,
+                action="complex_plan_generated",
+                platform=str(message.platform or "unknown"),
+                user_id=user_id,
+                detail=detail,
+            )
+    except Exception:
+        return
+
+
 async def complex_task_node(state: GraphState) -> GraphState:
     message = state["message"]
     content = (message.content or "").strip()
@@ -727,6 +766,9 @@ async def complex_task_node(state: GraphState) -> GraphState:
         )
         return {**state, "responses": [question]}
 
+    plan_json_reply = _render_planning_json(planning)
+    await _audit_planning_json(state=state, planning=planning)
+
     if not bool(planning.need_complex):
         fallback = await _decide_non_complex_handling(
             content=content,
@@ -758,11 +800,7 @@ async def complex_task_node(state: GraphState) -> GraphState:
             "fallback_mode": str(fallback.mode or ""),
             "fallback_node_action": str(fallback.node_action or ""),
         }
-        return {
-            **state,
-            "responses": responses,
-            "extra": extra,
-        }
+        return {**state, "responses": [plan_json_reply, *responses], "extra": extra}
 
     plan = planning.plan
     if plan is None:
@@ -773,7 +811,7 @@ async def complex_task_node(state: GraphState) -> GraphState:
         )
         return {
             **state,
-            "responses": [question],
+            "responses": [plan_json_reply, question],
         }
 
     is_valid, reason = _validate_plan(plan)
@@ -785,7 +823,7 @@ async def complex_task_node(state: GraphState) -> GraphState:
         )
         return {
             **state,
-            "responses": [question],
+            "responses": [plan_json_reply, question],
             "extra": {
                 **dict(state.get("extra") or {}),
                 "complex_task": {
@@ -953,4 +991,4 @@ async def complex_task_node(state: GraphState) -> GraphState:
         "trace": step_trace,
         "tool_calls_total": int(tool_counters.get("total", 0)),
     }
-    return {**state, "responses": [summary], "extra": extra}
+    return {**state, "responses": [plan_json_reply, summary], "extra": extra}

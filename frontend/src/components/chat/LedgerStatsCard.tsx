@@ -69,7 +69,7 @@ export function LedgerStatsCard({ stats, token }: LedgerStatsCardProps) {
   const query = useQuery<LedgerItem[]>({
     queryKey: ["ledgers", "stats-card", token],
     enabled: !!token,
-    queryFn: () => fetchLedgers(token, 300),
+    queryFn: () => fetchLedgers(token, 200),
     refetchInterval: token ? 15000 : false,
   });
 

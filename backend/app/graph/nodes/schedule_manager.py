@@ -3,22 +3,25 @@ import asyncio
 import re
 from datetime import date, datetime, timedelta
 from typing import Any
-from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
 
 from app.core.config import get_settings
 from app.graph.context import render_conversation_context
+from app.graph.prompts.schedule_manager_prompts import (
+    build_schedule_intent_messages,
+    build_schedule_reminder_fallback_messages,
+    build_schedule_weather_conditional_messages,
+)
 from app.graph.state import GraphState
 from app.models.ledger import Ledger
-from app.models.reminder_delivery import ReminderDelivery
 from app.models.schedule import Schedule
+from app.services.langchain_tools import ToolInvocationContext
 from app.services.llm import get_llm
-from app.services.scheduler_tasks import send_reminder_job
-from app.services.runtime_context import get_session, get_scheduler
+from app.services.toolsets import invoke_node_tool
+from app.services.runtime_context import get_session
 from app.models.user import User
 
 
@@ -27,6 +30,10 @@ DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
 RELATIVE_SECONDS_PATTERN = re.compile(r"(\d+)\s*秒(?:钟)?后")
 RELATIVE_MINUTES_PATTERN = re.compile(r"(\d+)\s*分(?:钟)?后")
 RELATIVE_HOURS_PATTERN = re.compile(r"(\d+)\s*小?时后")
+CLOCK_TIME_PATTERN = re.compile(
+    r"((?<!\d)(?:[01]?\d|2[0-3])\s*(?::|：)\s*[0-5]?\d(?!\d))|"
+    r"((?<!\d)(?:[01]?\d|2[0-3])\s*点(?:\s*[0-5]?\d\s*分?)?(?!\d))"
+)
 EXPLICIT_OFFSET_PATTERN = re.compile(r"(?:提前|前)\s*(\d+)\s*(分钟|分|小时|时|天)")
 TECHNICAL_LEAK_PATTERN = re.compile(r"(json|payload|字段|数组|schema|schedules|ledgers)", re.IGNORECASE)
 REMINDER_CONTENT_CLEAN_PATTERNS = (
@@ -148,8 +155,34 @@ EVENT_TYPE_DEFAULT_TITLES = {
 class ReminderTitleExtraction(BaseModel):
     title: str = Field(default="")
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class ConditionalWeatherReminderExtraction(BaseModel):
+    conditional: bool = Field(default=False)
+    condition_type: str = Field(default="none")
+    city: str = Field(default="")
+    target_date: str = Field(default="")
+    run_at_local: str = Field(default="")
+    reminder_content: str = Field(default="")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
 MAX_REMINDER_COUNT = 3
 MIN_OFFSET_GAP_MINUTES = 10
+WEATHER_RAIN_TOKENS = (
+    "rain",
+    "shower",
+    "storm",
+    "thunder",
+    "snow",
+    "sleet",
+    "drizzle",
+    "雨",
+    "雪",
+    "雷",
+)
+DEICTIC_MULTI_PATTERN = re.compile(r"(这几个|这些|刚才那些|上面那些|都删了|都删除|全部删|全部删除)")
+DEICTIC_SINGLE_PATTERN = re.compile(r"(这个|这条|这一条|这一个)")
 
 
 def _schedule_status_label(value: str | None) -> str:
@@ -240,6 +273,170 @@ def _parse_json_object(content: str) -> dict:
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
+
+
+def _parse_json_list(content: str) -> list[dict[str, Any]]:
+    text = (content or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if len(lines) >= 3:
+            text = "\n".join(lines[1:-1]).strip()
+    try:
+        data = json.loads(text)
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
+
+
+def _coerce_iso_date(value: str | None) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        return date.fromisoformat(raw).isoformat()
+    except Exception:
+        return ""
+
+
+def _default_tomorrow_iso() -> str:
+    local_today = datetime.now(ZoneInfo(get_settings().timezone)).date()
+    return (local_today + timedelta(days=1)).isoformat()
+
+
+def _pick_forecast_row(forecasts: list[dict[str, Any]], target_date: str) -> dict[str, Any] | None:
+    if not forecasts:
+        return None
+    if target_date:
+        for row in forecasts:
+            if str(row.get("date") or "").strip() == target_date:
+                return row
+    return forecasts[0]
+
+
+def _weather_has_precipitation(day_text: str, night_text: str) -> bool:
+    joined = f"{day_text or ''} {night_text or ''}".lower()
+    return any(token in joined for token in WEATHER_RAIN_TOKENS)
+
+
+async def _understand_weather_conditional_reminder(
+    content: str,
+    conversation_context: str,
+) -> ConditionalWeatherReminderExtraction:
+    llm = get_llm(node_name="schedule_manager")
+    runnable = llm.with_structured_output(ConditionalWeatherReminderExtraction)
+    messages = build_schedule_weather_conditional_messages(
+        content=content,
+        conversation_context=conversation_context,
+    )
+    try:
+        parsed = await asyncio.wait_for(runnable.ainvoke(messages), timeout=25)
+        if isinstance(parsed, ConditionalWeatherReminderExtraction):
+            return parsed
+    except Exception:
+        pass
+    return ConditionalWeatherReminderExtraction()
+
+
+async def _call_maps_weather_tool(
+    *,
+    user_id: int,
+    platform: str,
+    conversation_id: int | None,
+    city: str,
+) -> str:
+    return await invoke_node_tool(
+        context=ToolInvocationContext(
+            user_id=user_id,
+            platform=platform,
+            conversation_id=conversation_id,
+        ),
+        node_name="schedule_manager",
+        tool_name="maps_weather",
+        args={"city": city},
+    )
+
+
+def _schedule_from_payload(payload: dict[str, Any]) -> Schedule | None:
+    if not isinstance(payload, dict):
+        return None
+    try:
+        schedule_id = int(payload.get("id") or 0)
+        user_id = int(payload.get("user_id") or 0)
+    except Exception:
+        return None
+    if schedule_id <= 0 or user_id <= 0:
+        return None
+    trigger_raw = str(payload.get("trigger_time") or "").strip().replace("T", " ")
+    trigger_time = None
+    if trigger_raw:
+        try:
+            trigger_time = datetime.fromisoformat(trigger_raw)
+        except Exception:
+            trigger_time = None
+    if trigger_time is None:
+        trigger_time = datetime.utcnow()
+    return Schedule(
+        id=schedule_id,
+        user_id=user_id,
+        job_id=str(payload.get("job_id") or ""),
+        content=str(payload.get("content") or ""),
+        trigger_time=trigger_time,
+        status=str(payload.get("status") or "PENDING"),
+    )
+
+
+def _ledger_from_payload(payload: dict[str, Any]) -> Ledger | None:
+    if not isinstance(payload, dict):
+        return None
+    try:
+        ledger_id = int(payload.get("id") or 0)
+        user_id = int(payload.get("user_id") or 0)
+        amount = float(payload.get("amount") or 0.0)
+    except Exception:
+        return None
+    if ledger_id <= 0 or user_id <= 0:
+        return None
+    transaction_raw = str(payload.get("transaction_date") or "").strip().replace("T", " ")
+    transaction_date = None
+    if transaction_raw:
+        try:
+            transaction_date = datetime.fromisoformat(transaction_raw)
+        except Exception:
+            transaction_date = None
+    if transaction_date is None:
+        transaction_date = datetime.utcnow()
+    return Ledger(
+        id=ledger_id,
+        user_id=user_id,
+        amount=amount,
+        currency=str(payload.get("currency") or "CNY"),
+        category=str(payload.get("category") or ""),
+        item=str(payload.get("item") or ""),
+        image_url=str(payload.get("image_url") or "") or None,
+        transaction_date=transaction_date,
+    )
+
+
+async def _invoke_schedule_tool(
+    *,
+    user_id: int,
+    platform: str,
+    conversation_id: int | None,
+    tool_name: str,
+    args: dict[str, Any] | None = None,
+) -> str:
+    return await invoke_node_tool(
+        context=ToolInvocationContext(
+            user_id=user_id,
+            platform=platform,
+            conversation_id=conversation_id,
+        ),
+        node_name="schedule_manager",
+        tool_name=tool_name,
+        args=dict(args or {}),
+    )
 
 
 def _sanitize_llm_text(text: str) -> str:
@@ -334,6 +531,13 @@ def _relative_precision_mode(content: str) -> str:
     return "none"
 
 
+def _has_explicit_clock_time_signal(content: str) -> bool:
+    text = (content or "").strip()
+    if not text:
+        return False
+    return bool(CLOCK_TIME_PATTERN.search(text))
+
+
 def _format_reminder_time(dt: datetime) -> str:
     if dt.second != 0:
         return dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -426,6 +630,47 @@ def _schedule_content_root(text: str) -> str:
     if not raw:
         return ""
     return SCHEDULE_DECORATION_PATTERN.sub("", raw).strip()
+
+
+def _looks_like_deictic_reference(content: str) -> tuple[bool, str]:
+    text = (content or "").strip()
+    if not text:
+        return False, "none"
+    if DEICTIC_MULTI_PATTERN.search(text):
+        return True, "multi"
+    if DEICTIC_SINGLE_PATTERN.search(text):
+        return True, "single"
+    return False, "none"
+
+
+def _pick_recent_schedule_ids_for_deictic(candidates: list[Schedule], mode: str) -> list[int]:
+    if not candidates:
+        return []
+    if mode == "single":
+        sid = int(candidates[0].id or 0)
+        return [sid] if sid > 0 else []
+    anchor_root = _schedule_content_root(str(candidates[0].content or ""))
+    picked: list[int] = []
+    for row in candidates:
+        sid = int(row.id or 0)
+        if sid <= 0:
+            continue
+        if anchor_root and _schedule_content_root(str(row.content or "")) != anchor_root:
+            continue
+        picked.append(sid)
+        if len(picked) >= 8:
+            break
+    if picked:
+        return picked
+    fallback: list[int] = []
+    for row in candidates:
+        sid = int(row.id or 0)
+        if sid <= 0:
+            continue
+        fallback.append(sid)
+        if len(fallback) >= 3:
+            break
+    return fallback
 
 
 def _normalize_event_type(value: str | None) -> str:
@@ -598,38 +843,22 @@ async def _understand_reminder_fallback(content: str, conversation_context: str)
     tz = settings.timezone
     now_local = datetime.now(ZoneInfo(tz)).strftime("%Y-%m-%d %H:%M")
     llm = get_llm(node_name="schedule_manager")
-    system = SystemMessage(
-        content=(
-            "你是提醒专用解析器。只输出 JSON。"
-            "字段: is_reminder, confidence, run_at_local, reminder_content, event_type, priority, explicit_offsets_minutes, event_tags。"
-            "is_reminder 只可为 true/false。"
-            "如果用户表达了提醒诉求（例如“1分钟后提醒我测试”“明早9点提醒我开会”），is_reminder=true。"
-            "run_at_local 必须换算为用户时区时间，格式 YYYY-MM-DD HH:MM[:SS]。"
-            "若用户明确到秒（如“30秒后”），必须保留秒；否则秒填 00。"
-            "reminder_content 必须是提醒标题本体（2-12字），去掉人称、时间、语气词。"
-            "例如“明天中午12点我有个会” -> reminder_content=“开会”。"
-            "event_type 仅可为 meeting/travel/deadline/appointment/payment/study/work/family/task/other。"
-            "priority 仅可为 low/medium/high/critical。"
-            "若用户明确说“提前X分钟/小时/天”，explicit_offsets_minutes 输出分钟整数数组；否则 []。"
-            "event_tags 是可选标签数组，用于补充细分场景。"
-            f"用户时区: {tz}。当前本地时间: {now_local}。"
-        )
+    messages = build_schedule_reminder_fallback_messages(
+        content=content,
+        conversation_context=conversation_context,
+        timezone=tz,
+        now_local=now_local,
     )
-    human = HumanMessage(
-        content=(
-            f"会话上下文:\n{conversation_context}\n\n"
-            f"用户输入:\n{content}"
-        )
-    )
-    response = await llm.ainvoke([system, human])
+    response = await llm.ainvoke(messages)
     return _parse_json_object(str(response.content))
 
 
 async def _create_reminder(
     *,
     session,
-    scheduler,
     user: User,
+    platform: str,
+    conversation_id: int | None,
     reminder_content: str,
     event_time: datetime,
     event_type: str,
@@ -643,22 +872,24 @@ async def _create_reminder(
         trigger_time = event_time - timedelta(minutes=offset)
         if trigger_time <= now_local + timedelta(seconds=1):
             continue
-        job_id = str(uuid4())
-        schedule = Schedule(
+        output = await _invoke_schedule_tool(
             user_id=user.id,
-            job_id=job_id,
-            content=_decorate_reminder_content(reminder_content, offset),
-            trigger_time=trigger_time,
+            platform=platform,
+            conversation_id=conversation_id,
+            tool_name="schedule_insert",
+            args={
+                "user_id": user.id,
+                "content": _decorate_reminder_content(reminder_content, offset),
+                "trigger_time": trigger_time.isoformat(sep=" ", timespec="seconds"),
+                "status": "PENDING",
+            },
         )
-        session.add(schedule)
-        await session.flush()
-        scheduler.add_job(job_id, trigger_time, send_reminder_job, schedule.id)
-        created_offsets.append(offset)
+        created = _schedule_from_payload(_parse_json_object(output))
+        if created is not None:
+            created_offsets.append(offset)
 
     if not created_offsets:
         return ""
-
-    await session.commit()
 
     try:
         from app.services.audit import log_event
@@ -692,42 +923,13 @@ async def _understand_schedule_message(content: str, conversation_context: str) 
     tz = settings.timezone
     now_local = datetime.now(ZoneInfo(tz)).strftime("%Y-%m-%d %H:%M")
     llm = get_llm(node_name="schedule_manager")
-    system = SystemMessage(
-        content=(
-            "你是提醒与日历意图解析器，只输出 JSON。"
-            "字段: intent, confidence, run_at_local, reminder_content, target_content, target_ids, reference_mode, selection_mode, event_type, priority, explicit_offsets_minutes, event_tags, calendar_scope, calendar_date, schedule_status_filter。"
-            "intent 仅可为 reminder, update_by_name, update_by_scope, delete_by_name, delete_by_scope, calendar, time_query, context_recall, unknown。"
-            "创建提醒时 intent=reminder。"
-            "按名称修改提醒（如‘把开会改到明天11点’）intent=update_by_name，并给 target_content 与 run_at_local。"
-            "按名称删除提醒（如‘删除开会这个提醒’）intent=delete_by_name，并给 target_content。"
-            "按范围删除提醒（如‘删除明天所有未完成提醒’）intent=delete_by_scope。"
-            "按范围修改提醒（如‘把明天所有提醒改到11点’）intent=update_by_scope。"
-            "run_at_local 使用用户时区，格式 YYYY-MM-DD HH:MM[:SS]。"
-            "若用户明确到秒，保留秒；否则秒可为00。"
-            "reminder_content 必须是提醒标题本体（2-12字），去掉“我/你/提醒我”、时间词和语气词。"
-            "例如“明天中午12点我有个会” -> reminder_content=“开会”。"
-            "event_type 仅可为 meeting/travel/deadline/appointment/payment/study/work/family/task/other。"
-            "priority 仅可为 low/medium/high/critical。"
-            "explicit_offsets_minutes 为分钟整数数组，未提及则 []。"
-            "查看日历/日程时 intent=calendar，calendar_scope 仅可为 today/tomorrow/week/month/date/yesterday/day_before_yesterday/last_week。"
-            "若 scope=date，calendar_date 输出 YYYY-MM-DD。"
-            "询问当前时间/日期/星期 intent=time_query。"
-            "询问上下文回顾 intent=context_recall。"
-            "schedule_status_filter 仅可为 all/pending/executed/cancelled，未提及时 all。"
-            "reference_mode 仅可为 by_id/by_name/by_scope/latest/last_result_set/auto。"
-            "当用户说‘这几个/这些/刚才那些’时，reference_mode=last_result_set。"
-            "selection_mode 仅可为 all/single/subset/auto。"
-            "confidence 范围 0~1。"
-            f"用户时区: {tz}。当前本地时间: {now_local}。"
-        )
+    messages = build_schedule_intent_messages(
+        content=content,
+        conversation_context=conversation_context,
+        timezone=tz,
+        now_local=now_local,
     )
-    human = HumanMessage(
-        content=(
-            f"会话上下文:\n{conversation_context}\n\n"
-            f"用户输入:\n{content}"
-        )
-    )
-    response = await llm.ainvoke([system, human])
+    response = await llm.ainvoke(messages)
     return _parse_json_object(str(response.content))
 
 
@@ -818,28 +1020,59 @@ def _fmt_dt(value: datetime | None, pattern: str = "%m-%d %H:%M", assume_utc: bo
     return value.strftime(pattern)
 
 
-async def _query_calendar_rows(session, user_id: int, start_at: datetime, end_at: datetime) -> tuple[list[Ledger], list[Schedule]]:
+async def _query_calendar_rows(
+    *,
+    user_id: int,
+    platform: str,
+    conversation_id: int | None,
+    start_at: datetime,
+    end_at: datetime,
+) -> tuple[list[Ledger], list[Schedule]]:
     ledger_start = _to_utc_naive(start_at)
     ledger_end = _to_utc_naive(end_at)
-    ledgers_result = await session.execute(
-        select(Ledger)
-        .where(
-            Ledger.user_id == user_id,
-            Ledger.transaction_date >= ledger_start,
-            Ledger.transaction_date < ledger_end,
-        )
-        .order_by(Ledger.transaction_date.asc(), Ledger.id.asc())
+    ledger_output = await _invoke_schedule_tool(
+        user_id=user_id,
+        platform=platform,
+        conversation_id=conversation_id,
+        tool_name="ledger_list",
+        args={
+            "user_id": user_id,
+            "start_at": ledger_start.isoformat(sep=" ", timespec="seconds"),
+            "end_at": ledger_end.isoformat(sep=" ", timespec="seconds"),
+            "limit": 500,
+            "order": "asc",
+        },
     )
-    schedules_result = await session.execute(
-        select(Schedule)
-        .where(
-            Schedule.user_id == user_id,
-            Schedule.trigger_time >= start_at,
-            Schedule.trigger_time < end_at,
-        )
-        .order_by(Schedule.trigger_time.asc(), Schedule.id.asc())
+    schedule_output = await _invoke_schedule_tool(
+        user_id=user_id,
+        platform=platform,
+        conversation_id=conversation_id,
+        tool_name="schedule_list",
+        args={
+            "user_id": user_id,
+            "start_at": start_at.isoformat(sep=" ", timespec="seconds"),
+            "end_at": end_at.isoformat(sep=" ", timespec="seconds"),
+            "limit": 500,
+            "order": "asc",
+        },
     )
-    return list(ledgers_result.scalars().all()), list(schedules_result.scalars().all())
+    ledgers = [
+        row
+        for row in (
+            _ledger_from_payload(item)
+            for item in _parse_json_list(ledger_output)
+        )
+        if row is not None
+    ]
+    schedules = [
+        row
+        for row in (
+            _schedule_from_payload(item)
+            for item in _parse_json_list(schedule_output)
+        )
+        if row is not None
+    ]
+    return ledgers, schedules
 
 
 def _filter_schedules_by_status(schedules: list[Schedule], status_filter: str) -> list[Schedule]:
@@ -951,8 +1184,9 @@ def _render_calendar_text(ledgers: list[Ledger], schedules: list[Schedule], labe
 
 
 async def _answer_calendar(
-    session,
     user_id: int,
+    platform: str,
+    conversation_id: int | None,
     content: str,
     conversation_context: str,
     start_at: datetime,
@@ -960,7 +1194,13 @@ async def _answer_calendar(
     label: str,
     schedule_status_filter: str,
 ) -> str:
-    ledgers, schedules = await _query_calendar_rows(session, user_id, start_at, end_at)
+    ledgers, schedules = await _query_calendar_rows(
+        user_id=user_id,
+        platform=platform,
+        conversation_id=conversation_id,
+        start_at=start_at,
+        end_at=end_at,
+    )
     filtered_schedules = _filter_schedules_by_status(schedules, schedule_status_filter)
     try:
         llm_text = await _answer_calendar_with_llm(
@@ -979,34 +1219,58 @@ async def _answer_calendar(
 
 
 async def _query_editable_schedules(
-    session,
     user_id: int,
+    platform: str,
+    conversation_id: int | None,
     limit: int = 120,
     target_hint: str = "",
 ) -> list[Schedule]:
     hint = (target_hint or "").strip()
     if hint:
-        hinted = await session.execute(
-            select(Schedule)
-            .where(
-                Schedule.user_id == user_id,
-                Schedule.status == "PENDING",
-                Schedule.content.ilike(f"%{hint}%"),
-            )
-            .order_by(Schedule.trigger_time.asc(), Schedule.id.asc())
-            .limit(min(limit, 40))
+        output = await _invoke_schedule_tool(
+            user_id=user_id,
+            platform=platform,
+            conversation_id=conversation_id,
+            tool_name="schedule_list",
+            args={
+                "user_id": user_id,
+                "status": "PENDING",
+                "content_like": hint,
+                "limit": min(limit, 40),
+                "order": "asc",
+            },
         )
-        hinted_rows = list(hinted.scalars().all())
+        hinted_rows = [
+            row
+            for row in (
+                _schedule_from_payload(item)
+                for item in _parse_json_list(output)
+            )
+            if row is not None
+        ]
         if hinted_rows:
             return hinted_rows
 
-    result = await session.execute(
-        select(Schedule)
-        .where(Schedule.user_id == user_id, Schedule.status == "PENDING")
-        .order_by(Schedule.id.desc())
-        .limit(limit)
+    output = await _invoke_schedule_tool(
+        user_id=user_id,
+        platform=platform,
+        conversation_id=conversation_id,
+        tool_name="schedule_list",
+        args={
+            "user_id": user_id,
+            "status": "PENDING",
+            "limit": limit,
+            "order": "desc",
+        },
     )
-    return list(result.scalars().all())
+    return [
+        row
+        for row in (
+            _schedule_from_payload(item)
+            for item in _parse_json_list(output)
+        )
+        if row is not None
+    ]
 
 
 def _build_schedule_target_payload(rows: list[Schedule]) -> dict[str, Any]:
@@ -1073,22 +1337,38 @@ def _with_last_schedule_query(
 
 
 async def _query_schedules_by_ids(
-    session,
     *,
     user_id: int,
+    platform: str,
+    conversation_id: int | None,
     schedule_ids: list[int],
     status_filter: str = "all",
 ) -> list[Schedule]:
     ids = _parse_int_list(schedule_ids)
     if not ids:
         return []
-    stmt = select(Schedule).where(Schedule.user_id == user_id, Schedule.id.in_(ids))
-    db_status = SCHEDULE_STATUS_DB.get(status_filter, None)
-    if db_status:
-        stmt = stmt.where(Schedule.status == db_status)
-    stmt = stmt.order_by(Schedule.trigger_time.asc(), Schedule.id.asc())
-    result = await session.execute(stmt)
-    rows = list(result.scalars().all())
+    db_status = SCHEDULE_STATUS_DB.get(status_filter, None) or "ALL"
+    output = await _invoke_schedule_tool(
+        user_id=user_id,
+        platform=platform,
+        conversation_id=conversation_id,
+        tool_name="schedule_list",
+        args={
+            "user_id": user_id,
+            "schedule_ids": ids,
+            "status": db_status,
+            "limit": max(100, len(ids) * 3),
+            "order": "asc",
+        },
+    )
+    rows = [
+        row
+        for row in (
+            _schedule_from_payload(item)
+            for item in _parse_json_list(output)
+        )
+        if row is not None
+    ]
     index_map = {int(row.id): row for row in rows if int(row.id or 0) > 0}
     ordered: list[Schedule] = []
     for sid in ids:
@@ -1099,35 +1379,45 @@ async def _query_schedules_by_ids(
 
 
 async def _query_schedules_by_window(
-    session,
     *,
     user_id: int,
+    platform: str,
+    conversation_id: int | None,
     start_at: datetime,
     end_at: datetime,
     status_filter: str = "all",
     limit: int = 400,
 ) -> list[Schedule]:
-    stmt = (
-        select(Schedule)
-        .where(
-            Schedule.user_id == user_id,
-            Schedule.trigger_time >= start_at,
-            Schedule.trigger_time < end_at,
-        )
-        .order_by(Schedule.trigger_time.asc(), Schedule.id.asc())
-        .limit(limit)
+    db_status = SCHEDULE_STATUS_DB.get(status_filter, None) or "ALL"
+    output = await _invoke_schedule_tool(
+        user_id=user_id,
+        platform=platform,
+        conversation_id=conversation_id,
+        tool_name="schedule_list",
+        args={
+            "user_id": user_id,
+            "status": db_status,
+            "start_at": start_at.isoformat(sep=" ", timespec="seconds"),
+            "end_at": end_at.isoformat(sep=" ", timespec="seconds"),
+            "limit": limit,
+            "order": "asc",
+        },
     )
-    db_status = SCHEDULE_STATUS_DB.get(status_filter, None)
-    if db_status:
-        stmt = stmt.where(Schedule.status == db_status)
-    result = await session.execute(stmt)
-    return list(result.scalars().all())
+    return [
+        row
+        for row in (
+            _schedule_from_payload(item)
+            for item in _parse_json_list(output)
+        )
+        if row is not None
+    ]
 
 
 async def _expand_related_schedule_rows(
-    session,
     *,
     user_id: int,
+    platform: str,
+    conversation_id: int | None,
     target_rows: list[Schedule],
     status_filter: str,
 ) -> list[Schedule]:
@@ -1137,7 +1427,13 @@ async def _expand_related_schedule_rows(
     roots.discard("")
     if not roots:
         return target_rows
-    candidates = await _query_editable_schedules(session, user_id, limit=300, target_hint="")
+    candidates = await _query_editable_schedules(
+        user_id,
+        platform=platform,
+        conversation_id=conversation_id,
+        limit=300,
+        target_hint="",
+    )
     picked: list[Schedule] = []
     seen: set[int] = set()
     for row in target_rows + candidates:
@@ -1241,37 +1537,38 @@ async def _select_schedule_ids_from_context(
 
 async def _delete_schedules_by_ids(
     *,
-    session,
-    scheduler,
     user_id: int,
+    platform: str,
+    conversation_id: int | None,
     schedule_ids: list[int],
 ) -> list[Schedule]:
     if not schedule_ids:
         return []
-    result = await session.execute(
-        select(Schedule).where(Schedule.user_id == user_id, Schedule.id.in_(schedule_ids))
+    rows = await _query_schedules_by_ids(
+        user_id=user_id,
+        platform=platform,
+        conversation_id=conversation_id,
+        schedule_ids=schedule_ids,
+        status_filter="all",
     )
-    rows = list(result.scalars().all())
     if not rows:
         return []
     snapshots = list(rows)
     for row in rows:
-        try:
-            scheduler.remove_job(str(row.job_id))
-        except Exception:
-            pass
-        await session.execute(
-            delete(ReminderDelivery).where(ReminderDelivery.schedule_id == int(row.id or 0))
+        output = await _invoke_schedule_tool(
+            user_id=user_id,
+            platform=platform,
+            conversation_id=conversation_id,
+            tool_name="schedule_delete",
+            args={"user_id": user_id, "schedule_id": int(row.id or 0)},
         )
-        await session.delete(row)
-    await session.commit()
+        _ = _schedule_from_payload(_parse_json_object(output))
     return snapshots
 
 
 async def schedule_manager_node(state: GraphState) -> GraphState:
     message = state["message"]
     session = get_session()
-    scheduler = get_scheduler()
     user = await session.get(User, state["user_id"])
     if not user:
         return {**state, "responses": ["未找到用户信息。"]}
@@ -1323,11 +1620,18 @@ async def schedule_manager_node(state: GraphState) -> GraphState:
         llm_window = _resolve_calendar_window_from_fields(scope, calendar_date)
         if llm_window:
             start_at, end_at, label = llm_window
-            ledgers, schedules = await _query_calendar_rows(session, user.id, start_at, end_at)
+            ledgers, schedules = await _query_calendar_rows(
+                user_id=user.id,
+                platform=(message.platform or "unknown"),
+                conversation_id=state.get("conversation_id"),
+                start_at=start_at,
+                end_at=end_at,
+            )
             filtered_schedules = _filter_schedules_by_status(schedules, schedule_status_filter)
             response = await _answer_calendar(
-                session=session,
                 user_id=user.id,
+                platform=(message.platform or "unknown"),
+                conversation_id=state.get("conversation_id"),
                 content=content,
                 conversation_context=context_text,
                 start_at=start_at,
@@ -1350,8 +1654,9 @@ async def schedule_manager_node(state: GraphState) -> GraphState:
         async def _resolve_target_schedules(operation: str) -> tuple[list[Schedule], str]:
             if target_ids and reference_mode in {"by_id", "auto"}:
                 rows = await _query_schedules_by_ids(
-                    session,
                     user_id=user.id,
+                    platform=(message.platform or "unknown"),
+                    conversation_id=state.get("conversation_id"),
                     schedule_ids=target_ids,
                     status_filter=schedule_status_filter,
                 )
@@ -1360,8 +1665,9 @@ async def schedule_manager_node(state: GraphState) -> GraphState:
             if reference_mode == "last_result_set":
                 last_ids = _read_last_schedule_ids_from_state(state)
                 rows = await _query_schedules_by_ids(
-                    session,
                     user_id=user.id,
+                    platform=(message.platform or "unknown"),
+                    conversation_id=state.get("conversation_id"),
                     schedule_ids=last_ids,
                     status_filter=schedule_status_filter,
                 )
@@ -1374,8 +1680,9 @@ async def schedule_manager_node(state: GraphState) -> GraphState:
                 if window:
                     start_at, end_at, _ = window
                     rows = await _query_schedules_by_window(
-                        session,
                         user_id=user.id,
+                        platform=(message.platform or "unknown"),
+                        conversation_id=state.get("conversation_id"),
                         start_at=start_at,
                         end_at=end_at,
                         status_filter=schedule_status_filter,
@@ -1384,16 +1691,18 @@ async def schedule_manager_node(state: GraphState) -> GraphState:
                 # scope parse failed: fallback to last result set
                 last_ids = _read_last_schedule_ids_from_state(state)
                 rows = await _query_schedules_by_ids(
-                    session,
                     user_id=user.id,
+                    platform=(message.platform or "unknown"),
+                    conversation_id=state.get("conversation_id"),
                     schedule_ids=last_ids,
                     status_filter=schedule_status_filter,
                 )
                 return rows, "last_result_set"
 
             candidates = await _query_editable_schedules(
-                session,
                 user.id,
+                platform=(message.platform or "unknown"),
+                conversation_id=state.get("conversation_id"),
                 limit=120,
                 target_hint=target_content,
             )
@@ -1411,11 +1720,16 @@ async def schedule_manager_node(state: GraphState) -> GraphState:
                     conversation_context=context_text,
                     candidates=candidates,
                 )
+            if not picked_ids:
+                has_deictic, deictic_mode = _looks_like_deictic_reference(content)
+                if has_deictic:
+                    picked_ids = _pick_recent_schedule_ids_for_deictic(candidates, deictic_mode)
             if selection_mode == "all" and not picked_ids and candidates:
                 picked_ids = [int(row.id) for row in candidates if int(row.id or 0) > 0]
             rows = await _query_schedules_by_ids(
-                session,
                 user_id=user.id,
+                platform=(message.platform or "unknown"),
+                conversation_id=state.get("conversation_id"),
                 schedule_ids=picked_ids,
                 status_filter=schedule_status_filter,
             )
@@ -1427,8 +1741,9 @@ async def schedule_manager_node(state: GraphState) -> GraphState:
             last_ids = _read_last_schedule_ids_from_state(state)
             if last_ids:
                 fallback_rows = await _query_schedules_by_ids(
-                    session,
                     user_id=user.id,
+                    platform=(message.platform or "unknown"),
+                    conversation_id=state.get("conversation_id"),
                     schedule_ids=last_ids,
                     status_filter=schedule_status_filter,
                 )
@@ -1440,8 +1755,9 @@ async def schedule_manager_node(state: GraphState) -> GraphState:
         target_rows, source = await _resolve_target_schedules(operation)
         if target_rows:
             target_rows = await _expand_related_schedule_rows(
-                session,
                 user_id=user.id,
+                platform=(message.platform or "unknown"),
+                conversation_id=state.get("conversation_id"),
                 target_rows=target_rows,
                 status_filter=schedule_status_filter,
             )
@@ -1456,9 +1772,9 @@ async def schedule_manager_node(state: GraphState) -> GraphState:
 
         if operation == "delete":
             deleted_rows = await _delete_schedules_by_ids(
-                session=session,
-                scheduler=scheduler,
                 user_id=user.id,
+                platform=(message.platform or "unknown"),
+                conversation_id=state.get("conversation_id"),
                 schedule_ids=target_schedule_ids,
             )
             deleted_count = len(deleted_rows)
@@ -1468,10 +1784,18 @@ async def schedule_manager_node(state: GraphState) -> GraphState:
             }
 
         trigger_time = _parse_run_at_local(str(parsed.get("run_at_local") or ""), get_settings().timezone)
+        relative_update_trigger = _parse_relative_reminder_local(content, get_settings().timezone)
+        if trigger_time is None:
+            trigger_time = relative_update_trigger
+        if relative_update_trigger is None and not _has_explicit_clock_time_signal(content):
+            return {
+                **state,
+                "responses": ["我理解到你要修改提醒，但还缺少具体时间。请补充。"],
+            }
         if trigger_time is None:
             return {
                 **state,
-                "responses": ["我理解到你要修改提醒时间，但缺少明确时间。请补充具体时间，例如：明天 11:00。"],
+                "responses": ["我理解到你要修改提醒时间，但缺少明确时间。请补充具体时间。"],
             }
         trigger_time = trigger_time.replace(second=0, microsecond=0)
         now_local = datetime.now(ZoneInfo(get_settings().timezone)).replace(tzinfo=None)
@@ -1504,8 +1828,9 @@ async def schedule_manager_node(state: GraphState) -> GraphState:
         )
         create_text = await _create_reminder(
             session=session,
-            scheduler=scheduler,
             user=user,
+            platform=(message.platform or "unknown"),
+            conversation_id=state.get("conversation_id"),
             reminder_content=reminder_content,
             event_time=trigger_time,
             event_type=event_type,
@@ -1519,9 +1844,9 @@ async def schedule_manager_node(state: GraphState) -> GraphState:
             }
 
         deleted_rows = await _delete_schedules_by_ids(
-            session=session,
-            scheduler=scheduler,
             user_id=user.id,
+            platform=(message.platform or "unknown"),
+            conversation_id=state.get("conversation_id"),
             schedule_ids=target_schedule_ids,
         )
         return {
@@ -1552,6 +1877,99 @@ async def schedule_manager_node(state: GraphState) -> GraphState:
         }
 
     if reminder_intent and reminder_confidence >= 0.35:
+        conditional = await _understand_weather_conditional_reminder(content, context_text)
+        condition_type = str(conditional.condition_type or "").strip().lower()
+        conditional_conf = float(conditional.confidence or 0.0)
+        if bool(conditional.conditional) and condition_type in {"weather_good", "weather_rain"} and conditional_conf >= 0.55:
+            city = str(conditional.city or "").strip()
+            if not city:
+                return {
+                    **state,
+                    "responses": ["我可以按天气条件创建提醒。请补充城市，例如：武汉。"],
+                }
+
+            target_date = _coerce_iso_date(conditional.target_date) or _default_tomorrow_iso()
+            run_at_raw = str(conditional.run_at_local or reminder_candidate.get("run_at_local") or "").strip()
+            run_time = _parse_run_at_local(run_at_raw, settings.timezone)
+            if run_time is None:
+                run_time = datetime.fromisoformat(f"{target_date} 08:00:00")
+            run_time = run_time.replace(second=0, microsecond=0)
+
+            weather_raw = await _call_maps_weather_tool(
+                user_id=user.id,
+                platform=(message.platform or "unknown"),
+                conversation_id=state.get("conversation_id"),
+                city=city,
+            )
+            weather_obj = _parse_json_object(weather_raw)
+            forecasts_raw = weather_obj.get("forecasts") if isinstance(weather_obj, dict) else None
+            forecasts = [item for item in (forecasts_raw or []) if isinstance(item, dict)]
+            if not forecasts:
+                return {
+                    **state,
+                    "responses": [f"天气工具当前不可用或返回为空，暂时无法判断 {city} {target_date} 的天气。"],
+                }
+
+            row = _pick_forecast_row(forecasts, target_date)
+            if row is None:
+                return {
+                    **state,
+                    "responses": [f"暂时拿不到 {city} {target_date} 的天气明细，未创建提醒。"],
+                }
+            dayweather = str(row.get("dayweather") or "").strip()
+            nightweather = str(row.get("nightweather") or "").strip()
+            rainy = _weather_has_precipitation(dayweather, nightweather)
+            matched = (not rainy) if condition_type == "weather_good" else rainy
+            if not matched:
+                reason_text = "预计有降水" if condition_type == "weather_good" else "预计无降水"
+                return {
+                    **state,
+                    "responses": [
+                        f"{city}{target_date} 白天{dayweather or '-'}，夜间{nightweather or '-'}，{reason_text}，本次不创建提醒。"
+                    ],
+                }
+
+            event_type = _normalize_event_type(str(reminder_candidate.get("event_type") or ""))
+            reminder_content_seed = _resolve_reminder_content(
+                str(conditional.reminder_content or reminder_candidate.get("reminder_content") or ""),
+                content,
+                event_type,
+            )
+            reminder_content = await _generate_reminder_title_with_llm(
+                user_content=content,
+                conversation_context=context_text,
+                hint_title=reminder_content_seed,
+                event_type=event_type,
+            )
+            priority = _normalize_priority(str(reminder_candidate.get("priority") or "medium"))
+            explicit_offsets = _resolve_explicit_offsets(reminder_candidate, content)
+            offsets_minutes = _resolve_reminder_offsets(
+                event_type=event_type,
+                priority=priority,
+                explicit_offsets=explicit_offsets,
+                relative_mode="none",
+            )
+            text = await _create_reminder(
+                session=session,
+                user=user,
+                platform=(message.platform or "unknown"),
+                conversation_id=state.get("conversation_id"),
+                reminder_content=reminder_content,
+                event_time=run_time,
+                event_type=event_type,
+                priority=priority,
+                offsets_minutes=offsets_minutes,
+            )
+            if text:
+                return {
+                    **state,
+                    "responses": [f"{text}（条件满足：{city}{target_date} 天气符合要求）"],
+                }
+            return {
+                **state,
+                "responses": ["提醒时间已过近，无法安排提前提醒。请给我一个稍晚一点的时间。"],
+            }
+
         trigger_time = _parse_run_at_local(str(reminder_candidate.get("run_at_local") or ""), settings.timezone)
         if relative_mode == "second" and relative_trigger is not None:
             # For "X秒后/X分钟后", always use second-precision relative scheduling.
@@ -1562,6 +1980,11 @@ async def schedule_manager_node(state: GraphState) -> GraphState:
             # Absolute/bigger-time reminders keep minute precision.
             trigger_time = trigger_time.replace(second=0, microsecond=0)
         now_local = datetime.now(ZoneInfo(settings.timezone)).replace(tzinfo=None)
+        if relative_mode == "none" and not _has_explicit_clock_time_signal(content):
+            return {
+                **state,
+                "responses": ["我理解到你要设置提醒，但还缺少具体时间。请告诉我几点，例如：周五 11:00。"],
+            }
         if trigger_time and trigger_time > now_local + timedelta(seconds=1):
             event_type = _normalize_event_type(str(reminder_candidate.get("event_type") or ""))
             reminder_content_seed = _resolve_reminder_content(
@@ -1585,8 +2008,9 @@ async def schedule_manager_node(state: GraphState) -> GraphState:
             )
             text = await _create_reminder(
                 session=session,
-                scheduler=scheduler,
                 user=user,
+                platform=(message.platform or "unknown"),
+                conversation_id=state.get("conversation_id"),
                 reminder_content=reminder_content,
                 event_time=trigger_time,
                 event_type=event_type,
@@ -1609,11 +2033,18 @@ async def schedule_manager_node(state: GraphState) -> GraphState:
                 "responses": ["日历命令格式：`/calendar today|week|month|YYYY-MM-DD`。"],
             }
         start_at, end_at, label = calendar_window
-        ledgers, schedules = await _query_calendar_rows(session, user.id, start_at, end_at)
+        ledgers, schedules = await _query_calendar_rows(
+            user_id=user.id,
+            platform=(message.platform or "unknown"),
+            conversation_id=state.get("conversation_id"),
+            start_at=start_at,
+            end_at=end_at,
+        )
         filtered_schedules = _filter_schedules_by_status(schedules, schedule_status_filter)
         response = await _answer_calendar(
-            session=session,
             user_id=user.id,
+            platform=(message.platform or "unknown"),
+            conversation_id=state.get("conversation_id"),
             content=content,
             conversation_context=context_text,
             start_at=start_at,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -18,6 +19,7 @@ from app.services.commands.conversation import handle_conversation_command
 from app.services.llm import get_llm
 from app.services.memory import (
     extract_memory_candidates,
+    list_long_term_memories,
     retrieve_relevant_long_term_memories,
     upsert_long_term_memories,
 )
@@ -34,6 +36,7 @@ from app.services.conversations import (
     ensure_active_conversation,
 )
 from app.services.realtime import get_notification_hub
+from app.db.session import AsyncSessionLocal
 from app.services.runtime_context import (
     set_session,
     reset_session,
@@ -55,6 +58,15 @@ settings = get_settings()
 UNSUPPORTED_REBIND_TEXT = "当前版本暂不支持换绑/解绑。你仍可使用 `/bind new` 与 `/bind <6位码>` 进行账号绑定合并。"
 MEMORY_EXTRACT_TIMEOUT_SEC = 20
 MEMORY_UPSERT_TIMEOUT_SEC = 20
+_memory_tasks: set[asyncio.Task[Any]] = set()
+MEMORY_LIST_QUERY_PATTERN = re.compile(
+    r"("
+    r"(?:\u957f\u671f\u8bb0\u5fc6|\u8bb0\u5fc6).*(?:\u6709\u54ea\u4e9b|\u5217\u51fa|\u67e5\u770b|\u67e5\u8be2|\u5168\u90e8|\u6240\u6709)"
+    r"|(?:\u67e5\u770b|\u67e5\u8be2).*(?:\u957f\u671f\u8bb0\u5fc6|\u8bb0\u5fc6)"
+    r"|(?:what|show|list).*(?:long\\s*term\\s*memor(?:y|ies)|memory)"
+    r")",
+    re.IGNORECASE,
+)
 
 
 def _today_start_utc_naive() -> datetime:
@@ -94,8 +106,8 @@ async def _is_rebind_natural_intent(text: str) -> bool:
         content=(
             "你是意图分类器。判断用户是否在表达“换绑/解绑/重新绑定账号”的诉求。"
             "只输出 JSON：{\"block\": true|false}。"
-            "block=true 仅在用户明确要求更换绑定关系、解除绑定、改绑账号时。"
-            "咨询一般功能、普通绑定、记账、提醒等都应是 block=false。"
+            "只有在用户明确要求更换绑定关系、解除绑定、改绑账号时 block=true；"
+            "普通咨询、记账、提醒等场景都应 block=false。"
         )
     )
     human = HumanMessage(content=content)
@@ -137,6 +149,119 @@ async def _load_context_messages(
             }
         )
     return context_messages
+
+
+def _track_background_task(task: asyncio.Task[Any]) -> None:
+    _memory_tasks.add(task)
+
+    def _on_done(done: asyncio.Task[Any]) -> None:
+        _memory_tasks.discard(done)
+        try:
+            done.result()
+        except Exception:
+            logger.exception("background task failed")
+
+    task.add_done_callback(_on_done)
+
+
+def _is_long_term_memory_list_query(text: str) -> bool:
+    content = (text or "").strip()
+    if not content:
+        return False
+    return bool(MEMORY_LIST_QUERY_PATTERN.search(content))
+
+
+async def _wait_memory_pipeline_settle(timeout_sec: float = 2.5) -> None:
+    pending = [task for task in list(_memory_tasks) if not task.done()]
+    if not pending:
+        return
+    try:
+        await asyncio.wait(pending, timeout=max(0.1, float(timeout_sec)))
+    except Exception:
+        return
+
+
+def _render_long_term_memory_list_reply(memories: list[dict[str, Any]]) -> str:
+    if not memories:
+        return "当前还没有可用的长期记忆。"
+
+    lines: list[str] = [f"当前长期记忆共 {len(memories)} 条："]
+    show_limit = 40
+    for index, item in enumerate(memories[:show_limit], start=1):
+        memory_type = str(item.get("memory_type") or "fact").strip().lower() or "fact"
+        try:
+            importance = int(item.get("importance") or 3)
+        except Exception:
+            importance = 3
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        lines.append(f"{index}. [{memory_type}|P{max(1, min(5, importance))}] {content}")
+    if len(memories) > show_limit:
+        lines.append(f"... 其余 {len(memories) - show_limit} 条可在 admin 端查看。")
+    return "\n".join(lines)
+
+
+async def _run_long_term_memory_pipeline(
+    *,
+    user_id: int,
+    conversation_id: int,
+    user_message_id: int | None,
+    user_text: str,
+    assistant_outputs: list[str],
+    conversation_summary: str,
+    user_nickname: str,
+    user_ai_name: str,
+    user_ai_emoji: str,
+) -> None:
+    candidates: list[dict[str, Any]] = []
+    try:
+        candidates = await asyncio.wait_for(
+            extract_memory_candidates(
+                user_text=user_text,
+                assistant_text="\n".join(assistant_outputs),
+                conversation_summary=conversation_summary,
+            ),
+            timeout=MEMORY_EXTRACT_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "long-term memory extract timed out: user_id=%s conversation_id=%s",
+            user_id,
+            conversation_id,
+        )
+        return
+    except Exception:
+        logger.exception("long-term memory extract failed: user_id=%s", user_id)
+        return
+
+    if not candidates:
+        return
+
+    try:
+        async with AsyncSessionLocal() as mem_session:
+            await asyncio.wait_for(
+                upsert_long_term_memories(
+                    session=mem_session,
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    source_message_id=user_message_id,
+                    candidates=candidates,
+                    user_text=user_text,
+                    user_nickname=user_nickname,
+                    user_ai_name=user_ai_name,
+                    user_ai_emoji=user_ai_emoji,
+                ),
+                timeout=MEMORY_UPSERT_TIMEOUT_SEC,
+            )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "long-term memory upsert timed out: user_id=%s conversation_id=%s",
+            user_id,
+            conversation_id,
+        )
+    except Exception:
+        logger.exception("long-term memory upsert failed: user_id=%s", user_id)
 
 
 async def handle_message(
@@ -340,58 +465,67 @@ async def handle_message(
             skip_summary_update = True
         else:
             skip_summary_update = False
-            long_term_memories = await retrieve_relevant_long_term_memories(
-                session=session,
-                user_id=user_id,
-                query=message.content or "",
-                limit=settings.long_term_memory_retrieve_limit,
-            )
-            state["extra"] = {
-                "conversation_summary": (conversation.summary or "").strip(),
-                "context_messages": await _load_context_messages(
+            if _is_long_term_memory_list_query(message.content or ""):
+                await _wait_memory_pipeline_settle(timeout_sec=2.5)
+                memory_limit = max(40, settings.long_term_memory_retrieve_scan_limit)
+                long_term_memories = await list_long_term_memories(
                     session=session,
                     user_id=user_id,
-                    conversation_id=conversation.id,
-                    limit=20,
-                ),
-                "long_term_memories": long_term_memories,
-            }
-            graph = await get_graph()
-            graph_config = {"configurable": {"thread_id": f"{user_uuid}:{conversation.id}"}}
-            # Preserve node-produced conversation-scoped context (e.g. last query result ids)
-            # across turns, while always refreshing runtime context fields for this turn.
-            try:
-                state_snapshot = await graph.aget_state(graph_config)
-                prev_values = getattr(state_snapshot, "values", {}) or {}
-                prev_extra = prev_values.get("extra")
-                if isinstance(prev_extra, dict) and isinstance(state.get("extra"), dict):
-                    merged_extra = dict(prev_extra)
-                    merged_extra.update(dict(state.get("extra") or {}))
-                    state["extra"] = merged_extra
-            except Exception:
-                pass
-            session_token = set_session(session)
-            scheduler_token = set_scheduler(_scheduler)
-            tool_user_token = set_tool_user_id(user_id)
-            tool_platform_token = set_tool_platform(platform)
-            tool_conv_token = set_tool_conversation_id(conversation.id)
-            try:
+                    limit=memory_limit,
+                )
+                responses = [_render_long_term_memory_list_reply(long_term_memories)]
+            else:
+                long_term_memories = await retrieve_relevant_long_term_memories(
+                    session=session,
+                    user_id=user_id,
+                    query=message.content or "",
+                    limit=settings.long_term_memory_retrieve_limit,
+                )
+                state["extra"] = {
+                    "conversation_summary": (conversation.summary or "").strip(),
+                    "context_messages": await _load_context_messages(
+                        session=session,
+                        user_id=user_id,
+                        conversation_id=conversation.id,
+                        limit=20,
+                    ),
+                    "long_term_memories": long_term_memories,
+                }
+                graph = await get_graph()
+                graph_config = {"configurable": {"thread_id": f"{user_uuid}:{conversation.id}"}}
+                # Preserve node-produced conversation-scoped context (e.g. last query result ids)
+                # across turns, while always refreshing runtime context fields for this turn.
                 try:
-                    result = await graph.ainvoke(
-                        state,
-                        config=graph_config,
-                    )
-                    responses = result.get("responses") or []
-                except Exception as exc:
-                    logger.exception("graph invoke failed: platform=%s user_id=%s", platform, user_id)
-                    responses = ["我处理这条消息时失败了。请重试，或先用文字描述金额/分类/事项。"]
-            finally:
-                reset_tool_conversation_id(tool_conv_token)
-                reset_tool_platform(tool_platform_token)
-                reset_tool_user_id(tool_user_token)
-                reset_scheduler(scheduler_token)
-                reset_session(session_token)
-
+                    state_snapshot = await graph.aget_state(graph_config)
+                    prev_values = getattr(state_snapshot, "values", {}) or {}
+                    prev_extra = prev_values.get("extra")
+                    if isinstance(prev_extra, dict) and isinstance(state.get("extra"), dict):
+                        merged_extra = dict(prev_extra)
+                        merged_extra.update(dict(state.get("extra") or {}))
+                        state["extra"] = merged_extra
+                except Exception:
+                    pass
+                session_token = set_session(session)
+                scheduler_token = set_scheduler(_scheduler)
+                tool_user_token = set_tool_user_id(user_id)
+                tool_platform_token = set_tool_platform(platform)
+                tool_conv_token = set_tool_conversation_id(conversation.id)
+                try:
+                    try:
+                        result = await graph.ainvoke(
+                            state,
+                            config=graph_config,
+                        )
+                        responses = result.get("responses") or []
+                    except Exception:
+                        logger.exception("graph invoke failed: platform=%s user_id=%s", platform, user_id)
+                        responses = ["处理消息时发生错误，请稍后重试。"]
+                finally:
+                    reset_tool_conversation_id(tool_conv_token)
+                    reset_tool_platform(tool_platform_token)
+                    reset_tool_user_id(tool_user_token)
+                    reset_scheduler(scheduler_token)
+                    reset_session(session_token)
     assistant_outputs: list[str] = []
     for text in responses:
         await _sender.send_text(reply_platform, reply_platform_id, text)
@@ -437,48 +571,20 @@ async def handle_message(
         and message.content
         and not str(message.content).strip().startswith("/")
     ):
-        candidates: list[dict[str, Any]] = []
-        try:
-            candidates = await asyncio.wait_for(
-                extract_memory_candidates(
-                    user_text=message.content,
-                    assistant_text="\n".join(assistant_outputs),
-                    conversation_summary=(conversation.summary or "").strip(),
-                ),
-                timeout=MEMORY_EXTRACT_TIMEOUT_SEC,
+        memory_task = asyncio.create_task(
+            _run_long_term_memory_pipeline(
+                user_id=user_id,
+                conversation_id=conversation.id,
+                user_message_id=user_message_row.id,
+                user_text=message.content,
+                assistant_outputs=assistant_outputs,
+                conversation_summary=(conversation.summary or "").strip(),
+                user_nickname=user.nickname or "",
+                user_ai_name=user.ai_name or "",
+                user_ai_emoji=user.ai_emoji or "",
             )
-        except asyncio.TimeoutError:
-            logger.warning(
-                "long-term memory extract timed out: user_id=%s conversation_id=%s",
-                user_id,
-                conversation.id,
-            )
-        except Exception:
-            logger.exception("long-term memory extract failed: user_id=%s", user_id)
-
-        if candidates:
-            try:
-                await asyncio.wait_for(
-                    upsert_long_term_memories(
-                        session=session,
-                        user_id=user_id,
-                        conversation_id=conversation.id,
-                        source_message_id=user_message_row.id,
-                        candidates=candidates,
-                        user_text=message.content,
-                        user_nickname=user.nickname or "",
-                        user_ai_name=user.ai_name or "",
-                        user_ai_emoji=user.ai_emoji or "",
-                    ),
-                    timeout=MEMORY_UPSERT_TIMEOUT_SEC,
-                )
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "long-term memory upsert timed out: user_id=%s conversation_id=%s",
-                    user_id,
-                    conversation.id,
-                )
-            except Exception:
-                logger.exception("long-term memory upsert failed: user_id=%s", user_id)
+        )
+        _track_background_task(memory_task)
 
     return {"ok": True, "responses": responses}
+

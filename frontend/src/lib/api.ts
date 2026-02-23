@@ -416,7 +416,8 @@ export function fetchLedgers(
   limit = 30,
   beforeId?: number
 ) {
-  let path = `/api/ledgers?limit=${limit}`;
+  const safeLimit = Math.max(1, Math.min(200, Math.floor(Number(limit) || 30)));
+  let path = `/api/ledgers?limit=${safeLimit}`;
   if (Number.isFinite(beforeId) && Number(beforeId) > 0) {
     path += `&before_id=${Math.floor(Number(beforeId))}`;
   }

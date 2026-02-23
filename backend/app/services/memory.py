@@ -765,6 +765,55 @@ async def deactivate_identity_memories_for_user(
     return changed
 
 
+async def list_long_term_memories(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    limit: int = 120,
+) -> list[dict[str, Any]]:
+    settings = get_settings()
+    if not settings.long_term_memory_enabled:
+        return []
+
+    now = datetime.utcnow()
+    stmt = (
+        select(LongTermMemory)
+        .where(
+            LongTermMemory.user_id == user_id,
+            or_(LongTermMemory.expires_at.is_(None), LongTermMemory.expires_at > now),
+        )
+        .order_by(LongTermMemory.updated_at.desc(), LongTermMemory.id.desc())
+        .limit(max(1, int(limit)))
+    )
+    rows = list((await session.execute(stmt)).scalars().all())
+    if not rows:
+        return []
+
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        if _is_identity_memory_candidate(
+            memory_type=str(row.memory_type or ""),
+            memory_key=str(row.memory_key or ""),
+            content=str(row.content or ""),
+        ):
+            continue
+        row.last_accessed_at = now
+        session.add(row)
+        result.append(
+            {
+                "id": row.id,
+                "memory_type": row.memory_type,
+                "content": row.content,
+                "importance": int(row.importance or 3),
+                "confidence": round(float(row.confidence or 0.0), 3),
+                "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+            }
+        )
+
+    await session.commit()
+    return result
+
+
 async def retrieve_relevant_long_term_memories(
     session: AsyncSession,
     *,
