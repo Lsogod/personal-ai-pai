@@ -30,6 +30,7 @@ import {
   fetchAdminConversations,
   fetchAdminConversationStats,
   fetchAdminDashboard,
+  fetchAdminFeedbacks,
   fetchAdminMiniappHomePopup,
   fetchAdminUserDetail,
   fetchAdminScheduleDelivery,
@@ -38,6 +39,7 @@ import {
   fetchAdminUsers,
   saveAdminMiniappHomePopup,
   type AdminAuditItem,
+  type AdminFeedbackItem,
   type AdminMemoryConsolidateAllResponse,
   type AdminMemoryPurgeAllResponse,
   type AdminConversationItem,
@@ -112,6 +114,7 @@ type SectionKey =
   | "tools"
   | "delivery"
   | "miniappPopup"
+  | "feedback"
   | "audit";
 
 const SECTION_ITEMS: Array<{ key: SectionKey; label: string }> = [
@@ -122,6 +125,7 @@ const SECTION_ITEMS: Array<{ key: SectionKey; label: string }> = [
   { key: "tools", label: "工具管理" },
   { key: "delivery", label: "提醒投递" },
   { key: "miniappPopup", label: "首页弹窗" },
+  { key: "feedback", label: "问题反馈" },
   { key: "audit", label: "审计日志" },
 ];
 
@@ -206,6 +210,11 @@ export function AdminPage() {
   const [auditUserId, setAuditUserId] = useState("");
   const [auditPage, setAuditPage] = useState(1);
   const auditSize = 30;
+  const [feedbackKeyword, setFeedbackKeyword] = useState("");
+  const [feedbackPlatform, setFeedbackPlatform] = useState("");
+  const [feedbackUserId, setFeedbackUserId] = useState("");
+  const [feedbackPage, setFeedbackPage] = useState(1);
+  const feedbackSize = 30;
   const [popupDraft, setPopupDraft] = useState<AdminMiniappHomePopupConfig | null>(null);
   const [popupSaveMessage, setPopupSaveMessage] = useState("");
   const [memoryCleanMessage, setMemoryCleanMessage] = useState("");
@@ -306,6 +315,28 @@ export function AdminPage() {
         q: auditKeyword || undefined,
         action: auditAction || undefined,
         user_id: auditUserId ? Number(auditUserId) : undefined,
+      }),
+    enabled: !!token,
+  });
+
+  const feedbacks = useQuery({
+    queryKey: [
+      "admin",
+      "feedbacks",
+      token,
+      feedbackPage,
+      feedbackSize,
+      feedbackKeyword,
+      feedbackPlatform,
+      feedbackUserId,
+    ],
+    queryFn: () =>
+      fetchAdminFeedbacks(token, {
+        page: feedbackPage,
+        size: feedbackSize,
+        q: feedbackKeyword || undefined,
+        platform: feedbackPlatform || undefined,
+        user_id: feedbackUserId ? Number(feedbackUserId) : undefined,
       }),
     enabled: !!token,
   });
@@ -1289,6 +1320,93 @@ export function AdminPage() {
                     </div>
                   </>
                 )}
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {activeSection === "feedback" ? (
+            <Card>
+              <CardHeader className="text-lg font-semibold">问题反馈</CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid md:grid-cols-3 gap-2">
+                  <Input
+                    placeholder="内容/页面/版本搜索"
+                    value={feedbackKeyword}
+                    onChange={(e) => {
+                      setFeedbackKeyword(e.target.value);
+                      setFeedbackPage(1);
+                    }}
+                  />
+                  <Input
+                    placeholder="user_id 筛选"
+                    value={feedbackUserId}
+                    onChange={(e) => {
+                      setFeedbackUserId(e.target.value);
+                      setFeedbackPage(1);
+                    }}
+                  />
+                  <select
+                    className="h-10 rounded-xl border border-border bg-surface-card px-3 text-sm"
+                    value={feedbackPlatform}
+                    onChange={(e) => {
+                      setFeedbackPlatform(e.target.value);
+                      setFeedbackPage(1);
+                    }}
+                  >
+                    <option value="">全部平台</option>
+                    {USER_PLATFORM_OPTIONS.map((platform) => (
+                      <option key={`feedback-platform-${platform}`} value={platform}>
+                        {platform}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="overflow-auto max-h-[560px]">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-content-secondary border-b border-border">
+                        <th className="py-2 pr-2">ID</th>
+                        <th className="py-2 pr-2">用户</th>
+                        <th className="py-2 pr-2">平台</th>
+                        <th className="py-2 pr-2">反馈内容</th>
+                        <th className="py-2 pr-2">页面</th>
+                        <th className="py-2 pr-2">版本</th>
+                        <th className="py-2 pr-2">时间</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(feedbacks.data?.items || []).map((row: AdminFeedbackItem) => (
+                        <tr key={row.id} className="border-b border-border/60 align-top">
+                          <td className="py-2 pr-2">#{row.id}</td>
+                          <td className="py-2 pr-2">{row.user_nickname || `#${row.user_id}`}</td>
+                          <td className="py-2 pr-2">{row.platform || "-"}</td>
+                          <td className="py-2 pr-2 whitespace-pre-wrap break-words min-w-[260px]">{row.content}</td>
+                          <td className="py-2 pr-2 break-all">{row.client_page || "-"}</td>
+                          <td className="py-2 pr-2">
+                            <div>{row.app_version || "-"}</div>
+                            <div className="text-xs text-content-secondary">{row.env_version || "-"}</div>
+                          </td>
+                          <td className="py-2 pr-2">{new Date(row.created_at).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                      {(!feedbacks.data?.items || feedbacks.data.items.length === 0) ? (
+                        <tr>
+                          <td colSpan={7} className="py-3 text-content-secondary">
+                            暂无反馈数据
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+
+                <Pager
+                  page={feedbacks.data?.page || 1}
+                  size={feedbacks.data?.size || feedbackSize}
+                  total={feedbacks.data?.total || 0}
+                  onPageChange={setFeedbackPage}
+                />
               </CardContent>
             </Card>
           ) : null}
