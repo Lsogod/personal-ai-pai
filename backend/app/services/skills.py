@@ -8,7 +8,7 @@ from typing import Iterable
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete as sa_delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.skill import Skill, SkillStatus, SkillVersion
@@ -19,6 +19,11 @@ from app.services.llm import get_llm
 SKILLS_DIR = Path(__file__).resolve().parents[2] / "skills"
 _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n", re.DOTALL)
 _WORD_RE = re.compile(r"[\u4e00-\u9fffA-Za-z0-9_-]+")
+_SKILL_SLUG_RE = re.compile(r"\b([a-z0-9][a-z0-9-]{2,63})\b", re.IGNORECASE)
+_FOLLOWUP_UPDATE_PATTERN = re.compile(
+    r"(改为|改成|修改|调整|限制|收紧|放宽|改下|改一下|change|update|revise)",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -74,6 +79,16 @@ class SkillIntentExtraction(BaseModel):
     skill_slug: str = Field(default="")
     target: str = Field(default="")
     request: str = Field(default="")
+    delete_scope: str = Field(default="unknown")
+    confirmed: bool = Field(default=False)
+    clarification_needed: bool = Field(default=False)
+
+
+class SkillFollowupExtraction(BaseModel):
+    action: str = Field(default="help")
+    target: str = Field(default="")
+    request: str = Field(default="")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 def _iter_static_skill_files() -> Iterable[Path]:
@@ -289,6 +304,51 @@ async def disable_skill(session: AsyncSession, user_id: int, slug: str) -> Skill
     return skill
 
 
+async def delete_skill(session: AsyncSession, user_id: int, slug: str) -> tuple[bool, int]:
+    skill = await get_skill(session, user_id, slug)
+    if not skill:
+        return False, 0
+
+    versions_result = await session.execute(
+        sa_delete(SkillVersion).where(SkillVersion.skill_id == skill.id)
+    )
+    deleted_versions = int(versions_result.rowcount or 0)
+
+    await session.execute(
+        sa_delete(Skill).where(Skill.id == skill.id, Skill.user_id == user_id)
+    )
+    await session.commit()
+    return True, max(0, deleted_versions)
+
+
+async def delete_all_user_skills(
+    session: AsyncSession,
+    user_id: int,
+) -> tuple[int, int, list[str]]:
+    result = await session.execute(
+        select(Skill).where(Skill.user_id == user_id).order_by(Skill.id.asc())
+    )
+    skills = list(result.scalars().all())
+    if not skills:
+        return 0, 0, []
+
+    skill_ids = [int(item.id) for item in skills if int(item.id or 0) > 0]
+    slugs = [str(item.slug) for item in skills if str(item.slug or "").strip()]
+    if not skill_ids:
+        return 0, 0, []
+
+    versions_result = await session.execute(
+        sa_delete(SkillVersion).where(SkillVersion.skill_id.in_(skill_ids))
+    )
+    deleted_versions = int(versions_result.rowcount or 0)
+
+    await session.execute(
+        sa_delete(Skill).where(Skill.user_id == user_id, Skill.id.in_(skill_ids))
+    )
+    await session.commit()
+    return len(skill_ids), max(0, deleted_versions), slugs
+
+
 async def render_skill_from_request(
     user_request: str,
     preferred_name: str | None = None,
@@ -341,8 +401,13 @@ async def parse_skill_intent(
     system = SystemMessage(
         content=(
             "你是意图解析器。将用户关于技能管理的消息解析为 JSON。"
-            "action 仅可为: create, update, publish, disable, list, show, help。"
-            "返回字段: action, skill_name, skill_slug, target, request。"
+            "action 仅可为: create, update, publish, disable, delete, list, show, help。"
+            "返回字段: action, skill_name, skill_slug, target, request, delete_scope, confirmed, clarification_needed。"
+            "delete_scope 仅可为 single/all/unknown。"
+            "当 action=delete 且用户明确说“全部/所有/我的技能都删掉”时 delete_scope=all。"
+            "当 action=delete 且用户明确指定某个技能（slug/名称）时 delete_scope=single，并填 target。"
+            "若你无法确认是删单个还是删全部，delete_scope=unknown 且 clarification_needed=true。"
+            "confirmed 仅在用户明确确认执行高风险删除时为 true（例如“确认删除全部技能”）。"
             "必须同时支持自然语言和命令式输入（例如 `/skill publish demo`）。"
             "只输出 JSON。"
         )
@@ -353,7 +418,8 @@ async def parse_skill_intent(
             f"用户输入:\n{text}"
         )
     )
-    allowed_actions = {"create", "update", "publish", "disable", "list", "show", "help"}
+    allowed_actions = {"create", "update", "publish", "disable", "delete", "list", "show", "help"}
+    fallback = parse_skill_command_fallback(text, allowed_actions)
     try:
         parsed = await runnable.ainvoke([system, human])
         data = (
@@ -363,11 +429,94 @@ async def parse_skill_intent(
         )
         action = str(data.get("action") or "").strip().lower()
         if action in allowed_actions:
+            # LLM sometimes over-returns "help" for clear NL operations.
+            # Keep deterministic fallback as a correction path.
+            if action == "help":
+                fallback_action = str(fallback.get("action") or "").strip().lower()
+                if fallback_action in allowed_actions and fallback_action != "help":
+                    return fallback
+                followup = await _parse_skill_followup_intent(
+                    text=text,
+                    conversation_context=conversation_context,
+                )
+                if followup:
+                    return followup
             return data
     except Exception:
         pass
 
-    return parse_skill_command_fallback(text, allowed_actions)
+    followup = await _parse_skill_followup_intent(
+        text=text,
+        conversation_context=conversation_context,
+    )
+    if followup:
+        return followup
+    return fallback
+
+
+async def _parse_skill_followup_intent(*, text: str, conversation_context: str) -> dict:
+    if not text:
+        return {}
+    llm = get_llm(node_name="skills")
+    runnable = llm.with_structured_output(SkillFollowupExtraction)
+    system = SystemMessage(
+        content=(
+            "你是技能跟进意图解析器，只输出 JSON。"
+            "当用户在上一轮创建/展示技能后，用自然语言继续修改约束（如“标题改为...”“把正文限制到80字”），"
+            "应识别为 action=update。"
+            "从会话上下文中提取最近一个用户技能 slug 填入 target。"
+            "字段: action,target,request,confidence。"
+            "action 仅可为 update/help。"
+            "若无法确认是技能修改，返回 action=help。"
+        )
+    )
+    human = HumanMessage(
+        content=(
+            f"会话上下文:\n{conversation_context or '（无）'}\n\n"
+            f"用户输入:\n{text}"
+        )
+    )
+    try:
+        parsed = await runnable.ainvoke([system, human])
+        data = (
+            parsed.model_dump()
+            if isinstance(parsed, BaseModel)
+            else dict(parsed or {}) if isinstance(parsed, dict) else {}
+        )
+        action = str(data.get("action") or "").strip().lower()
+        confidence = float(data.get("confidence") or 0.0)
+        target = str(data.get("target") or "").strip()
+        if not target:
+            target = _extract_recent_skill_slug_from_context(conversation_context)
+        if action == "update" and confidence >= 0.55 and target:
+            return {
+                "action": "update",
+                "target": target,
+                "request": text,
+            }
+        if confidence >= 0.55 and target and _FOLLOWUP_UPDATE_PATTERN.search(text):
+            return {
+                "action": "update",
+                "target": target,
+                "request": text,
+            }
+    except Exception:
+        return {}
+    return {}
+
+
+def _extract_recent_skill_slug_from_context(conversation_context: str) -> str:
+    text = str(conversation_context or "")
+    if not text:
+        return ""
+    matches = list(_SKILL_SLUG_RE.finditer(text))
+    if not matches:
+        return ""
+    for match in reversed(matches):
+        token = str(match.group(1) or "").strip().lower()
+        if token.startswith("skill-"):
+            return token
+    return ""
 
 
 async def load_skills(

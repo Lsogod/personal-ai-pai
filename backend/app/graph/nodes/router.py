@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -11,6 +12,7 @@ from app.graph.state import GraphState
 from app.services.commands.router import route_command_intent
 from app.services.ledger_pending import has_pending_ledger
 from app.services.llm import get_llm
+from app.services.skills import parse_skill_intent
 from app.services.tool_registry import list_runtime_tool_metas
 
 
@@ -23,6 +25,18 @@ VALID_INTENTS = {
     "help_center",
     "unknown",
 }
+
+SKILL_MANAGEMENT_ACTIONS = {"create", "update", "publish", "disable", "delete", "list", "show"}
+SKILL_MANAGEMENT_TEXT_PATTERN = re.compile(
+    r"(/skill\b|技能\s*(列表|清单|详情|信息)|"
+    r"(创建|新建|更新|修改|发布|停用|禁用|删除|查看|展示|列出)\s*.*技能|"
+    r"skill\s*(list|show|create|update|publish|disable|delete))",
+    re.IGNORECASE,
+)
+SKILL_FOLLOWUP_UPDATE_PATTERN = re.compile(
+    r"(改为|改成|修改|调整|限制|收紧|放宽|change|update|revise)",
+    re.IGNORECASE,
+)
 
 
 class RouterIntentExtraction(BaseModel):
@@ -61,12 +75,13 @@ async def _classify_intent_with_llm(
             "Output fields: intent, use_complex, confidence, reason.\n"
             "Routing rules:\n"
             "1) complex_task: multi-goal workflow with cross-node orchestration.\n"
-            "2) skill_manager: skill CRUD/list/show/publish/disable.\n"
+            "2) skill_manager: only skill management CRUD/list/show/publish/disable/delete.\n"
             "3) ledger_manager: ledger create/update/delete/query.\n"
             "4) schedule_manager: reminder/calendar create/update/delete/query.\n"
             "5) help_center: help/manual/capabilities introduction.\n"
             "6) chat_manager: general Q&A/writing/translation/external lookup/weather query only.\n"
             "7) unknown only when evidence is insufficient.\n"
+            "When user asks to USE an existing skill to generate content (e.g. '使用xx技能写文案/写诗/翻译'), route to chat_manager, not skill_manager.\n"
             "Identity questions such as '你是谁/我是谁/我叫什么/你叫什么' should route to chat_manager, not help_center.\n"
             "Set use_complex=true only when the request requires two or more domain nodes "
             "(for example ledger_manager + schedule_manager, or skill_manager + chat_manager).\n"
@@ -99,6 +114,30 @@ async def _classify_intent_with_llm(
         "use_complex": use_complex,
         "confidence": confidence,
     }
+
+
+async def _should_keep_skill_manager_route(*, content: str, conversation_context: str) -> bool:
+    # Keep natural-language skill operations in skill_manager only when the parsed action
+    # is an actual management action; otherwise let chat_manager consume published skills.
+    text = (content or "").strip()
+    if not text:
+        return False
+    if text.lower().startswith("/skill"):
+        return True
+    try:
+        parsed = await parse_skill_intent(content, conversation_context=conversation_context)
+    except Exception:
+        return False
+    action = str(parsed.get("action") or "").strip().lower()
+    if action in SKILL_MANAGEMENT_ACTIONS:
+        return True
+    if action == "help":
+        ctx = str(conversation_context or "")
+        if SKILL_FOLLOWUP_UPDATE_PATTERN.search(text) and (
+            "技能草稿" in ctx or "/skill publish" in ctx or "skill-" in ctx
+        ):
+            return True
+    return False
 
 
 async def _verify_complex_eligibility_with_llm(
@@ -217,6 +256,17 @@ async def router_node(state: GraphState) -> GraphState:
     except Exception:
         intent = "unknown"
         use_complex = False
+
+    if intent == "skill_manager" and not content.lower().startswith("/skill"):
+        try:
+            keep_skill_mgr = await _should_keep_skill_manager_route(
+                content=content,
+                conversation_context=context_text,
+            )
+            if not keep_skill_mgr:
+                intent = "chat_manager"
+        except Exception:
+            intent = "chat_manager"
 
     if use_complex:
         try:

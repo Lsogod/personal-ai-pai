@@ -80,11 +80,10 @@ flowchart TB
     N7 --> ORCH["JSON Plan + Executor"]
 
     AG --> T1["now_time"]
-    AG --> T2["mcp_list_tools"]
-    AG --> T3["mcp_call_tool"]
-    AG --> T4["fetch_url"]
-    T2 --> MCP["MCP Fetch Server"]
-    T3 --> MCP
+    AG --> T2["fetch_url"]
+    AG --> T3["mcp_list_tools"]
+    AG --> T4["mcp_call_tool"]
+    T3 --> MCP["MCP Fetch Server"]
     T4 --> MCP
 ```
 
@@ -231,7 +230,7 @@ pai/
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/mcp/tools` | 获取系统级 MCP 工具列表 |
-| POST | `/api/mcp/fetch` | 调用 MCP `fetch` 抓取网页内容 |
+| POST | `/api/mcp/call` | 调用 MCP 工具 |
 
 ### 会话管理
 | 方法 | 路径 | 说明 |
@@ -341,7 +340,7 @@ MCP_FETCH_DEFAULT_MAX_LENGTH=5000
 对话中可直接使用：
 - 自然语言：`帮我抓取并总结这个网页 https://example.com`
 - 自然语言：`现在武汉天气`
-- 命令兜底：`/mcp list`、`/fetch https://example.com`、`/weather 武汉`
+- 命令兜底：`/tool list`、`/tool call fetch_url url=https://example.com`、`/tool call maps_weather location=武汉`
 
 ---
 

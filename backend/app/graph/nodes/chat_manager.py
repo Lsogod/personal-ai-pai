@@ -32,6 +32,10 @@ URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 VALID_CHAT_KINDS = {"general", "time", "external", "weather", "tooling", "unknown"}
 IDENTITY_USER_PATTERN = re.compile(r"(我是谁|我叫什么|who\s+am\s+i)", re.IGNORECASE)
 IDENTITY_ASSISTANT_PATTERN = re.compile(r"(你是谁|你叫什么|who\s+are\s+you)", re.IGNORECASE)
+INVALID_TOOL_ERROR_PATTERN = re.compile(
+    r"(not a valid tool|invalid tool|工具不存在|未知工具|no such tool)",
+    re.IGNORECASE,
+)
 
 
 class ChatClassificationExtraction(BaseModel):
@@ -130,6 +134,8 @@ async def _classify_chat_request_with_llm(
             "tool_required 必须是布尔值。"
             "当问题依赖实时信息、网页抓取、外部事实验证、MCP工具调用时，tool_required=true。"
             "当用户仅请求一般写作/润色/翻译/闲聊时，tool_required=false。"
+            "当用户要求“使用某个技能/按某种风格写文案、写诗、翻译、改写”时，kind=general 且 tool_required=false。"
+            "tooling 仅用于‘列出工具/如何调用工具/工具是否可用’等工具管理问题。"
             "weather_location 仅在 kind=weather 时填写城市名，否则留空字符串。"
             "confidence 范围 0~1。"
             "不要输出额外解释。"
@@ -435,6 +441,10 @@ def _extract_tool_outputs(messages: list[Any]) -> list[str]:
     return rows
 
 
+def _looks_like_invalid_tool_error(text: str) -> bool:
+    return bool(INVALID_TOOL_ERROR_PATTERN.search((text or "").strip()))
+
+
 async def _ground_answer_with_tool_outputs(
     *,
     user: User,
@@ -490,6 +500,8 @@ async def _run_tool_agent(
         f"你是{user.nickname}的私人助理{user.ai_name} {user.ai_emoji}。"
         "你必须结合会话上下文连续对话，不要声称自己无法回忆当前会话。\n"
         "你具备 LangGraph 工具调用能力。原则：LLM 先判断是否需要工具，规则仅兜底。\n"
+        "技能文档是写作/回答参考，不是可调用工具；严禁把 writer/translator/skill 名称当作 tool 调用。\n"
+        "只能调用“当前可用工具目录”里出现的工具名。\n"
         "当问题依赖实时/外部信息时：\n"
         "1) 优先调用 mcp_list_tools 查看可用工具；\n"
         "2) 选择最匹配工具执行；\n"
@@ -697,6 +709,7 @@ async def chat_manager_node(state: GraphState) -> GraphState:
     tool_required = bool(classification.get("tool_required"))
     weather_location = str(classification.get("weather_location") or "").strip()
     should_try_tools = tool_required or (kind in {"time", "external", "weather", "tooling"})
+    tool_path_invalid_tool_error = False
 
     # Weather should be deterministic: call MCP weather first, avoid web-fetch fallback drift.
     platform = (message.platform or "unknown")
@@ -733,6 +746,10 @@ async def chat_manager_node(state: GraphState) -> GraphState:
                 skills=skills,
                 runtime_tools=runtime_tools,
             )
+            if _looks_like_invalid_tool_error(tool_answer):
+                tool_path_invalid_tool_error = True
+                tool_answer = ""
+                tool_count = 0
             if tool_answer and (tool_count > 0 or not tool_required):
                 return {**state, "responses": [tool_answer]}
         except Exception:
@@ -742,7 +759,7 @@ async def chat_manager_node(state: GraphState) -> GraphState:
     if kind == "time":
         return {**state, "responses": [_render_time_reply(content)]}
 
-    if tool_required and kind in {"external", "tooling"}:
+    if tool_required and kind in {"external", "tooling"} and not tool_path_invalid_tool_error:
         return {
             **state,
             "responses": [

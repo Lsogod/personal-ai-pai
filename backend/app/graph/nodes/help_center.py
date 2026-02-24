@@ -124,7 +124,7 @@ async def help_center_node(state: GraphState) -> GraphState:
             "涉及命令时，只能使用以下命令族："
             "/new /history /switch /rename /delete /ledger(list|update|delete) "
             "/calendar(today|week|month|YYYY-MM-DD) "
-            "/skill(list|show|create|publish|disable) /mcp list /fetch <url> /weather <city> /help。"
+            "/skill(list|show|create|update|publish|disable|delete) /mcp list /fetch <url> /weather <city> /help。"
             "严禁输出不存在的命令（例如 /skill use、/ledger --limit）。"
             "按用户问题自动决定回答粒度："
             "1) 若用户问“怎么用/帮助/命令/教程/手册”，给结构化使用说明；"
