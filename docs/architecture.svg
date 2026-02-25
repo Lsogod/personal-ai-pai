@@ -1,192 +1,281 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 780" font-family="Inter, system-ui, sans-serif">
-  <defs>
-    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0f0f14"/>
-      <stop offset="100%" stop-color="#1a1a28"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#818cf8"/>
-      <stop offset="100%" stop-color="#6366f1"/>
-    </linearGradient>
-    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#34d399"/>
-      <stop offset="100%" stop-color="#10b981"/>
-    </linearGradient>
-    <linearGradient id="orange" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#fb923c"/>
-      <stop offset="100%" stop-color="#f97316"/>
-    </linearGradient>
-    <linearGradient id="pink" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#f472b6"/>
-      <stop offset="100%" stop-color="#ec4899"/>
-    </linearGradient>
-    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#22d3ee"/>
-      <stop offset="100%" stop-color="#06b6d4"/>
-    </linearGradient>
-    <filter id="glow">
-      <feGaussianBlur stdDeviation="3" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-    <filter id="shadow">
-      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity="0.3"/>
-    </filter>
-    <style>
-      @keyframes dash { to { stroke-dashoffset: -20; } }
-      @keyframes pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
-      @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
-      .flow-line { stroke-dasharray: 6 4; animation: dash 1.5s linear infinite; }
-      .pulse-node { animation: pulse 3s ease-in-out infinite; }
-      .float-box { animation: float 4s ease-in-out infinite; }
-    </style>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 880">
+      <defs>
+        <!-- 卡片外阴影 -->
+        <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
+          <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#94A3B8" flood-opacity="0.12"/>
+        </filter>
+        <!-- 浅色内嵌阴影 -->
+        <filter id="lightShadow" x="-10%" y="-10%" width="120%" height="120%">
+          <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#94A3B8" flood-opacity="0.08"/>
+        </filter>
 
-  <rect width="960" height="780" rx="16" fill="url(#bgGrad)"/>
+        <!-- 箭头标记定义 (改浅，与连线同色，降低干扰) -->
+        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 1 L 8 5 L 0 9 z" fill="#CBD5E1" />
+        </marker>
+        <!-- 箭头标记定义 (旁路浅蓝色客户端推送) -->
+        <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 1 L 8 5 L 0 9 z" fill="#93C5FD" />
+        </marker>
 
-  <text x="480" y="42" text-anchor="middle" fill="#e2e8f0" font-size="20" font-weight="700">PAI · Personal AI Assistant — 系统架构</text>
-  <text x="480" y="62" text-anchor="middle" fill="#64748b" font-size="11">多平台智能助手 · LangGraph 工作流 · MCP 工具协议 · 复杂任务编排</text>
+        <style>
+          @keyframes dash { to { stroke-dashoffset: -32; } }
+          @keyframes flow { to { stroke-dashoffset: -32; } }
+          @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+          
+          /* 增强连线清晰度但降低存在感 */
+          .flow-line { stroke-dasharray: 8 8; animation: dash 2.5s linear infinite; fill: none; }
+          .flow-line-fast { stroke-dasharray: 8 8; animation: flow 1.5s linear infinite; fill: none; }
+          .float-box { animation: float 4s ease-in-out infinite; }
+          
+          .hover-card { 
+            transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.3s ease; 
+            transform-origin: center; 
+            transform-box: fill-box;
+            cursor: pointer;
+          }
+          .hover-card:hover { 
+            transform: scale(1.03); 
+            filter: drop-shadow(0 10px 15px rgba(148, 163, 184, 0.2)); 
+          }
+          text { pointer-events: none; }
+        </style>
+      </defs>
 
-  <g class="float-box" style="animation-delay: 0s">
-    <rect x="30" y="88" width="105" height="44" rx="12" fill="#1e1e2e" stroke="#818cf8" stroke-width="1.5" filter="url(#shadow)"/>
-    <text x="83" y="114" text-anchor="middle" fill="#c7d2fe" font-size="11" font-weight="600">✈️ Telegram</text>
-  </g>
-  <g class="float-box" style="animation-delay: 0.2s">
-    <rect x="150" y="88" width="105" height="44" rx="12" fill="#1e1e2e" stroke="#818cf8" stroke-width="1.5" filter="url(#shadow)"/>
-    <text x="203" y="114" text-anchor="middle" fill="#c7d2fe" font-size="11" font-weight="600">💬 微信</text>
-  </g>
-  <g class="float-box" style="animation-delay: 0.4s">
-    <rect x="270" y="88" width="105" height="44" rx="12" fill="#1e1e2e" stroke="#818cf8" stroke-width="1.5" filter="url(#shadow)"/>
-    <text x="323" y="114" text-anchor="middle" fill="#c7d2fe" font-size="11" font-weight="600">🐧 QQ</text>
-  </g>
-  <g class="float-box" style="animation-delay: 0.6s">
-    <rect x="390" y="88" width="105" height="44" rx="12" fill="#1e1e2e" stroke="#818cf8" stroke-width="1.5" filter="url(#shadow)"/>
-    <text x="443" y="114" text-anchor="middle" fill="#c7d2fe" font-size="11" font-weight="600">🐦 飞书</text>
-  </g>
-  <g class="float-box" style="animation-delay: 0.8s">
-    <rect x="510" y="88" width="105" height="44" rx="12" fill="#1e1e2e" stroke="#818cf8" stroke-width="1.5" filter="url(#shadow)"/>
-    <text x="563" y="114" text-anchor="middle" fill="#c7d2fe" font-size="11" font-weight="600">🌐 Web UI</text>
-  </g>
-  <g class="float-box" style="animation-delay: 1.0s">
-    <rect x="630" y="88" width="105" height="44" rx="12" fill="#1e1e2e" stroke="url(#green)" stroke-width="1.5" filter="url(#shadow)"/>
-    <text x="683" y="114" text-anchor="middle" fill="#34d399" font-size="11" font-weight="600">📱 微信小程序</text>
-  </g>
+      <!-- ================= 1. 背景与大容器层 (放在最底层) ================= -->
+      <rect width="960" height="880" rx="32" fill="#F8FAFC" />
 
-  <rect x="760" y="88" width="180" height="44" rx="12" fill="#818cf810" stroke="#818cf830" stroke-width="1"/>
-  <text x="850" y="107" text-anchor="middle" fill="#818cf8" font-size="10" font-weight="600">多平台接入层</text>
-  <text x="850" y="122" text-anchor="middle" fill="#64748b" font-size="9">Webhook / Polling / SSE / WS</text>
+      <!-- LangGraph 智能工作流大容器：采用半透明玻璃态，允许底层虚线透出 -->
+      <rect x="30" y="290" width="900" height="290" rx="28" fill="rgba(255, 255, 255, 0.6)" stroke="#E2E8F0" stroke-width="2" filter="url(#softShadow)"/>
+      <text x="480" y="316" text-anchor="middle" dominant-baseline="central" fill="#0F172A" font-size="15" font-weight="800">🧠 LangGraph 智能工作流调度</text>
 
-  <line x1="83" y1="132" x2="330" y2="178" stroke="#818cf860" stroke-width="1" class="flow-line"/>
-  <line x1="203" y1="132" x2="380" y2="178" stroke="#818cf860" stroke-width="1" class="flow-line"/>
-  <line x1="323" y1="132" x2="430" y2="178" stroke="#818cf860" stroke-width="1" class="flow-line"/>
-  <line x1="443" y1="132" x2="480" y2="178" stroke="#818cf860" stroke-width="1" class="flow-line"/>
-  <line x1="563" y1="132" x2="530" y2="178" stroke="#818cf860" stroke-width="1" class="flow-line"/>
-  <line x1="683" y1="132" x2="580" y2="178" stroke="#34d39960" stroke-width="1" class="flow-line"/>
 
-  <rect x="240" y="168" width="480" height="56" rx="14" fill="#1e1e2e" stroke="url(#accent)" stroke-width="2" filter="url(#shadow)"/>
-  <text x="480" y="193" text-anchor="middle" fill="#e2e8f0" font-size="14" font-weight="700">⚡ FastAPI 后端</text>
-  <text x="480" y="212" text-anchor="middle" fill="#94a3b8" font-size="10">认证 · 路由 · 消息处理 · SSE 流式 · WebSocket 推送 · 管理 API</text>
+      <!-- ================= 2. 连线流向层 ================= -->
+      <g stroke="#CBD5E1" stroke-width="2" class="flow-line" opacity="0.6">
+        <!-- 外部平台 -> FastAPI -->
+        <path d="M 270 144 L 270 150 L 410 150 L 410 170" fill="none" marker-end="url(#arrow)" />
+        <path d="M 410 144 L 410 170" fill="none" marker-end="url(#arrow)" />
+        <path d="M 550 144 L 550 170" fill="none" marker-end="url(#arrow)" />
+        <path d="M 690 144 L 690 150 L 550 150 L 550 170" fill="none" marker-end="url(#arrow)" />
 
-  <line x1="480" y1="224" x2="480" y2="265" stroke="#34d39960" stroke-width="1.5" class="flow-line"/>
+        <!-- FastAPI -> LangGraph Router -->
+        <path d="M 480 250 L 480 322" fill="none" marker-end="url(#arrow)" />
 
-  <line x1="304" y1="224" x2="250" y2="622" stroke="#818cf850" stroke-width="1" class="flow-line"/>
-  <line x1="664" y1="224" x2="700" y2="622" stroke="#34d39950" stroke-width="1" class="flow-line"/>
+        <!-- Router -> 子节点 -->
+        <!-- Center trunk -->
+        <path d="M 480 366 L 480 380" fill="none" stroke="#CBD5E1" stroke-width="2" />
+        
+        <!-- Branches to subnodes -->
+        <path d="M 480 380 L 115 380 L 115 410" fill="none" marker-end="url(#arrow)" />
+        <path d="M 480 380 L 260 380 L 260 410" fill="none" marker-end="url(#arrow)" />
+        <path d="M 480 380 L 405 380 L 405 410" fill="none" marker-end="url(#arrow)" />
+        <path d="M 480 380 L 550 380 L 550 410" fill="none" marker-end="url(#arrow)" />
+        <path d="M 480 380 L 695 380 L 695 410" fill="none" marker-end="url(#arrow)" />
+        <path d="M 480 380 L 840 380 L 840 410" fill="none" marker-end="url(#arrow)" />
 
-  <rect x="20" y="260" width="920" height="180" rx="16" fill="#0d1117" stroke="#34d39950" stroke-width="1.5" filter="url(#shadow)"/>
-  <text x="480" y="286" text-anchor="middle" fill="#34d399" font-size="13" font-weight="700">🧠 LangGraph 智能工作流</text>
+        <!-- Router -> Complex Task Node (Bypasses components down column 480) -->
+        <path d="M 480 366 L 480 495" fill="none" marker-end="url(#arrow)" />
 
-  <g filter="url(#glow)">
-    <rect x="400" y="300" width="160" height="40" rx="20" fill="#1a2332" stroke="url(#green)" stroke-width="2"/>
-    <text x="480" y="324" text-anchor="middle" fill="#34d399" font-size="12" font-weight="700">🔀 意图路由器</text>
-  </g>
+        <!-- 子节点 -> 基础设施 (Carefully weaving through clean columns to avoid intersection) -->
+        <path d="M 115 470 L 115 610" fill="none" marker-end="url(#arrow)" /> <!-- Onboarding->Postgres -->
+        
+        <!-- Shared Database lines grouped in completely clean corridors -->
+        <path d="M 250 470 L 250 540 L 135 540 L 135 610" fill="none" marker-end="url(#arrow)" /> <!-- Ledger->Postgres -->
+        <path d="M 270 470 L 270 550 L 340 550 L 340 610" fill="none" marker-end="url(#arrow)" /> <!-- Ledger->Redis -->
+        
+        <path d="M 355 470 L 355 560 L 155 560 L 155 610" fill="none" marker-end="url(#arrow)" /> <!-- Schedule->Postgres -->
+        <path d="M 375 470 L 375 540 L 833 540 L 833 610" fill="none" marker-end="url(#arrow)" /> <!-- Schedule->APScheduler -->
+        
+        <path d="M 585 470 L 585 610" fill="none" marker-end="url(#arrow)" /> <!-- Chat->LLM -->
+        
+        <path d="M 685 470 L 685 570 L 175 570 L 175 610" fill="none" marker-end="url(#arrow)" /> <!-- Skill->Postgres -->
+        <path d="M 705 470 L 705 560 L 610 560 L 610 610" fill="none" marker-end="url(#arrow)" /> <!-- Skill->LLM -->
 
-  <g>
-    <rect x="32" y="358" width="130" height="56" rx="10" fill="#1a2332" stroke="#a78bfa50" stroke-width="1"/>
-    <text x="97" y="380" text-anchor="middle" fill="#a78bfa" font-size="10" font-weight="600">🚀 引导</text>
-    <text x="97" y="396" text-anchor="middle" fill="#64748b" font-size="8">Onboarding</text>
-  </g>
-  <g>
-    <rect x="182" y="358" width="130" height="56" rx="10" fill="#1a2332" stroke="#34d39950" stroke-width="1"/>
-    <text x="247" y="380" text-anchor="middle" fill="#34d399" font-size="10" font-weight="600">💰 记账</text>
-    <text x="247" y="396" text-anchor="middle" fill="#64748b" font-size="8">Ledger Mgr</text>
-  </g>
-  <g>
-    <rect x="332" y="358" width="130" height="56" rx="10" fill="#1a2332" stroke="#60a5fa50" stroke-width="1"/>
-    <text x="397" y="380" text-anchor="middle" fill="#60a5fa" font-size="10" font-weight="600">📅 日程</text>
-    <text x="397" y="396" text-anchor="middle" fill="#64748b" font-size="8">Schedule Mgr</text>
-  </g>
-  <g>
-    <rect x="482" y="358" width="130" height="56" rx="10" fill="#1a2332" stroke="#f472b650" stroke-width="1"/>
-    <text x="547" y="380" text-anchor="middle" fill="#f472b6" font-size="10" font-weight="600">💬 聊天</text>
-    <text x="547" y="396" text-anchor="middle" fill="#64748b" font-size="8">Chat Mgr + MCP</text>
-  </g>
-  <g>
-    <rect x="632" y="358" width="130" height="56" rx="10" fill="#1a2332" stroke="#fb923c50" stroke-width="1"/>
-    <text x="697" y="380" text-anchor="middle" fill="#fb923c" font-size="10" font-weight="600">🎯 技能</text>
-    <text x="697" y="396" text-anchor="middle" fill="#64748b" font-size="8">Skill Mgr</text>
-  </g>
-  <g>
-    <rect x="782" y="358" width="130" height="56" rx="10" fill="#1a2332" stroke="#22d3ee50" stroke-width="1"/>
-    <text x="847" y="380" text-anchor="middle" fill="#22d3ee" font-size="10" font-weight="600">📖 帮助</text>
-    <text x="847" y="396" text-anchor="middle" fill="#64748b" font-size="8">Help Center</text>
-  </g>
+        <!-- Complex Task -> LLM -->
+        <path d="M 480 523 L 480 580 L 595 580 L 595 610" fill="none" marker-end="url(#arrow)" />
 
-  <line x1="410" y1="340" x2="97" y2="358" stroke="#a78bfa40" stroke-width="1" class="flow-line"/>
-  <line x1="430" y1="340" x2="247" y2="358" stroke="#34d39940" stroke-width="1" class="flow-line"/>
-  <line x1="450" y1="340" x2="397" y2="358" stroke="#60a5fa40" stroke-width="1" class="flow-line"/>
-  <line x1="510" y1="340" x2="547" y2="358" stroke="#f472b640" stroke-width="1" class="flow-line"/>
-  <line x1="530" y1="340" x2="697" y2="358" stroke="#fb923c40" stroke-width="1" class="flow-line"/>
-  <line x1="550" y1="340" x2="847" y2="358" stroke="#22d3ee40" stroke-width="1" class="flow-line"/>
-  <line x1="560" y1="340" x2="480" y2="418" stroke="#fbbf2440" stroke-width="1" class="flow-line"/>
+        <!-- LLM -> MCP Fetch -->
+        <path d="M 597 670 L 597 690" fill="none" marker-end="url(#arrow)" />
+      </g>
 
-  <g>
-    <rect x="352" y="418" width="256" height="18" rx="8" fill="#1a2332" stroke="#fbbf2450" stroke-width="1"/>
-    <text x="480" y="430" text-anchor="middle" fill="#fbbf24" font-size="8.5" font-weight="600">🧠 complex_task_node() · JSON Plan + Executor · 跨节点编排</text>
-  </g>
+      <!-- 第一方客户端与后端的高速连接 (浅蓝色) -->
+      <g stroke="#93C5FD" stroke-width="2" class="flow-line-fast" opacity="0.6">
+        <!-- FastAPI -> Web UI -->
+        <path d="M 280 210 L 260 210" fill="none" marker-end="url(#arrow-blue)" />
+        <!-- FastAPI -> 微信小程序 -->
+        <path d="M 680 210 L 700 210" fill="none" marker-end="url(#arrow-blue)" />
+      </g>
 
-  <line x1="200" y1="440" x2="155" y2="488" stroke="#fb923c40" stroke-width="1" class="flow-line"/>
-  <line x1="400" y1="440" x2="370" y2="488" stroke="#fb923c40" stroke-width="1" class="flow-line"/>
-  <line x1="600" y1="440" x2="585" y2="488" stroke="#22d3ee40" stroke-width="1" class="flow-line"/>
-  <line x1="800" y1="440" x2="800" y2="488" stroke="#f472b640" stroke-width="1" class="flow-line"/>
 
-  <g>
-    <rect x="60" y="482" width="190" height="52" rx="12" fill="#1e1e2e" stroke="url(#orange)" stroke-width="1.5" filter="url(#shadow)"/>
-    <text x="155" y="506" text-anchor="middle" fill="#fb923c" font-size="12" font-weight="700">🐘 PostgreSQL</text>
-    <text x="155" y="522" text-anchor="middle" fill="#64748b" font-size="9">用户 · 账单 · 日程 · 技能 · 记忆</text>
-  </g>
-  <g>
-    <rect x="275" y="482" width="190" height="52" rx="12" fill="#1e1e2e" stroke="url(#orange)" stroke-width="1.5" filter="url(#shadow)"/>
-    <text x="370" y="506" text-anchor="middle" fill="#fb923c" font-size="12" font-weight="700">🔴 Redis Stack</text>
-    <text x="370" y="522" text-anchor="middle" fill="#64748b" font-size="9">Checkpointer · 去重 · 待确认账单</text>
-  </g>
-  <g>
-    <rect x="490" y="482" width="190" height="52" rx="12" fill="#1e1e2e" stroke="url(#cyan)" stroke-width="1.5" filter="url(#shadow)"/>
-    <text x="585" y="506" text-anchor="middle" fill="#22d3ee" font-size="12" font-weight="700">🤖 LLM (OpenAI)</text>
-    <text x="585" y="522" text-anchor="middle" fill="#64748b" font-size="9">GPT-4o · Vision · 意图路由</text>
-  </g>
-  <g>
-    <rect x="705" y="482" width="190" height="52" rx="12" fill="#1e1e2e" stroke="url(#pink)" stroke-width="1.5" filter="url(#shadow)"/>
-    <text x="800" y="506" text-anchor="middle" fill="#f472b6" font-size="12" font-weight="700">⏰ APScheduler</text>
-    <text x="800" y="522" text-anchor="middle" fill="#64748b" font-size="9">定时提醒 · 多端广播</text>
-  </g>
+      <!-- ================= 3. 实体卡片与节点层 ================= -->
 
-  <line x1="585" y1="534" x2="585" y2="566" stroke="#22d3ee40" stroke-width="1" class="flow-line"/>
-  <rect x="490" y="560" width="190" height="42" rx="12" fill="#1e1e2e" stroke="#22d3ee50" stroke-width="1.5" filter="url(#shadow)"/>
-  <text x="585" y="580" text-anchor="middle" fill="#22d3ee" font-size="10" font-weight="600">🔌 MCP Fetch (Streamable HTTP)</text>
-  <text x="585" y="594" text-anchor="middle" fill="#64748b" font-size="8">网页抓取 · 天气查询 · 工具协议</text>
+      <!-- 全局标题 -->
+      <text x="480" y="46" text-anchor="middle" fill="#1E293B" font-size="24" font-weight="800" letter-spacing="0.5">PAI · Personal AI Assistant — 系统架构</text>
+      <text x="480" y="72" text-anchor="middle" fill="#64748B" font-size="13" font-weight="500">多平台智能助手 · LangGraph 工作流 · MCP 工具协议 · 第一方沉浸式客户端</text>
 
-  <rect x="40" y="622" width="420" height="56" rx="14" fill="#1e1e2e" stroke="url(#accent)" stroke-width="1.5" filter="url(#shadow)"/>
-  <text x="250" y="647" text-anchor="middle" fill="#e2e8f0" font-size="13" font-weight="700">🎨 Web — React + Vite + TypeScript + Tailwind CSS</text>
-  <text x="250" y="666" text-anchor="middle" fill="#94a3b8" font-size="10">深色/浅色主题 · 流式对话 · 日历 · 技能工作台 · 跨平台绑定</text>
+      <!-- 第三方接入层 -->
+      <g class="float-box" style="animation-delay: 0s">
+        <g class="hover-card">
+            <rect x="220" y="100" width="100" height="44" rx="22" fill="#DBEAFE" filter="url(#softShadow)"/>
+            <text x="270" y="122" text-anchor="middle" dominant-baseline="central" fill="#1E3A8A" font-size="12" font-weight="700">✈️ Telegram</text>
+        </g>
+      </g>
+      <g class="float-box" style="animation-delay: 0.2s">
+        <g class="hover-card">
+            <rect x="360" y="100" width="100" height="44" rx="22" fill="#DCFCE7" filter="url(#softShadow)"/>
+            <text x="410" y="122" text-anchor="middle" dominant-baseline="central" fill="#14532D" font-size="12" font-weight="700">💬 微信</text>
+        </g>
+      </g>
+      <g class="float-box" style="animation-delay: 0.4s">
+        <g class="hover-card">
+            <rect x="500" y="100" width="100" height="44" rx="22" fill="#E0F2FE" filter="url(#softShadow)"/>
+            <text x="550" y="122" text-anchor="middle" dominant-baseline="central" fill="#0C4A6E" font-size="12" font-weight="700">🐧 QQ</text>
+        </g>
+      </g>
+      <g class="float-box" style="animation-delay: 0.6s">
+        <g class="hover-card">
+            <rect x="640" y="100" width="100" height="44" rx="22" fill="#FFEDD5" filter="url(#softShadow)"/>
+            <text x="690" y="122" text-anchor="middle" dominant-baseline="central" fill="#9A3412" font-size="12" font-weight="700">🐦 飞书</text>
+        </g>
+      </g>
+      
+      <!-- 接入层标签 -->
+      <g class="float-box" style="animation-delay: 0.8s">
+        <rect x="760" y="100" width="160" height="44" rx="22" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1.5"/>
+        <text x="840" y="116" text-anchor="middle" dominant-baseline="central" fill="#475569" font-size="11" font-weight="700">第三方平台接入</text>
+        <text x="840" y="132" text-anchor="middle" dominant-baseline="central" fill="#94A3B8" font-size="9" font-weight="600">Webhook / Polling</text>
+      </g>
 
-  <rect x="490" y="622" width="420" height="56" rx="14" fill="#1e1e2e" stroke="url(#green)" stroke-width="1.5" filter="url(#shadow)"/>
-  <text x="700" y="647" text-anchor="middle" fill="#34d399" font-size="13" font-weight="700">📱 微信小程序 — 原生 WXML/WXSS/JS</text>
-  <text x="700" y="666" text-anchor="middle" fill="#94a3b8" font-size="10">聊天 · 账单 · 日程 · 技能 · 绑定 · 订阅提醒 · Markdown</text>
+      <!-- 左侧第一方 Web 客户端 -->
+      <g class="float-box" style="animation-delay: 0.8s">
+        <g class="hover-card">
+            <rect x="30" y="170" width="220" height="80" rx="24" fill="#EEF2FF" filter="url(#softShadow)"/>
+            <text x="140" y="195" text-anchor="middle" dominant-baseline="central" fill="#3730A3" font-size="14" font-weight="800">🎨 Web (React/Vite)</text>
+            <text x="140" y="217" text-anchor="middle" dominant-baseline="central" fill="#4F46E5" font-size="11" font-weight="600">流式对话 · 可视化日历</text>
+            <text x="140" y="235" text-anchor="middle" dominant-baseline="central" fill="#4F46E5" font-size="11" font-weight="600">技能工作台 · 账号绑定</text>
+        </g>
+      </g>
+      <text x="260" y="200" text-anchor="middle" fill="#60A5FA" font-size="10" font-weight="700">SSE/WS</text>
 
-  <rect x="160" y="700" width="640" height="40" rx="8" fill="#818cf810" stroke="#818cf830" stroke-width="1"/>
-  <text x="480" y="718" text-anchor="middle" fill="#818cf8" font-size="11" font-weight="600">🐳 Docker Compose — backend · frontend · db · redis · gewechat · napcat</text>
-  <text x="480" y="733" text-anchor="middle" fill="#64748b" font-size="9">PostgreSQL 15 · Redis 7 · GeWeChat 微信网关 · NapCat QQ 网关 · Nginx 前端</text>
+      <!-- 中央 FastAPI -->
+      <g class="hover-card">
+          <rect x="280" y="170" width="400" height="80" rx="32" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="2" filter="url(#softShadow)"/>
+          <text x="480" y="195" text-anchor="middle" dominant-baseline="central" fill="#1E293B" font-size="16" font-weight="800">⚡ FastAPI 后端核心</text>
+          <text x="480" y="217" text-anchor="middle" dominant-baseline="central" fill="#64748B" font-size="11" font-weight="600">认证鉴权 · 路由分发 · 管理 API</text>
+          <text x="480" y="235" text-anchor="middle" dominant-baseline="central" fill="#64748B" font-size="11" font-weight="600">SSE 流式响应 · WebSocket 实时推送</text>
+      </g>
 
-  <circle cx="480" cy="320" r="3" fill="#34d399" class="pulse-node"/>
-  <circle cx="480" cy="196" r="2.5" fill="#818cf8" class="pulse-node" style="animation-delay: 1s"/>
-  <circle cx="585" cy="577" r="2" fill="#22d3ee" class="pulse-node" style="animation-delay: 0.5s"/>
-</svg>
+      <!-- 右侧第一方 小程序 客户端 -->
+      <g class="float-box" style="animation-delay: 1.0s">
+        <g class="hover-card">
+            <rect x="710" y="170" width="220" height="80" rx="24" fill="#DCFCE7" filter="url(#softShadow)"/>
+            <text x="820" y="195" text-anchor="middle" dominant-baseline="central" fill="#166534" font-size="14" font-weight="800">📱 微信小程序 (原生)</text>
+            <text x="820" y="217" text-anchor="middle" dominant-baseline="central" fill="#16A34A" font-size="11" font-weight="600">便携聊天 · 语音记账</text>
+            <text x="820" y="235" text-anchor="middle" dominant-baseline="central" fill="#16A34A" font-size="11" font-weight="600">订阅提醒 · Markdown</text>
+        </g>
+      </g>
+      <text x="700" y="200" text-anchor="middle" fill="#60A5FA" font-size="10" font-weight="700">SSE/WS</text>
+
+      <!-- 意图路由器 -->
+      <g class="hover-card">
+          <rect x="400" y="330" width="160" height="36" rx="18" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1.5"/>
+          <text x="480" y="348" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="13" font-weight="700">🔀 意图路由器</text>
+      </g>
+
+      <!-- 内部子节点 (Y=420 to open up spacing for Router Arrows) -->
+      <g class="float-box" style="animation-delay: 1.6s">
+        <g class="hover-card" filter="url(#lightShadow)">
+            <rect x="50" y="420" width="130" height="50" rx="16" fill="#F3E8FF" />
+            <text x="115" y="436" text-anchor="middle" dominant-baseline="central" fill="#6B21A8" font-size="12" font-weight="700">🚀 引导配置</text>
+            <text x="115" y="454" text-anchor="middle" dominant-baseline="central" fill="#9333EA" font-size="10" font-weight="600">Onboarding</text>
+        </g>
+      </g>
+      <g class="float-box" style="animation-delay: 1.8s">
+        <g class="hover-card" filter="url(#lightShadow)">
+            <rect x="195" y="420" width="130" height="50" rx="16" fill="#DCFCE7" />
+            <text x="260" y="436" text-anchor="middle" dominant-baseline="central" fill="#166534" font-size="12" font-weight="700">💰 记账管理</text>
+            <text x="260" y="454" text-anchor="middle" dominant-baseline="central" fill="#22C55E" font-size="10" font-weight="600">Ledger Mgr</text>
+        </g>
+      </g>
+      <g class="float-box" style="animation-delay: 2.0s">
+        <g class="hover-card" filter="url(#lightShadow)">
+            <rect x="340" y="420" width="130" height="50" rx="16" fill="#DBEAFE" />
+            <text x="405" y="436" text-anchor="middle" dominant-baseline="central" fill="#1E3A8A" font-size="12" font-weight="700">📅 日程规划</text>
+            <text x="405" y="454" text-anchor="middle" dominant-baseline="central" fill="#3B82F6" font-size="10" font-weight="600">Schedule Mgr</text>
+        </g>
+      </g>
+      <g class="float-box" style="animation-delay: 2.2s">
+        <g class="hover-card" filter="url(#lightShadow)">
+            <rect x="485" y="420" width="130" height="50" rx="16" fill="#FCE7F3" />
+            <text x="550" y="436" text-anchor="middle" dominant-baseline="central" fill="#9D174D" font-size="12" font-weight="700">💬 智能闲聊</text>
+            <text x="550" y="454" text-anchor="middle" dominant-baseline="central" fill="#EC4899" font-size="10" font-weight="600">Chat Mgr + MCP</text>
+        </g>
+      </g>
+      <g class="float-box" style="animation-delay: 2.4s">
+        <g class="hover-card" filter="url(#lightShadow)">
+            <rect x="630" y="420" width="130" height="50" rx="16" fill="#FFEDD5" />
+            <text x="695" y="436" text-anchor="middle" dominant-baseline="central" fill="#9A3412" font-size="12" font-weight="700">🎯 技能调用</text>
+            <text x="695" y="454" text-anchor="middle" dominant-baseline="central" fill="#F97316" font-size="10" font-weight="600">Skill Mgr</text>
+        </g>
+      </g>
+      <g class="float-box" style="animation-delay: 2.6s">
+        <g class="hover-card" filter="url(#lightShadow)">
+            <rect x="775" y="420" width="130" height="50" rx="16" fill="#CFFAFE" />
+            <text x="840" y="436" text-anchor="middle" dominant-baseline="central" fill="#155E75" font-size="12" font-weight="700">📖 帮助中心</text>
+            <text x="840" y="454" text-anchor="middle" dominant-baseline="central" fill="#06B6D4" font-size="10" font-weight="600">Help Center</text>
+        </g>
+      </g>
+
+      <!-- 复杂任务调度节点框 (采用镂空虚线，彻底变为透明感，不再遮挡引线，也下移20px) -->
+      <g class="hover-card">
+          <rect x="385" y="495" width="190" height="28" rx="14" fill="rgba(254, 249, 195, 0.3)" stroke="#EAB308" stroke-width="1.5" stroke-dasharray="4 4" />
+          <text x="480" y="509" text-anchor="middle" dominant-baseline="central" fill="#A16207" font-size="11" font-weight="700">🧠 complex_task() · 跨编排</text>
+      </g>
+
+      <!-- 基础设施层 -->
+      <g class="float-box" style="animation-delay: 0.1s">
+        <g class="hover-card" filter="url(#softShadow)">
+            <rect x="30" y="610" width="190" height="60" rx="20" fill="#E0F2FE" />
+            <text x="125" y="632" text-anchor="middle" dominant-baseline="central" fill="#0369A1" font-size="14" font-weight="800">🐘 PostgreSQL</text>
+            <text x="125" y="652" text-anchor="middle" dominant-baseline="central" fill="#0284C7" font-size="11" font-weight="600">用户 · 账单 · 日程 · 技能</text>
+        </g>
+      </g>
+      <g class="float-box" style="animation-delay: 0.3s">
+        <g class="hover-card" filter="url(#softShadow)">
+            <rect x="266" y="610" width="190" height="60" rx="20" fill="#FFE4E6" />
+            <text x="361" y="632" text-anchor="middle" dominant-baseline="central" fill="#BE123C" font-size="14" font-weight="800">🔴 Redis Stack</text>
+            <text x="361" y="652" text-anchor="middle" dominant-baseline="central" fill="#E11D48" font-size="11" font-weight="600">持久化游标 · 消息去重</text>
+        </g>
+      </g>
+      <g class="float-box" style="animation-delay: 0.5s">
+        <g class="hover-card" filter="url(#softShadow)">
+            <rect x="502" y="610" width="190" height="60" rx="20" fill="#F3E8FF" />
+            <text x="597" y="632" text-anchor="middle" dominant-baseline="central" fill="#6B21A8" font-size="14" font-weight="800">🤖 LLM (OpenAI)</text>
+            <text x="597" y="652" text-anchor="middle" dominant-baseline="central" fill="#9333EA" font-size="11" font-weight="600">GPT-4o · Vision · 意图决策</text>
+        </g>
+      </g>
+      <g class="float-box" style="animation-delay: 0.7s">
+        <g class="hover-card" filter="url(#softShadow)">
+            <rect x="738" y="610" width="190" height="60" rx="20" fill="#FEF9C3" />
+            <text x="833" y="632" text-anchor="middle" dominant-baseline="central" fill="#A16207" font-size="14" font-weight="800">⏰ APScheduler</text>
+            <text x="833" y="652" text-anchor="middle" dominant-baseline="central" fill="#CA8A04" font-size="11" font-weight="600">定时提醒 · 异步多端广播</text>
+        </g>
+      </g>
+
+      <!-- MCP Fetch -->
+      <g class="float-box" style="animation-delay: 0.9s">
+        <g class="hover-card">
+            <rect x="502" y="690" width="190" height="46" rx="16" fill="#F1F5F9" filter="url(#lightShadow)"/>
+            <text x="597" y="705" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="12" font-weight="800">🔌 MCP Fetch Tools</text>
+            <text x="597" y="722" text-anchor="middle" dominant-baseline="central" fill="#64748B" font-size="10" font-weight="600">网页抓取 · 天气 · 外部 API</text>
+        </g>
+      </g>
+
+      <!-- 底部 Docker -->
+      <g class="hover-card">
+          <rect x="130" y="770" width="700" height="50" rx="16" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.5"/>
+          <text x="480" y="786" text-anchor="middle" dominant-baseline="central" fill="#475569" font-size="13" font-weight="800">🐳 Docker Compose 容器编排架构</text>
+          <text x="480" y="804" text-anchor="middle" dominant-baseline="central" fill="#94A3B8" font-size="11" font-weight="600">PostgreSQL 15 · Redis 7 · GeWeChat 微信网关 · NapCat QQ 网关 · Nginx 代理</text>
+      </g>
+
+    </svg>

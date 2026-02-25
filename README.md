@@ -106,7 +106,7 @@ flowchart TB
 - **系统级 MCP（Fetch）** — 统一网页抓取工具，可在对话中自然语言触发或命令触发
 - **分层记忆系统** — 会话短期上下文 + 用户级长期记忆（检索注入，非全量喂模型）
 - **管理 API** — 后台查看用户、账单、日程、审计日志
-- **Docker Compose 一键部署** — 含 PostgreSQL、Redis、前后端及平台网关
+- **Docker Compose 一键部署** — 含 PostgreSQL 15、Redis 7、GeWeChat、NapCat、Nginx 代理及前后端
 
 ---
 
