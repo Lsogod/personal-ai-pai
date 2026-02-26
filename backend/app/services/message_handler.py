@@ -105,7 +105,7 @@ async def _is_rebind_natural_intent(text: str) -> bool:
     system = SystemMessage(
         content=(
             "你是意图分类器。判断用户是否在表达“换绑/解绑/重新绑定账号”的诉求。"
-            "只输出 JSON：{\"block\": true|false}。"
+            "请仅返回结构化字段 block。"
             "只有在用户明确要求更换绑定关系、解除绑定、改绑账号时 block=true；"
             "普通咨询、记账、提醒等场景都应 block=false。"
         )
@@ -587,4 +587,3 @@ async def handle_message(
         _track_background_task(memory_task)
 
     return {"ok": True, "responses": responses}
-

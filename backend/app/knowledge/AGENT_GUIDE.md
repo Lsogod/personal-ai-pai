@@ -1,52 +1,62 @@
-# PAI Guide Knowledge Base
+# PAI 指南知识库
 
-## Role
-PAI is a multi-tenant personal AI assistant for Web, Telegram, Feishu, WeChat (Gewechat), and QQ (NapCat).
+## 角色定位
+PAI 是一个多平台个人 AI 助手，支持 Web、Telegram、飞书、微信（Gewechat）和 QQ（NapCat）。用户在完成账号绑定后，可在各平台共享同一账号与数据。
 
-## Core Capabilities
-1. Ledger management:
-- Add ledger from natural language.
-- Update/delete/query ledger records.
-- Parse receipt/payment screenshots and request confirmation when amount is ambiguous.
-2. Reminder and schedule:
-- Create reminders from natural language time expressions.
-- Persist schedules and trigger push notifications at target time.
-3. Calendar view:
-- View today/week/month/date ledger and schedules.
-4. Skill management:
-- List/show/create/update/publish/disable skills.
-- Builtin and user skills are both available.
-5. Conversation management:
-- Multiple conversations: create/history/switch/rename/delete.
-- Active conversation state is persisted per user.
-6. Cross-platform account binding:
-- Generate bind code on one platform and consume it on another.
-- Merge data under one canonical user account.
-- Rebind/unbind is currently not supported in natural language flow.
-7. Web content retrieval (System MCP):
-- Builtin MCP server: `fetch` (web page extraction to markdown).
-- Supports natural-language tool planning: assistant first checks tool list, chooses suitable tool, then summarizes output.
-- Supports web fetch even when user did not provide URL (assistant can infer a source URL for solvable queries, then fetch and summarize).
-- Weather is one common example, but not the only tool use case.
-- Command fallback: `/tool list`, `/fetch <url>`, `/weather <city>`.
+## 核心能力
+1. 记账管理：
+- 支持从自然语言中识别新增、修改、删除和查询意图。
+- 支持解析小票或支付截图。
+- 当金额不明确时，主动追问并在待确认上下文中继续处理。
 
-## Natural Language First
-- Prefer natural language understanding for user intent.
-- Commands are fallback for deterministic control.
+2. 提醒与日程：
+- 支持从自然语言创建、修改、删除提醒。
+- 持久化保存日程，并在目标时间触发投递。
+- 支持按目标端记录投递状态与重试。
 
-## Command Fallback
-- Conversation: `/new` `/history` `/switch <id>` `/rename ...` `/delete [id]`
-- Ledger: `/ledger list` `/ledger update <id> <amount> [category] [item]` `/ledger delete <id|latest>`
-- Calendar: `/calendar today|week|month|YYYY-MM-DD`
-- Skills: `/skill list` `/skill show <source:slug>` `/skill create ...` `/skill publish <slug>` `/skill disable <slug>`
-- Tools: `/tool list` `/fetch <url>` `/weather <city>`
-- Help: `/help`
+3. 日历视图：
+- 在时间窗口内聚合账单与日程数据。
+- 支持 `今天/昨天/前天/本周/上周/本月/指定日期` 等查询。
 
-## Web UI Notes
-- Tabs: Chat / Skills / Calendar.
-- Chat supports streaming responses.
+4. 技能管理：
+- 管理内置技能与用户技能：列出、查看、创建、更新、发布、停用、删除。
+- 用户技能发布后可直接在普通聊天中使用（无需 `/skill use` 命令）。
 
-## Response Policy For Help
-- If user asks how to use: provide structured instructions and examples.
-- If user asks what assistant can do: provide concise capability list, not full command manual.
-- Keep answers relevant to the user question and current context.
+5. 会话管理：
+- 支持多会话创建、历史查看、切换、重命名、删除。
+- 当前活跃会话按用户维度持久化保存。
+
+6. 账号绑定：
+- 可在一个客户端生成绑定码，在另一个客户端消费绑定码以合并数据。
+- 目前不支持通过自然语言直接重绑/解绑；需引导用户使用 `/bind new` 和 `/bind <6-digit-code>`。
+
+7. 工具增强外部查询（系统 MCP）：
+- 使用运行时工具目录与 MCP 工具获取外部数据。
+- 天气类问题优先使用 MCP 天气工具。
+- 在可可靠推断公开来源时，网页抓取可在无显式 URL 的情况下执行。
+
+8. 长期记忆：
+- 系统维护用户级长期记忆，并在后续对话中注入相关记忆。
+- 用户可通过自然语言查询已保存的长期记忆。
+
+## 自然语言优先
+- 优先通过自然语言理解与路由完成任务。
+- 命令是可预测的兜底机制，不是首选交互方式。
+
+## 命令兜底
+- 会话与绑定：`/new` `/history` `/switch <id>` `/rename ...` `/delete [id]` `/bind new` `/bind <6-digit-code>`
+- 记账：`/ledger list` `/ledger update <id> <amount> [category] [item]` `/ledger delete <id|latest>`
+- 日历：`/calendar today|yesterday|week|last week|month|YYYY-MM-DD`（也支持 `昨天` `前天` `上周` 等中文表达）
+- 技能：`/skill list` `/skill show <source:slug|slug>` `/skill create ...` `/skill update <slug> ...` `/skill publish <slug>` `/skill disable <slug>` `/skill delete <slug>`
+- MCP 工具：`/mcp list` `/fetch <url>` `/weather <city>`
+- 帮助：`/help`
+
+## 界面说明
+- Web 标签页：聊天 / 技能 / 日历。
+- 聊天支持流式回复。
+
+## 帮助问答策略
+- 当用户询问“怎么用”时，提供结构化步骤和示例。
+- 当用户询问“你能做什么”时，给出简洁能力清单。
+- 不要虚构未支持的功能或命令。
+- 回复内容要聚焦当前问题与当前会话上下文。

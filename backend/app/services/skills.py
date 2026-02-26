@@ -400,7 +400,7 @@ async def parse_skill_intent(
     runnable = llm.with_structured_output(SkillIntentExtraction)
     system = SystemMessage(
         content=(
-            "你是意图解析器。将用户关于技能管理的消息解析为 JSON。"
+            "你是意图解析器。请将用户关于技能管理的消息解析为结构化字段。"
             "action 仅可为: create, update, publish, disable, delete, list, show, help。"
             "返回字段: action, skill_name, skill_slug, target, request, delete_scope, confirmed, clarification_needed。"
             "delete_scope 仅可为 single/all/unknown。"
@@ -409,7 +409,7 @@ async def parse_skill_intent(
             "若你无法确认是删单个还是删全部，delete_scope=unknown 且 clarification_needed=true。"
             "confirmed 仅在用户明确确认执行高风险删除时为 true（例如“确认删除全部技能”）。"
             "必须同时支持自然语言和命令式输入（例如 `/skill publish demo`）。"
-            "只输出 JSON。"
+            "仅返回 schema 定义字段。"
         )
     )
     human = HumanMessage(
@@ -461,7 +461,7 @@ async def _parse_skill_followup_intent(*, text: str, conversation_context: str) 
     runnable = llm.with_structured_output(SkillFollowupExtraction)
     system = SystemMessage(
         content=(
-            "你是技能跟进意图解析器，只输出 JSON。"
+            "你是技能跟进意图解析器，请仅返回结构化字段。"
             "当用户在上一轮创建/展示技能后，用自然语言继续修改约束（如“标题改为...”“把正文限制到80字”），"
             "应识别为 action=update。"
             "从会话上下文中提取最近一个用户技能 slug 填入 target。"

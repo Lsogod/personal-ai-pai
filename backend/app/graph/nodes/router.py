@@ -69,26 +69,25 @@ async def _classify_intent_with_llm(
     runnable = llm.with_structured_output(RouterIntentExtraction)
     system = SystemMessage(
         content=(
-            "You are a routing classifier for an agent graph. Output structured JSON only.\n"
-            "Allowed intents: complex_task, skill_manager, ledger_manager, schedule_manager, "
-            "chat_manager, help_center, unknown.\n"
-            "Output fields: intent, use_complex, confidence, reason.\n"
-            "Routing rules:\n"
-            "1) complex_task: multi-goal workflow with cross-node orchestration.\n"
-            "2) skill_manager: only skill management CRUD/list/show/publish/disable/delete.\n"
-            "3) ledger_manager: ledger create/update/delete/query.\n"
-            "4) schedule_manager: reminder/calendar create/update/delete/query.\n"
-            "5) help_center: help/manual/capabilities introduction.\n"
-            "6) chat_manager: general Q&A/writing/translation/external lookup/weather query only.\n"
-            "7) unknown only when evidence is insufficient.\n"
-            "When user asks to USE an existing skill to generate content (e.g. '使用xx技能写文案/写诗/翻译'), route to chat_manager, not skill_manager.\n"
-            "Identity questions such as '你是谁/我是谁/我叫什么/你叫什么' should route to chat_manager, not help_center.\n"
-            "Set use_complex=true only when the request requires two or more domain nodes "
-            "(for example ledger_manager + schedule_manager, or skill_manager + chat_manager).\n"
-            "A conditional request that can be fully handled inside a single node "
-            "(e.g. schedule_manager with internal tool checks) should keep use_complex=false.\n"
-            "Use user_message as primary evidence. conversation_context and runtime_tools are auxiliary only.\n"
-            "If has_pending_ledger=true, prefer ledger_manager unless user clearly requests another domain."
+            "你是智能体图路由分类器。请仅返回 schema 定义的结构化字段。\n"
+            "允许的 intent: complex_task, skill_manager, ledger_manager, schedule_manager, "
+            "chat_manager, help_center, unknown。\n"
+            "输出字段: intent, use_complex, confidence, reason。\n"
+            "路由规则：\n"
+            "1) complex_task: 多目标工作流，且涉及跨节点编排。\n"
+            "2) skill_manager: 仅技能管理 CRUD/list/show/publish/disable/delete。\n"
+            "3) ledger_manager: 账单新增/修改/删除/查询。\n"
+            "4) schedule_manager: 提醒/日历新增/修改/删除/查询。\n"
+            "5) help_center: 帮助、手册、能力说明。\n"
+            "6) chat_manager: 通用问答、写作、翻译、外部查询、天气问答。\n"
+            "7) unknown: 仅在证据不足时使用。\n"
+            "当用户要求“使用某个已有技能生成内容”（如“使用xx技能写文案/写诗/翻译”）时，路由到 chat_manager，不是 skill_manager。\n"
+            "身份类问题（如“你是谁/我是谁/我叫什么/你叫什么”）应路由到 chat_manager，不是 help_center。\n"
+            "仅当请求确实需要两个及以上领域节点时才设置 use_complex=true "
+            "（例如 ledger_manager + schedule_manager，或 skill_manager + chat_manager）。\n"
+            "若一个节点即可完整处理（如 schedule_manager 内部条件工具判断），应保持 use_complex=false。\n"
+            "以用户消息为主要证据，会话上下文与运行时工具目录仅作辅助。\n"
+            "若 has_pending_ledger=true，除非用户明确请求其它域，否则优先 ledger_manager。"
         )
     )
     human = HumanMessage(
@@ -96,8 +95,8 @@ async def _classify_intent_with_llm(
             f"has_image={str(has_image).lower()}\n"
             f"has_pending_ledger={str(has_pending_ledger).lower()}\n"
             f"runtime_tools={runtime_tools}\n\n"
-            f"conversation_context:\n{conversation_context}\n\n"
-            f"user_message:\n{content}"
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"用户消息:\n{content}"
         )
     )
     result = await asyncio.wait_for(runnable.ainvoke([system, human]), timeout=25)
@@ -150,20 +149,19 @@ async def _verify_complex_eligibility_with_llm(
     runnable = llm.with_structured_output(ComplexEligibilityExtraction)
     system = SystemMessage(
         content=(
-            "You are a complex-task eligibility checker. Output structured JSON only.\n"
-            "Fields: use_complex, required_nodes, reason.\n"
-            "Domain nodes allowed in required_nodes: "
-            "ledger_manager, schedule_manager, chat_manager, skill_manager, help_center.\n"
-            "Set use_complex=true only if the request requires >=2 distinct domain nodes.\n"
-            "If one node can complete the task end-to-end (even with internal tools/conditions), use_complex=false.\n"
-            "required_nodes should contain the minimal node set needed."
+            "你是复杂任务资格检查器。请仅返回 schema 定义的结构化字段。\n"
+            "字段: use_complex, required_nodes, reason。\n"
+            "required_nodes 允许值: ledger_manager, schedule_manager, chat_manager, skill_manager, help_center。\n"
+            "仅当请求确实需要至少 2 个不同领域节点时，use_complex=true。\n"
+            "如果单节点即可端到端完成（即便包含内部工具/条件判断），use_complex=false。\n"
+            "required_nodes 需给出完成任务所需的最小节点集合。"
         )
     )
     human = HumanMessage(
         content=(
             f"primary_intent={primary_intent}\n\n"
-            f"user_message:\n{content}\n\n"
-            f"conversation_context:\n{conversation_context}"
+            f"用户消息:\n{content}\n\n"
+            f"会话上下文:\n{conversation_context}"
         )
     )
     result = await asyncio.wait_for(runnable.ainvoke([system, human]), timeout=25)
@@ -193,22 +191,22 @@ async def _should_route_complex_with_llm(
     runnable = llm.with_structured_output(ComplexRouteDecision)
     system = SystemMessage(
         content=(
-            "You are a complex-routing verifier. Output structured JSON only.\n"
-            "Decide whether this user request MUST go to complex_task.\n"
-            "use_complex=true when at least one is true:\n"
-            "1) multi-goal workflow with ordering/dependencies and >=2 domain nodes,\n"
-            "2) cross-domain orchestration where one node result drives another node,\n"
-            "3) true multi-node plan is required (not solvable within one node).\n"
-            "Single-node conditional execution based on internal tools should keep primary intent.\n"
-            "Simple single-shot CRUD/query should keep primary intent.\n"
-            "Be conservative: choose false unless clear complex orchestration is required."
+            "你是复杂路由校验器。请仅返回 schema 定义的结构化字段。\n"
+            "判断该请求是否必须进入 complex_task。\n"
+            "满足任一条件时 use_complex=true：\n"
+            "1) 多目标且有顺序/依赖关系，并涉及至少 2 个领域节点；\n"
+            "2) 存在跨域编排，一个节点结果驱动另一个节点；\n"
+            "3) 必须使用多节点计划，单节点无法完成。\n"
+            "若属于单节点内部条件执行，应保持原主路由。\n"
+            "若只是单次简单 CRUD/查询，应保持原主路由。\n"
+            "采取保守策略：除非有明确多节点编排需求，否则 use_complex=false。"
         )
     )
     human = HumanMessage(
         content=(
             f"primary_intent={primary_intent}\n\n"
-            f"user_message:\n{content}\n\n"
-            f"conversation_context:\n{conversation_context}"
+            f"用户消息:\n{content}\n\n"
+            f"会话上下文:\n{conversation_context}"
         )
     )
     result = await asyncio.wait_for(runnable.ainvoke([system, human]), timeout=25)

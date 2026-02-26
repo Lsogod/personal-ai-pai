@@ -128,7 +128,7 @@ async def _classify_chat_request_with_llm(
     runnable = llm.with_structured_output(ChatClassificationExtraction)
     system = SystemMessage(
         content=(
-            "你是 chat_manager 节点的请求分析器。只输出 JSON。"
+            "你是 chat_manager 节点的请求分析器。请仅返回结构化字段。"
             "字段: kind, tool_required, weather_location, confidence。"
             "kind 仅可为: general, time, external, weather, tooling, unknown。"
             "tool_required 必须是布尔值。"
@@ -457,7 +457,7 @@ async def _ground_answer_with_tool_outputs(
     llm = get_llm(node_name="chat_manager")
     merged = "\n\n---\n\n".join(tool_outputs)
     if len(merged) > 16000:
-        merged = merged[:16000] + "\n...(tool outputs truncated)"
+        merged = merged[:16000] + "\n...(工具输出已截断)"
     system = SystemMessage(
         content=(
             f"你是{user.nickname}的私人助理{user.ai_name} {user.ai_emoji}。"

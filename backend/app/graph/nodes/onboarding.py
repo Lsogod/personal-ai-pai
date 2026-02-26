@@ -59,9 +59,9 @@ async def _extract_nickname_with_llm(raw: str, conversation_context: str) -> str
             "你是字段提取器。请从用户消息中提取用户昵称。"
             "无论用户是自然语言还是'昵称: xxx'格式，都只返回昵称值。"
             "必须去掉语气和动词前缀，例如'叫我'、'我叫'、'我是'。"
-            "示例1: 输入'昵称：叫我Lsogod'，输出 {\"nickname\":\"Lsogod\"}。"
-            "示例2: 输入'我叫大卫'，输出 {\"nickname\":\"大卫\"}。"
-            "只输出 JSON: {\"nickname\":\"...\"}，不要输出其他文本。"
+            "示例1: 输入'昵称：叫我Lsogod'，提取 nickname=Lsogod。"
+            "示例2: 输入'我叫大卫'，提取 nickname=大卫。"
+            "仅返回 nickname 字段对应的值，不要添加额外说明。"
         )
     )
     human = HumanMessage(
@@ -96,8 +96,8 @@ async def _extract_ai_profile_with_llm(raw: str, conversation_context: str) -> t
             "你是字段提取器。请从用户消息中提取 AI 名称和 AI 表情。"
             "无论用户是自然语言还是'AI 名称: xxx'、'AI 表情: yyy'格式，都只返回值。"
             "AI 名称必须去掉语气和动词前缀，例如'叫你'、'你是'、'就叫'。"
-            "示例: 输入'AI 名称：叫你贾维斯\\nAI 表情：👻'，输出 {\"ai_name\":\"贾维斯\",\"ai_emoji\":\"👻\"}。"
-            "只输出 JSON: {\"ai_name\":\"...\",\"ai_emoji\":\"...\"}，不要输出其他文本。"
+            "示例: 输入'AI 名称：叫你贾维斯\\nAI 表情：👻'，提取 ai_name=贾维斯, ai_emoji=👻。"
+            "仅返回 ai_name 与 ai_emoji 字段值，不要添加额外说明。"
         )
     )
     human = HumanMessage(
@@ -132,7 +132,7 @@ async def _understand_binding_answer(raw: str, conversation_context: str) -> str
         return "unknown"
     system = SystemMessage(
         content=(
-            "你是绑定引导意图解析器。只输出 JSON。"
+            "你是绑定引导意图解析器。请仅返回结构化字段。"
             "字段: decision。"
             "decision 仅可为: has_account, no_account, continue, unknown。"
             "当用户表示在其他客户端已有账号时，decision=has_account。"

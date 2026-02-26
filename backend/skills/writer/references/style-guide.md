@@ -1,6 +1,6 @@
-# Writer Style Notes
+# 写作风格说明
 
-- Prefer short sentences and explicit verbs.
-- Avoid repetitive transition phrases.
-- Use lists for actionable content.
-- Keep one core idea per paragraph.
+- 优先使用短句和明确动词。
+- 避免重复使用过渡性套话。
+- 对可执行内容优先使用列表表达。
+- 每段只承载一个核心观点。

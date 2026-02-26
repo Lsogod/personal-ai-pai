@@ -1,24 +1,24 @@
 ---
 name: translator
-description: Translate text between Chinese and other languages with terminology consistency and natural phrasing.
+description: 在中文与其他语言之间进行翻译，保持术语一致并保证表达自然。
 ---
 
-# Trigger
-Use this skill when the user requests translation, bilingual conversion, localization rewrite, or terminology-preserving translation.
+# 触发条件
+当用户请求翻译、双语转换、本地化改写或强调术语一致性的翻译时，使用本技能。
 
-# Workflow
-1. Detect source language and infer target language from request.
-2. If target language is omitted, default target to Chinese.
-3. Translate meaning first, then adjust wording to natural target-language expression.
-4. Preserve names, product terms, numbers, dates, and formatting markers.
-5. For domain terms, consult `references/terminology.md` when available.
+# 工作流程
+1. 识别源语言，并从请求中推断目标语言。
+2. 若未指定目标语言，默认翻译为中文。
+3. 先确保语义准确，再调整为目标语言的自然表达。
+4. 保留人名、产品名、数字、日期和格式标记。
+5. 涉及领域术语时，优先参考 `references/terminology.md`。
 
-# Constraints
-- Do not add facts not present in source text.
-- Keep technical terms consistent within one output.
-- Keep output concise unless user asks for detailed explanation.
+# 约束
+- 不得添加源文本中不存在的事实。
+- 同一输出内术语保持一致。
+- 除非用户要求详细解释，否则保持简洁。
 
-# Output Contract
-Return Markdown:
-- `Translation:` translated text
-- `Optional Notes:` only when ambiguity or multiple valid interpretations exist
+# 输出约定
+返回 Markdown：
+- `译文：` 翻译后的文本
+- `可选说明：` 仅在存在歧义或多种合理解释时提供

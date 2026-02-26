@@ -7,19 +7,19 @@ SCHEDULE_WEATHER_CONDITIONAL_PROMPT = ChatPromptTemplate.from_messages(
         (
             "system",
             (
-                "You are a conditional weather-reminder parser. Output JSON only.\n"
-                "Fields: conditional, condition_type, city, target_date, run_at_local, reminder_content, confidence.\n"
-                "condition_type allowed: weather_good, weather_rain, none.\n"
-                "If user asks 'if weather good/rain then remind me', set conditional=true.\n"
-                "city must come from user message or context. Do not invent a city.\n"
-                "target_date must be YYYY-MM-DD when clearly derivable, else empty.\n"
-                "run_at_local must be local datetime string when provided, else empty.\n"
-                "reminder_content should be concise action text, for example '晒衣服' or '带伞'."
+                "你是天气条件提醒解析器。请按 schema 输出结构化字段。\n"
+                "字段: conditional, condition_type, city, target_date, run_at_local, reminder_content, confidence。\n"
+                "condition_type 仅可为: weather_good, weather_rain, none。\n"
+                "当用户表达“天气好/下雨就提醒我”这类条件提醒时，conditional=true。\n"
+                "city 必须来自用户消息或上下文，禁止臆造城市。\n"
+                "target_date 若可明确推导则输出 YYYY-MM-DD，否则留空。\n"
+                "run_at_local 若用户提供具体时间则输出本地时间字符串，否则留空。\n"
+                "reminder_content 应为简洁动作短语，例如“晒衣服”“带伞”。"
             ),
         ),
         (
             "human",
-            "conversation_context:\n{conversation_context}\n\nuser_message:\n{content}",
+            "会话上下文:\n{conversation_context}\n\n用户消息:\n{content}",
         ),
     ]
 )
@@ -30,7 +30,7 @@ SCHEDULE_REMINDER_FALLBACK_PROMPT = ChatPromptTemplate.from_messages(
         (
             "system",
             (
-                "你是提醒专用解析器。只输出 JSON。"
+                "你是提醒专用解析器。请按 schema 输出结构化字段。"
                 "字段: is_reminder, confidence, run_at_local, reminder_content, event_type, priority, explicit_offsets_minutes, event_tags。"
                 "is_reminder 只可为 true/false。"
                 "如果用户表达了提醒诉求（例如“1分钟后提醒我测试”“明早9点提醒我开会”），is_reminder=true。"
@@ -55,7 +55,7 @@ SCHEDULE_INTENT_PROMPT = ChatPromptTemplate.from_messages(
         (
             "system",
             (
-                "你是提醒与日历意图解析器，只输出 JSON。"
+                "你是提醒与日历意图解析器，请按 schema 输出结构化字段。"
                 "字段: intent, confidence, run_at_local, reminder_content, target_content, target_ids, reference_mode, selection_mode, event_type, priority, explicit_offsets_minutes, event_tags, calendar_scope, calendar_date, schedule_status_filter。"
                 "intent 仅可为 reminder, update_by_name, update_by_scope, delete_by_name, delete_by_scope, calendar, time_query, context_recall, unknown。"
                 "创建提醒时 intent=reminder。"

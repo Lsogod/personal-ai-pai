@@ -198,7 +198,7 @@ def _build_action_catalog(runtime_tools: list[dict[str, Any]]) -> list[dict[str,
         rows.append(
             {
                 "action": f"node.{node_name}",
-                "description": "Execute this domain node with args.input as the user message.",
+                "description": "执行该领域节点，使用 args.input 作为用户输入。",
             }
         )
     for tool in runtime_tools:
@@ -209,15 +209,15 @@ def _build_action_catalog(runtime_tools: list[dict[str, Any]]) -> list[dict[str,
         rows.append(
             {
                 "action": f"tool.{name}",
-                "description": f"Call runtime tool `{name}` (source={source}).",
+                "description": f"调用运行时工具 `{name}`（source={source}）。",
             }
         )
     rows.append(
         {
             "action": "logic.weather_rain_check",
             "description": (
-                "Determine whether precipitation is expected from weather output. "
-                "args supports weather_step|weather_output, target_date, period(day|night|afternoon|evening)."
+                "根据天气输出判断是否有降水。"
+                "args 支持 weather_step|weather_output、target_date、period(day|night|afternoon|evening)。"
             ),
         }
     )
@@ -239,36 +239,33 @@ async def _plan_complex_task(
     runnable = llm.with_structured_output(ComplexTaskPlanExtraction)
     system = SystemMessage(
         content=(
-            "You are a complex task planner. Output structured JSON only.\n"
-            "Decide if this request requires a complex DAG execution (need_complex=true) or not.\n"
-            "Use need_complex=true when the task has any of: multi-goal, cross-domain, dependency chain, or conditional execution.\n"
-            "When need_complex=true, you must provide a plan.\n"
-            "Plan rules:\n"
-            "1) Each step has unique step_id.\n"
-            "2) Use only actions from the provided action catalog.\n"
-            "3) Use depends_on for ordering.\n"
-            "4) For conditional branching, use when={step_id, field, equals}.\n"
-            "5) Use args placeholders to pass results, format: $<step_id> or $<step_id>.<field_path>.\n"
-            "6) Keep total steps <= 8.\n"
-            "7) Prefer tool evidence first, then business actions, then synthesis by the engine.\n"
-            "8) Never fabricate tool outputs.\n"
-            "9) For weather tools that require city/adcode, use city/adcode only when explicitly provided "
-            "in the current user message or explicit recent conversation context. "
-            "Never assume a default city.\n"
-            "If city is unknown, avoid tool call and ask for clarification.\n"
-            "10) For conditional plans, evaluate condition in a logic step first. "
-            "If condition is met, downstream business action input must be unconditional "
-            "(do not include words like 'if/如果/下雨就').\n"
-            "11) when.field should reference a real output field (for weather rain check use 'matched').\n"
-            "12) when.equals must be a scalar literal (boolean/string/number), not a list/object.\n"
-            f"User timezone: {tz}. Current local time: {now_local}."
+            "你是复杂任务规划器。请仅返回 schema 定义的结构化字段。\n"
+            "判断该请求是否需要复杂 DAG 执行（need_complex=true）。\n"
+            "当任务具备以下任一特征时使用 need_complex=true：多目标、跨域、依赖链、条件执行。\n"
+            "当 need_complex=true 时，必须给出 plan。\n"
+            "规划规则：\n"
+            "1) 每个步骤的 step_id 必须唯一。\n"
+            "2) 只能使用给定动作目录中的 action。\n"
+            "3) 用 depends_on 表达执行顺序。\n"
+            "4) 条件分支用 when={step_id, field, equals}。\n"
+            "5) args 中可用占位符传递结果，格式为 $<step_id> 或 $<step_id>.<field_path>。\n"
+            "6) 总步骤数不超过 8。\n"
+            "7) 优先使用工具证据，再执行业务动作，最后由引擎汇总。\n"
+            "8) 严禁编造工具输出。\n"
+            "9) 对需要 city/adcode 的天气工具，仅当当前用户消息或最近上下文明确给出时才填写；禁止默认城市。\n"
+            "若城市未知，不要调用工具，应先澄清。\n"
+            "10) 条件型计划必须先用 logic 步骤判断条件；条件满足后，下游业务动作输入必须是无条件描述，"
+            "不要包含“如果/下雨就”之类条件措辞。\n"
+            "11) when.field 必须引用真实输出字段（天气降水判断使用 matched）。\n"
+            "12) when.equals 必须是标量字面量（布尔/字符串/数字），不能是数组或对象。\n"
+            f"用户时区：{tz}。当前本地时间：{now_local}。"
         )
     )
     human = HumanMessage(
         content=(
-            f"User message:\n{content}\n\n"
-            f"Conversation context:\n{conversation_context}\n\n"
-            f"Action catalog:\n{json.dumps(action_catalog, ensure_ascii=False)}"
+            f"用户消息:\n{content}\n\n"
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"动作目录:\n{json.dumps(action_catalog, ensure_ascii=False)}"
         )
     )
     return await asyncio.wait_for(runnable.ainvoke([system, human]), timeout=45)
@@ -284,21 +281,21 @@ async def _decide_non_complex_handling(
     runnable = llm.with_structured_output(NonComplexDecision)
     system = SystemMessage(
         content=(
-            "You are a fallback decision maker for an agent graph.\n"
-            "Output structured JSON only.\n"
-            "Choose exactly one mode:\n"
-            "1) handoff: route to a single node action.\n"
-            "2) clarify: ask one short clarification question.\n"
-            "Allowed node_action: node.chat_manager, node.ledger_manager, node.schedule_manager, node.skill_manager, node.help_center.\n"
-            "Use clarify when key parameters are missing or user intent is still ambiguous.\n"
-            "Never output final factual conclusions without tool evidence."
+            "你是智能体图的兜底决策器。\n"
+            "请仅返回 schema 定义的结构化字段。\n"
+            "只能二选一：\n"
+            "1) handoff：路由到单个节点动作；\n"
+            "2) clarify：提出一个简短澄清问题。\n"
+            "允许的 node_action: node.chat_manager, node.ledger_manager, node.schedule_manager, node.skill_manager, node.help_center。\n"
+            "当关键参数缺失或意图仍不明确时使用 clarify。\n"
+            "在没有工具证据时，禁止输出最终事实结论。"
         )
     )
     human = HumanMessage(
         content=(
-            f"User message:\n{content}\n\n"
-            f"Conversation context:\n{conversation_context}\n\n"
-            f"Planner reason:\n{planner_reason}"
+            f"用户消息:\n{content}\n\n"
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"规划器原因:\n{planner_reason}"
         )
     )
     try:
@@ -317,15 +314,15 @@ async def _generate_clarification(
     runnable = llm.with_structured_output(ClarificationReply)
     system = SystemMessage(
         content=(
-            "You ask one concise clarification question to unblock task execution.\n"
-            "Do not expose internal errors. Do not fabricate facts."
+            "你需要提出一个简洁澄清问题，以解除执行阻塞。\n"
+            "不要暴露内部错误，不要编造事实。"
         )
     )
     human = HumanMessage(
         content=(
-            f"User message:\n{content}\n\n"
-            f"Conversation context:\n{conversation_context}\n\n"
-            f"Reason:\n{reason}"
+            f"用户消息:\n{content}\n\n"
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"原因:\n{reason}"
         )
     )
     try:
@@ -569,12 +566,17 @@ async def _execute_step(
         )
         if not result["ok"]:
             raise RuntimeError(str(result.get("error") or f"tool `{tool_name}` failed"))
+        output_data = result.get("output_data")
+        output_text = str(result.get("output") or "")
+        if output_data is None:
+            output_data = output_text
         return {
             "kind": "tool",
             "tool": tool_name,
             "source": source,
             "arguments": args_for_tool,
-            "output": str(result.get("output") or ""),
+            "output": output_data,
+            "output_text": output_text,
             "latency_ms": int(result.get("latency_ms") or 0),
         }
 
@@ -643,11 +645,11 @@ async def _summarize_complex_result(
     llm = get_llm(node_name="complex_task")
     system = SystemMessage(
         content=(
-            "You are a final response synthesizer.\n"
-            "Use ONLY executed step results. Do not fabricate execution success.\n"
-            "If a required step failed, explicitly state failure and next action.\n"
-            "For conditional tasks, explain whether conditions were met.\n"
-            "Keep the answer concise and user-facing."
+            "你是最终答复汇总器。\n"
+            "只能使用已执行步骤结果作答，禁止编造执行成功。\n"
+            "若关键步骤失败，必须明确说明失败点和下一步建议。\n"
+            "若是条件任务，需说明条件是否满足。\n"
+            "回答保持简洁、面向用户。"
         )
     )
     trace_payload = {
@@ -657,9 +659,9 @@ async def _summarize_complex_result(
     }
     human = HumanMessage(
         content=(
-            f"User message:\n{content}\n\n"
-            f"Conversation context:\n{conversation_context}\n\n"
-            f"Execution trace:\n{json.dumps(trace_payload, ensure_ascii=False)}"
+            f"用户消息:\n{content}\n\n"
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"执行轨迹:\n{json.dumps(trace_payload, ensure_ascii=False)}"
         )
     )
     response = await asyncio.wait_for(llm.ainvoke([system, human]), timeout=45)

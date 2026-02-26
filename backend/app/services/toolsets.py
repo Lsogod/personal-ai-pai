@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from typing import Iterable
 
 from langchain_core.tools import BaseTool
 
 from app.services.langchain_tools import ToolInvocationContext, build_langchain_tools
+from app.services.tool_executor import execute_capability_with_usage
 
 # Shared tools usable across multiple nodes.
 SHARED_TOOL_NAMES: set[str] = {
@@ -101,3 +103,60 @@ async def invoke_node_tool(
     if selected is None:
         return f"tool `{tool_name}` not available"
     return str(await selected.ainvoke(dict(args or {})))
+
+
+def _resolve_tool_source(tool_name: str) -> str:
+    target = (tool_name or "").strip().lower()
+    if target == "maps_weather":
+        return "mcp"
+    return "builtin"
+
+
+async def invoke_node_tool_typed(
+    *,
+    context: ToolInvocationContext,
+    node_name: str,
+    tool_name: str,
+    args: dict | None = None,
+):
+    enabled = get_node_tool_names(node_name)
+    target = (tool_name or "").strip()
+    if not target or target.lower() not in enabled:
+        return f"tool `{tool_name}` not available"
+
+    payload = dict(args or {})
+    source = _resolve_tool_source(target)
+    result = await execute_capability_with_usage(
+        source=source,
+        name=target,
+        args=payload,
+        user_id=context.user_id,
+        platform=context.platform,
+        conversation_id=context.conversation_id,
+    )
+    ok = bool(result.get("ok"))
+    output_text = str(result.get("output") or "")
+    error_text = str(result.get("error") or "")
+    latency_ms = int(result.get("latency_ms") or 0)
+    if context.audit_hook is not None:
+        await context.audit_hook(
+            source,
+            target,
+            payload,
+            ok,
+            latency_ms,
+            output_text,
+            error_text,
+        )
+    if not ok:
+        return error_text or f"tool `{target}` failed"
+
+    output_data = result.get("output_data")
+    if output_data is not None:
+        return output_data
+    if not output_text:
+        return ""
+    try:
+        return json.loads(output_text)
+    except Exception:
+        return output_text

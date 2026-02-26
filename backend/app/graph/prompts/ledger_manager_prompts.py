@@ -7,7 +7,7 @@ LEDGER_PENDING_SELECTION_PROMPT = ChatPromptTemplate.from_messages(
         (
             "system",
             (
-                "你是待确认记账解析器。只输出 JSON。"
+                "你是待确认记账解析器。请按 schema 输出结构化字段。"
                 "字段: mode, indexes, amount, category, item。"
                 "mode 仅可为 indexes, amount, cancel, unknown。"
                 "若用户选择候选项（如“1 2”“第二个和第三个”“选2和3”“前两个”），mode=indexes，indexes 输出数组。"
@@ -37,14 +37,16 @@ LEDGER_INTENT_PROMPT = ChatPromptTemplate.from_messages(
         (
             "system",
             (
-                "你是记账意图解析器，只输出 JSON。"
+                "你是记账意图解析器，请按 schema 输出结构化字段。"
                 "字段: intent, ledger_id, target_ids, target_item, amount, item, category, query_scope, query_date, reference_mode, selection_mode, confidence。"
                 "intent 仅可为 insert, correct_latest, correct_by_id, correct_by_name, correct_by_scope, delete_latest, delete_by_id, delete_by_name, delete_by_scope, query, list, unknown。"
                 "若用户纠正最近一笔（如‘错了，改成30’）intent=correct_latest。"
+                "若句子里出现明确账单名称/摘要（如‘不对，爬山门票应该是200元’），优先 intent=correct_by_name，不要判为 correct_latest。"
                 "若用户纠正指定ID（如‘把账单#12改成28元’）intent=correct_by_id 并给 ledger_id。"
                 "若用户纠正某个名称/摘要（如‘不对，爬山门票应该是200元’）intent=correct_by_name，并提取 target_item。"
                 "若用户按范围纠正（如‘把今天餐饮都改成30’）intent=correct_by_scope。"
                 "若用户删除最近一笔 intent=delete_latest。"
+                "若句子里出现明确账单名称/摘要（如‘删除晚饭这笔’），优先 intent=delete_by_name，不要判为 delete_latest。"
                 "若用户删除指定ID intent=delete_by_id 并给 ledger_id。"
                 "若用户删除某个名称/摘要 intent=delete_by_name，并提取 target_item。"
                 "若用户按范围删除（如‘删除今天所有账单’）intent=delete_by_scope。"
@@ -56,6 +58,7 @@ LEDGER_INTENT_PROMPT = ChatPromptTemplate.from_messages(
                 "reference_mode 仅可为 by_id/by_name/by_scope/latest/last_result_set/auto。"
                 "当用户说‘这几笔/这些/刚才那几个’时，reference_mode=last_result_set。"
                 "selection_mode 仅可为 all/single/subset/auto。"
+                "当 intent 为 correct_by_name/delete_by_name 且未出现‘都/全部/所有/这几笔/这些’等批量信号时，selection_mode=single。"
                 "confidence 范围 0~1。"
             ),
         ),
@@ -90,4 +93,3 @@ def build_ledger_intent_messages(
         content=content,
         conversation_context=conversation_context,
     )
-

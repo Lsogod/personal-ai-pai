@@ -165,6 +165,44 @@ class RegressionRunner:
         _must(status == 200 and isinstance(data, list), f"schedule list failed: {status}, {data}")
         return [item for item in data if isinstance(item, dict)]
 
+    def _create_ledger_row(
+        self,
+        *,
+        amount: float,
+        category: str,
+        item: str,
+        transaction_date: str | None = None,
+    ) -> dict[str, Any]:
+        tx = transaction_date or (datetime.utcnow().replace(microsecond=0).isoformat() + "Z")
+        status, data = self.call(
+            "POST",
+            "/api/ledgers",
+            payload={
+                "amount": amount,
+                "category": category,
+                "item": item,
+                "transaction_date": tx,
+            },
+        )
+        _must(status == 200 and isinstance(data, dict), f"create ledger failed: {status}, {data}")
+        _must(int(data.get("id") or 0) > 0, f"create ledger invalid id: {data}")
+        return data
+
+    def _create_schedule_row(
+        self,
+        *,
+        content: str,
+        trigger_time: str,
+        status: str = "PENDING",
+    ) -> dict[str, Any]:
+        payload = {"content": content, "trigger_time": trigger_time}
+        if status:
+            payload["status"] = status
+        code, data = self.call("POST", "/api/schedules", payload=payload)
+        _must(code == 200 and isinstance(data, dict), f"create schedule failed: {code}, {data}")
+        _must(int(data.get("id") or 0) > 0, f"create schedule invalid id: {data}")
+        return data
+
     def _complete_onboarding(self) -> dict[str, Any]:
         transcript: list[dict[str, Any]] = []
         samples = ["你好", "没有", "小帅", "贾维斯 🤖", "继续", "我准备好了"]
@@ -185,57 +223,109 @@ class RegressionRunner:
         last = self._profile()
         return {"done": int(last.get("setup_stage") or 0) >= 3, "transcript": transcript, "profile": last}
 
-    def run(self) -> RegressionResult:
+    def _run_bootstrap_steps(self) -> None:
         self.step("auth.register", self._step_register)
         self.step("auth.login", self._step_login)
         self.step("onboarding.complete", self._step_onboarding)
 
-        # Core user/domain APIs
+    def _run_user_domain_steps(self) -> None:
         self.step("user.profile", self._step_profile)
         self.step("user.identities", self._step_identities)
         self.step("user.feedback", self._step_feedback)
         self.step("user.bind-code+consume", self._step_bind_code)
 
-        # Conversation APIs
+    def _run_conversation_steps(self) -> None:
         self.step("conversation.current", self._step_conv_current)
         self.step("conversation.list", self._step_conv_list)
         self.step("conversation.create/switch/rename/delete", self._step_conv_crud)
         self.step("chat.history", self._step_chat_history)
 
-        # Ledger APIs
+    def _run_ledger_api_steps(self) -> None:
         self.step("ledger.create", self._step_ledger_create)
         self.step("ledger.list", self._step_ledger_list)
         self.step("ledger.patch", self._step_ledger_patch)
         self.step("ledger.stats", self._step_ledger_stats)
         self.step("ledger.delete", self._step_ledger_delete)
 
-        # Schedule/Calendar APIs
+    def _run_schedule_api_steps(self) -> None:
         self.step("schedule.create", self._step_schedule_create)
         self.step("schedule.list", self._step_schedule_list)
         self.step("schedule.patch", self._step_schedule_patch)
         self.step("calendar.query", self._step_calendar_query)
         self.step("schedule.delete", self._step_schedule_delete)
 
-        # Skills APIs
+    def _run_skill_steps(self) -> None:
         self.step("skills.list", self._step_skills_list)
         self.step("skills.draft/detail/publish/disable", self._step_skills_crud)
 
-        # MCP APIs (allow disabled/error in env)
+    def _run_mcp_steps(self) -> None:
         self.step("mcp.tools", self._step_mcp_tools)
         self.step("mcp.fetch", self._step_mcp_fetch)
 
-        # Agent NL/complex flows
-        self.step("agent.chat.guide", self._step_agent_guide)
+    def _run_agent_ledger_nl_steps(self) -> None:
         self.step("agent.chat.finance_nl", self._step_agent_finance_nl)
+        self.step("agent.chat.finance_query_nl", self._step_agent_finance_query_nl)
+        self.step("agent.chat.finance_correct_by_id_nl", self._step_agent_finance_correct_by_id_nl)
         self.step("agent.chat.finance_correct_by_name_nl", self._step_agent_finance_correct_by_name_nl)
+        self.step("agent.chat.finance_delete_by_name_nl", self._step_agent_finance_delete_by_name_nl)
         self.step("agent.chat.finance_scope_correct_delete_nl", self._step_agent_finance_scope_correct_delete_nl)
+
+    def _run_agent_schedule_nl_steps(self) -> None:
         self.step("agent.chat.secretary_nl", self._step_agent_secretary_nl)
+        self.step("agent.chat.secretary_query_nl", self._step_agent_secretary_query_nl)
+        self.step("agent.chat.secretary_delete_by_name_nl", self._step_agent_secretary_delete_by_name_nl)
         self.step("agent.chat.secretary_delete_last_result_set_nl", self._step_agent_secretary_delete_last_result_set_nl)
         self.step("agent.chat.secretary_scope_delete_nl", self._step_agent_secretary_scope_delete_nl)
+        self.step("agent.chat.secretary_update_scope_last_result_set_nl", self._step_agent_secretary_update_scope_last_result_set_nl)
         self.step("agent.chat.secretary_update_delete_by_name_cross_conv", self._step_agent_secretary_update_delete_by_name_cross_conv)
-        self.step("agent.chat.complex_nl", self._step_agent_complex_nl)
 
-        return self.result
+    def _run_agent_nl_steps(self, *, include_complex: bool) -> None:
+        self.step("agent.chat.guide", self._step_agent_guide)
+        self._run_agent_ledger_nl_steps()
+        self._run_agent_schedule_nl_steps()
+        if include_complex:
+            self.step("agent.chat.complex_nl", self._step_agent_complex_nl)
+
+    def run(self, suite: str = "full") -> RegressionResult:
+        suite_key = (suite or "full").strip().lower()
+        self._run_bootstrap_steps()
+
+        if suite_key == "full":
+            self._run_user_domain_steps()
+            self._run_conversation_steps()
+            self._run_ledger_api_steps()
+            self._run_schedule_api_steps()
+            self._run_skill_steps()
+            self._run_mcp_steps()
+            self._run_agent_nl_steps(include_complex=True)
+            return self.result
+
+        if suite_key == "agent_nl":
+            self.step("user.profile", self._step_profile)
+            self.step("conversation.current", self._step_conv_current)
+            self._run_agent_nl_steps(include_complex=True)
+            return self.result
+
+        if suite_key == "agent_ledger_nl":
+            self.step("user.profile", self._step_profile)
+            self._run_agent_ledger_nl_steps()
+            return self.result
+
+        if suite_key == "agent_schedule_nl":
+            self.step("user.profile", self._step_profile)
+            self._run_agent_schedule_nl_steps()
+            return self.result
+
+        if suite_key == "api_core":
+            self._run_user_domain_steps()
+            self._run_conversation_steps()
+            self._run_ledger_api_steps()
+            self._run_schedule_api_steps()
+            self._run_skill_steps()
+            self._run_mcp_steps()
+            return self.result
+
+        raise RuntimeError(f"unknown suite: {suite_key}")
 
     # ---- step impls ----
     def _step_register(self) -> dict[str, Any]:
@@ -483,10 +573,221 @@ class RegressionRunner:
         _must(len(rows) > 0 and any(str(x).strip() for x in rows), f"finance nl empty: {rows}")
         return {"responses": len(rows), "preview": "\n".join(rows)[:240]}
 
+    def _step_agent_finance_query_nl(self) -> dict[str, Any]:
+        suffix = str(int(time.time()) % 100000)[-4:]
+        category = f"查账回归{suffix}"
+        item = f"{category}样例"
+        row = self._create_ledger_row(amount=18.8, category=category, item=item)
+        ledger_id = int(row.get("id") or 0)
+
+        used, responses = self._chat_send_retry(
+            [
+                f"今天{category}有哪些账单",
+                f"查询今天分类为{category}的账单",
+                f"帮我看一下{category}的账单记录",
+            ],
+            attempts_per_prompt=2,
+        )
+        _must(any(str(x).strip() for x in responses), f"finance query nl empty: {responses}")
+
+        by_id = {int(x.get("id") or 0): x for x in self._list_ledgers(limit=160)}
+        _must(ledger_id in by_id, f"finance query target ledger missing id={ledger_id}")
+        return {
+            "ledger_id": ledger_id,
+            "category": category,
+            "prompt": used,
+            "preview": "\n".join(responses)[:200],
+        }
+
+    def _step_agent_finance_correct_by_id_nl(self) -> dict[str, Any]:
+        suffix = str(int(time.time()) % 100000)
+        item = f"按ID改账{suffix}"
+        row = self._create_ledger_row(amount=41.0, category="餐饮", item=item)
+        ledger_id = int(row.get("id") or 0)
+
+        used, rows = self._chat_send_retry(
+            [
+                f"把账单#{ledger_id}改成88元",
+                f"把{ledger_id}号账单改成88元",
+            ],
+            attempts_per_prompt=2,
+        )
+        _must(any(str(x).strip() for x in rows), f"finance correct by id empty: {rows}")
+
+        by_id = {int(x.get("id") or 0): x for x in self._list_ledgers(limit=200)}
+        _must(ledger_id in by_id, f"finance correct by id target missing: id={ledger_id}")
+        new_amount = float(by_id[ledger_id].get("amount") or 0)
+        _must(abs(new_amount - 88.0) < 1e-6, f"finance correct by id failed: {by_id[ledger_id]}")
+        return {
+            "ledger_id": ledger_id,
+            "new_amount": new_amount,
+            "prompt": used,
+            "preview": "\n".join(rows)[:200],
+        }
+
+    def _step_agent_finance_delete_by_name_nl(self) -> dict[str, Any]:
+        suffix = str(int(time.time()) % 100000)
+        item_a = f"删名账单A{suffix}"
+        item_b = f"删名账单B{suffix}"
+        row_a = self._create_ledger_row(amount=55.0, category="购物", item=item_a)
+        row_b = self._create_ledger_row(amount=66.0, category="购物", item=item_b)
+        id_a = int(row_a.get("id") or 0)
+        id_b = int(row_b.get("id") or 0)
+
+        used, rows = self._chat_send_retry(
+            [
+                f"删除{item_a}这笔账单",
+                f"把{item_a}删了",
+            ],
+            attempts_per_prompt=2,
+        )
+        _must(any(str(x).strip() for x in rows), f"finance delete by name empty: {rows}")
+
+        remained = {int(x.get("id") or 0) for x in self._list_ledgers(limit=200)}
+        _must(id_a not in remained, f"finance delete by name failed: id_a still exists {id_a}")
+        _must(id_b in remained, f"finance delete by name polluted sibling ledger: id_b missing {id_b}")
+        return {
+            "deleted_id": id_a,
+            "remained_id": id_b,
+            "prompt": used,
+            "preview": "\n".join(rows)[:200],
+        }
+
     def _step_agent_secretary_nl(self) -> dict[str, Any]:
         rows = self._chat_send("明天上午9点提醒我做回归测试")
         _must(len(rows) > 0 and any(str(x).strip() for x in rows), f"secretary nl empty: {rows}")
         return {"responses": len(rows), "preview": "\n".join(rows)[:240]}
+
+    def _step_agent_secretary_query_nl(self) -> dict[str, Any]:
+        suffix = str(int(time.time()) % 100000)
+        schedule_name = f"查提醒回归{suffix}"
+        trigger = (datetime.now() + timedelta(days=1)).replace(hour=9, minute=30, second=0, microsecond=0)
+        row = self._create_schedule_row(content=schedule_name, trigger_time=_iso_local(trigger))
+        schedule_id = int(row.get("id") or 0)
+        date_label = str(row.get("trigger_time") or "")[:10] or trigger.date().isoformat()
+
+        used, rows = self._chat_send_retry(
+            [
+                f"{date_label}有哪些{schedule_name}提醒",
+                f"查询{schedule_name}提醒",
+            ],
+            attempts_per_prompt=2,
+        )
+        _must(any(str(x).strip() for x in rows), f"schedule query nl empty: {rows}")
+
+        remained = {int(x.get("id") or 0) for x in self._list_schedules(limit=200)}
+        _must(schedule_id in remained, f"schedule query target missing id={schedule_id}")
+        return {
+            "schedule_id": schedule_id,
+            "schedule_name": schedule_name,
+            "prompt": used,
+            "preview": "\n".join(rows)[:220],
+        }
+
+    def _step_agent_secretary_delete_by_name_nl(self) -> dict[str, Any]:
+        suffix = str(int(time.time()) % 100000)
+        name_a = f"删名提醒A{suffix}"
+        name_b = f"删名提醒B{suffix}"
+        trigger_a = (datetime.now() + timedelta(days=1)).replace(hour=14, minute=0, second=0, microsecond=0)
+        trigger_b = (datetime.now() + timedelta(days=1)).replace(hour=15, minute=0, second=0, microsecond=0)
+        row_a = self._create_schedule_row(content=name_a, trigger_time=_iso_local(trigger_a))
+        row_b = self._create_schedule_row(content=name_b, trigger_time=_iso_local(trigger_b))
+        id_a = int(row_a.get("id") or 0)
+        id_b = int(row_b.get("id") or 0)
+
+        used, rows = self._chat_send_retry(
+            [
+                f"删除{name_a}这个提醒",
+                f"把{name_a}提醒删了",
+            ],
+            attempts_per_prompt=2,
+        )
+        _must(any(str(x).strip() for x in rows), f"schedule delete by name empty: {rows}")
+
+        remained = {int(x.get("id") or 0) for x in self._list_schedules(limit=200)}
+        _must(id_a not in remained, f"schedule delete by name failed: id_a still exists {id_a}")
+        _must(id_b in remained, f"schedule delete by name polluted sibling schedule: id_b missing {id_b}")
+        return {
+            "deleted_id": id_a,
+            "remained_id": id_b,
+            "prompt": used,
+            "preview": "\n".join(rows)[:220],
+        }
+
+    def _step_agent_secretary_update_scope_last_result_set_nl(self) -> dict[str, Any]:
+        suffix = str(int(time.time()) % 100000)
+        tag = f"批量改提醒{suffix}"
+        trigger_a = (datetime.now() + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
+        trigger_b = (datetime.now() + timedelta(days=1)).replace(hour=11, minute=0, second=0, microsecond=0)
+        row_a = self._create_schedule_row(content=f"{tag}A", trigger_time=_iso_local(trigger_a))
+        row_b = self._create_schedule_row(content=f"{tag}B", trigger_time=_iso_local(trigger_b))
+        created_ids = {int(row_a.get("id") or 0), int(row_b.get("id") or 0)}
+        original_hour_by_id = {
+            int(row_a.get("id") or 0): 10,
+            int(row_b.get("id") or 0): 11,
+        }
+
+        date_hint = trigger_a.date().isoformat()
+        self._chat_send_retry(
+            [
+                f"{date_hint}有哪些{tag}提醒",
+                f"查询{tag}提醒",
+            ],
+            attempts_per_prompt=2,
+        )
+
+        used, rows = self._chat_send_retry(
+            [
+                "把这几个提醒都改到明天晚上8点",
+                f"把{tag}这几个提醒都改到明天晚上8点",
+            ],
+            attempts_per_prompt=2,
+        )
+        _must(any(str(x).strip() for x in rows), f"schedule update scope empty: {rows}")
+
+        after_rows = self._list_schedules(limit=200)
+        after_by_id = {int(x.get("id") or 0): x for x in after_rows}
+
+        def _is_20(row: dict[str, Any]) -> bool:
+            return "T20:00" in str(row.get("trigger_time") or "")
+
+        unchanged_wrong = [
+            sid for sid in created_ids
+            if sid in after_by_id and not _is_20(after_by_id[sid])
+        ]
+        if unchanged_wrong:
+            self._chat_send_retry(
+                [
+                    f"把明天{tag}相关提醒都改到晚上8点",
+                    f"将{tag}提醒统一改到明天20点",
+                ],
+                attempts_per_prompt=2,
+            )
+            after_rows = self._list_schedules(limit=200)
+            after_by_id = {int(x.get("id") or 0): x for x in after_rows}
+            unchanged_wrong = [
+                sid for sid in created_ids
+                if sid in after_by_id and not _is_20(after_by_id[sid])
+            ]
+
+        still_old_hour = [
+            sid
+            for sid in created_ids
+            if sid in after_by_id
+            and f"T{int(original_hour_by_id.get(sid) or 0):02d}:00" in str(after_by_id[sid].get("trigger_time") or "")
+        ]
+        _must(not unchanged_wrong, f"schedule scope update not applied to original rows: {unchanged_wrong}")
+        _must(not still_old_hour, f"schedule scope update still keeps old hour for ids: {still_old_hour}")
+        still_exist = [sid for sid in created_ids if sid in after_by_id]
+        updated_to_20 = [sid for sid in still_exist if _is_20(after_by_id[sid])]
+        return {
+            "tag": tag,
+            "created_count": len(created_ids),
+            "still_exist_after_update": len(still_exist),
+            "updated_to_20_count": len(updated_to_20),
+            "prompt": used,
+            "preview": "\n".join(rows)[:220],
+        }
 
     def _step_agent_complex_nl(self) -> dict[str, Any]:
         used, rows = self._chat_send_retry(
@@ -840,14 +1141,21 @@ def main() -> None:
     parser.add_argument("--base-url", default="http://localhost:8000")
     parser.add_argument("--password", default="Test123456!")
     parser.add_argument("--timeout-sec", type=int, default=40)
+    parser.add_argument(
+        "--suite",
+        default="full",
+        choices=["full", "api_core", "agent_nl", "agent_ledger_nl", "agent_schedule_nl"],
+        help="回归套件：full(默认) / api_core / agent_nl / agent_ledger_nl / agent_schedule_nl",
+    )
     args = parser.parse_args()
 
     runner = RegressionRunner(base_url=args.base_url, timeout=args.timeout_sec, password=args.password)
-    result = runner.run()
+    result = runner.run(suite=args.suite)
     payload = {
         "started_at": result.started_at,
         "base_url": result.base_url,
         "email": result.email,
+        "suite": args.suite,
         "step_total": len(result.steps),
         "step_passed": len([x for x in result.steps if x.get("ok")]),
         "step_failed": len(result.failures),

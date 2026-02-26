@@ -124,7 +124,7 @@ async def _plan_sql(message: str, conversation_context: str = "") -> dict[str, A
     system_prompt = (
         "你是账单 Text-to-SQL 规划器（PostgreSQL）。"
         "只允许操作 ledgers 表，不允许出现任何其他表。"
-        "只输出 JSON，字段: matched, intent, sql, params, summary, confidence。"
+        "请仅返回结构化字段: matched, intent, sql, params, summary, confidence。"
         "intent 仅可为 select/insert/update/delete/unknown。"
         "如果不是账单请求，matched=false，intent=unknown。"
         "必须使用命名参数占位符（如 :user_id）。"

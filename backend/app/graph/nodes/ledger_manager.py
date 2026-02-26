@@ -5,6 +5,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
 from app.graph.context import render_conversation_context
@@ -18,7 +19,7 @@ from app.models.user import User
 from app.services.langchain_tools import ToolInvocationContext
 from app.services.llm import get_llm
 from app.services.runtime_context import get_session
-from app.services.toolsets import invoke_node_tool
+from app.services.toolsets import invoke_node_tool_typed
 from app.services.ledger_pending import (
     clear_pending_ledger,
     get_pending_ledger,
@@ -33,7 +34,7 @@ async def _tracked_analyze_receipt(
     platform: str = "",
     conversation_id: int | None = None,
 ) -> dict[str, Any]:
-    output = await invoke_node_tool(
+    output = await invoke_node_tool_typed(
         context=ToolInvocationContext(
             user_id=user_id,
             platform=platform or "unknown",
@@ -43,9 +44,9 @@ async def _tracked_analyze_receipt(
         tool_name="analyze_receipt",
         args={"image_ref": image_ref},
     )
-    if _looks_like_tool_error(output):
+    if isinstance(output, str) and _looks_like_tool_error(output):
         raise RuntimeError(output)
-    payload = _parse_json_object(str(output or ""))
+    payload = _parse_json_object(output)
     if payload:
         return payload
     return {
@@ -68,7 +69,7 @@ async def _tracked_text2sql(
     platform: str = "",
     conversation_id: int | None = None,
 ) -> str | None:
-    output = await invoke_node_tool(
+    output = await invoke_node_tool_typed(
         context=ToolInvocationContext(
             user_id=user_id,
             platform=platform or "unknown",
@@ -81,7 +82,7 @@ async def _tracked_text2sql(
             "conversation_context": conversation_context,
         },
     )
-    if _looks_like_tool_error(output):
+    if isinstance(output, str) and _looks_like_tool_error(output):
         raise RuntimeError(output)
     text = str(output or "").strip()
     return text or None
@@ -130,6 +131,35 @@ CATEGORY_MAP = {
 MAX_IMAGES = 6
 
 
+class LedgerPendingSelectionExtraction(BaseModel):
+    mode: str = Field(default="unknown")
+    indexes: list[int] = Field(default_factory=list)
+    amount: float | None = Field(default=None)
+    category: str = Field(default="")
+    item: str = Field(default="")
+
+
+class LedgerIntentExtraction(BaseModel):
+    intent: str = Field(default="unknown")
+    ledger_id: int | None = Field(default=None)
+    target_ids: list[int] = Field(default_factory=list)
+    target_item: str = Field(default="")
+    amount: float | None = Field(default=None)
+    item: str = Field(default="")
+    category: str = Field(default="")
+    query_scope: str = Field(default="")
+    query_date: str = Field(default="")
+    reference_mode: str = Field(default="auto")
+    selection_mode: str = Field(default="auto")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class LedgerTargetSelection(BaseModel):
+    ledger_ids: list[int] = Field(default_factory=list)
+    ledger_id: int | None = Field(default=None)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
 def _fmt_dt(dt: datetime | None) -> str:
     if not dt:
         return ""
@@ -151,8 +181,14 @@ def _normalize_category(text: str | None) -> str:
     return raw if len(raw) <= 10 else "其他"
 
 
-def _parse_json_object(content: str) -> dict:
-    text = (content or "").strip()
+def _parse_json_object(content: Any) -> dict:
+    if isinstance(content, dict):
+        return content
+    if content is None:
+        return {}
+    if isinstance(content, list):
+        return {}
+    text = str(content).strip()
     if text.startswith("```"):
         lines = text.splitlines()
         if len(lines) >= 3:
@@ -163,8 +199,14 @@ def _parse_json_object(content: str) -> dict:
     except Exception:
         return {}
 
-def _parse_json_list(content: str) -> list[dict[str, Any]]:
-    text = (content or "").strip()
+def _parse_json_list(content: Any) -> list[dict[str, Any]]:
+    if isinstance(content, list):
+        return [item for item in content if isinstance(item, dict)]
+    if content is None:
+        return []
+    if isinstance(content, dict):
+        return []
+    text = str(content).strip()
     if not text:
         return []
     if text.startswith("```"):
@@ -236,8 +278,8 @@ async def _invoke_ledger_tool(
     conversation_id: int | None,
     tool_name: str,
     args: dict[str, Any] | None = None,
-) -> str:
-    return await invoke_node_tool(
+) -> Any:
+    return await invoke_node_tool_typed(
         context=ToolInvocationContext(
             user_id=user_id,
             platform=platform or "unknown",
@@ -326,6 +368,75 @@ def _clean_item(item: str) -> str:
     if value in {"和", "及", "跟"}:
         return ""
     return value
+
+
+GENERIC_TARGET_ITEM_TOKENS = {
+    "这笔",
+    "那笔",
+    "这条",
+    "那条",
+    "这个",
+    "那个",
+    "这个账单",
+    "那个账单",
+    "刚才那笔",
+    "刚刚那笔",
+    "上一笔",
+    "上条",
+    "最新",
+    "latest",
+    "它",
+}
+
+
+def _is_generic_target_item(value: str) -> bool:
+    raw = (value or "").strip().lower()
+    if not raw:
+        return True
+    if raw in GENERIC_TARGET_ITEM_TOKENS:
+        return True
+    if re.fullmatch(r"\d+", raw):
+        return True
+    return False
+
+
+def _has_explicit_multi_selector(content: str, target_item: str) -> bool:
+    text = (content or "").strip().lower()
+    if re.search(r"(都|全部|所有|这几笔|这些|刚才那些|那几笔|一起|批量)", text):
+        return True
+    tokens = [token for token in re.split(r"\s+", (target_item or "").strip()) if token]
+    return len(tokens) >= 2
+
+
+def _filter_ledger_candidates_by_target_item(candidates: list[Ledger], target_item: str) -> list[Ledger]:
+    if not candidates:
+        return []
+    hint = (target_item or "").strip()
+    if not hint or _is_generic_target_item(hint):
+        return candidates
+
+    normalized_hint = re.sub(r"\s+", "", hint).lower()
+    if not normalized_hint:
+        return candidates
+
+    matched = [
+        row
+        for row in candidates
+        if normalized_hint in re.sub(r"\s+", "", str(row.item or "")).lower()
+    ]
+    if matched:
+        return matched
+
+    tokens = [token for token in re.split(r"\s+", hint) if token and len(token) >= 2]
+    if len(tokens) >= 2:
+        fallback = [
+            row
+            for row in candidates
+            if all(token.lower() in re.sub(r"\s+", "", str(row.item or "")).lower() for token in tokens)
+        ]
+        if fallback:
+            return fallback
+    return candidates
 
 
 def _unique_positive_amounts(values: list[float]) -> list[float]:
@@ -446,6 +557,7 @@ async def _understand_pending_selection(
     conversation_context: str,
 ) -> dict:
     llm = get_llm(node_name="ledger_manager")
+    runnable = llm.with_structured_output(LedgerPendingSelectionExtraction)
     messages = build_ledger_pending_selection_messages(
         content=content,
         candidates=candidates,
@@ -453,8 +565,12 @@ async def _understand_pending_selection(
         default_category=str(pending.get("category") or "其他"),
         conversation_context=conversation_context,
     )
-    response = await llm.ainvoke(messages)
-    return _parse_json_object(str(response.content))
+    parsed = await runnable.ainvoke(messages)
+    if isinstance(parsed, LedgerPendingSelectionExtraction):
+        return parsed.model_dump()
+    if isinstance(parsed, dict):
+        return parsed
+    return {}
 
 
 def _render_pending_candidates(candidates: list[float]) -> str:
@@ -507,12 +623,17 @@ def _parse_vision_result(result: dict) -> dict:
 
 async def _understand_ledger_message(content: str, conversation_context: str) -> dict:
     llm = get_llm(node_name="ledger_manager")
+    runnable = llm.with_structured_output(LedgerIntentExtraction)
     messages = build_ledger_intent_messages(
         content=content,
         conversation_context=conversation_context,
     )
-    response = await llm.ainvoke(messages)
-    return _parse_json_object(str(response.content))
+    parsed = await runnable.ainvoke(messages)
+    if isinstance(parsed, LedgerIntentExtraction):
+        return parsed.model_dump()
+    if isinstance(parsed, dict):
+        return parsed
+    return {}
 
 
 def _build_ledger_target_payload(rows: list[Ledger]) -> dict[str, Any]:
@@ -542,10 +663,11 @@ async def _select_ledger_id_by_llm(
     if not candidates:
         return None
     llm = get_llm(node_name="ledger_manager")
+    runnable = llm.with_structured_output(LedgerTargetSelection)
     payload = _build_ledger_target_payload(candidates)
     system = SystemMessage(
         content=(
-            "你是账单目标选择器，只输出 JSON。"
+            "你是账单目标选择器，请按 schema 输出结构化字段。"
             "字段: ledger_id, confidence。"
             "根据用户输入，从候选账单中选择唯一目标账单ID。"
             "如果无法确定，ledger_id=null。"
@@ -561,9 +683,10 @@ async def _select_ledger_id_by_llm(
             f"候选账单(JSON):\n{json.dumps(payload, ensure_ascii=False)}"
         )
     )
-    response = await llm.ainvoke([system, human])
-    parsed = _parse_json_object(str(response.content))
-    selected = parsed.get("ledger_id")
+    parsed = await runnable.ainvoke([system, human])
+    selected = getattr(parsed, "ledger_id", None)
+    if selected is None and isinstance(parsed, dict):
+        selected = parsed.get("ledger_id")
     try:
         ledger_id = int(selected) if selected is not None else None
     except Exception:
@@ -584,10 +707,11 @@ async def _select_ledger_ids_by_llm(
     if not candidates:
         return []
     llm = get_llm(node_name="ledger_manager")
+    runnable = llm.with_structured_output(LedgerTargetSelection)
     payload = _build_ledger_target_payload(candidates)
     system = SystemMessage(
         content=(
-            "你是账单目标批量选择器，只输出 JSON。"
+            "你是账单目标批量选择器，请按 schema 输出结构化字段。"
             "字段: ledger_ids, confidence。"
             "根据用户输入，从候选账单中选择应操作的账单ID列表。"
             "operation 仅为 correct 或 delete。"
@@ -607,11 +731,15 @@ async def _select_ledger_ids_by_llm(
             f"候选账单(JSON):\n{json.dumps(payload, ensure_ascii=False)}"
         )
     )
-    response = await llm.ainvoke([system, human])
-    parsed = _parse_json_object(str(response.content))
-    raw_ids = parsed.get("ledger_ids")
+    parsed = await runnable.ainvoke([system, human])
+    raw_ids = getattr(parsed, "ledger_ids", None)
+    if raw_ids is None and isinstance(parsed, dict):
+        raw_ids = parsed.get("ledger_ids")
     if not isinstance(raw_ids, list):
-        picked = _parse_int_list(parsed.get("ledger_id"))
+        single_id = getattr(parsed, "ledger_id", None)
+        if single_id is None and isinstance(parsed, dict):
+            single_id = parsed.get("ledger_id")
+        picked = _parse_int_list(single_id)
         raw_ids = picked
     valid_ids = {int(row.id) for row in candidates if int(row.id or 0) > 0}
     result: list[int] = []
@@ -638,10 +766,11 @@ async def _select_ledger_ids_from_context(
     if not candidates:
         return []
     llm = get_llm(node_name="ledger_manager")
+    runnable = llm.with_structured_output(LedgerTargetSelection)
     payload = _build_ledger_target_payload(candidates)
     system = SystemMessage(
         content=(
-            "你是账单上下文引用解析器，只输出 JSON。"
+            "你是账单上下文引用解析器，请按 schema 输出结构化字段。"
             "字段: ledger_ids, confidence。"
             "当用户使用代词（如‘这几笔/这些/刚才那些’）时，需结合会话上下文和候选列表选择目标ID。"
             "若仍不确定，返回空数组。"
@@ -654,9 +783,11 @@ async def _select_ledger_ids_from_context(
             f"候选账单(JSON):\n{json.dumps(payload, ensure_ascii=False)}"
         )
     )
-    response = await llm.ainvoke([system, human])
-    parsed = _parse_json_object(str(response.content))
-    return _parse_int_list(parsed.get("ledger_ids"))
+    parsed = await runnable.ainvoke([system, human])
+    raw_ids = getattr(parsed, "ledger_ids", None)
+    if raw_ids is None and isinstance(parsed, dict):
+        raw_ids = parsed.get("ledger_ids")
+    return _parse_int_list(raw_ids)
 
 
 def _to_utc_naive(local_dt: datetime, tz_name: str) -> datetime:
@@ -1461,6 +1592,19 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
     if selection_mode not in {"all", "single", "subset", "auto"}:
         selection_mode = "auto"
 
+    has_named_target = bool(target_item) and not _is_generic_target_item(target_item)
+    explicit_multi = _has_explicit_multi_selector(content, target_item)
+    if intent == "correct_latest" and has_named_target:
+        intent = "correct_by_name"
+    elif intent == "delete_latest" and has_named_target:
+        intent = "delete_by_name"
+
+    if intent in {"correct_by_name", "delete_by_name"}:
+        if reference_mode in {"auto", "latest"}:
+            reference_mode = "by_name"
+        if selection_mode in {"auto", "all", "subset"} and not explicit_multi:
+            selection_mode = "single"
+
     async def _resolve_operation_ledgers(operation: str) -> tuple[list[Ledger], str]:
         # 1) explicit id(s)
         if target_ids and (reference_mode in {"by_id", "auto"} or intent in {"delete_by_id", "correct_by_id"}):
@@ -1535,6 +1679,7 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
             category=None,
             limit=160,
         )
+        candidates = _filter_ledger_candidates_by_target_item(candidates, target_item)
         if not candidates:
             return [], "by_name"
         picked_ids = await _select_ledger_ids_by_llm(

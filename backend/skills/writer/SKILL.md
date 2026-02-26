@@ -1,25 +1,25 @@
 ---
 name: writer
-description: Draft, polish, summarize, and rewrite Chinese or bilingual text with clear structure and practical tone.
+description: 用清晰结构和务实语气起草、润色、总结并改写中文或双语文本。
 ---
 
-# Trigger
-Use this skill when the user asks for writing, polishing, rewriting, summarizing, title generation, or style transformation.
+# 触发条件
+当用户提出写作、润色、改写、总结、标题生成或文风转换需求时，使用本技能。
 
-# Workflow
-1. Identify output goal and target reader from user input.
-2. If key constraints are missing, choose practical defaults and proceed.
-3. Produce a structured draft first, then refine wording for clarity.
-4. Keep paragraphs compact and avoid filler language.
-5. If domain constraints are needed, load relevant references before finalizing.
+# 工作流程
+1. 从用户输入中识别输出目标和目标读者。
+2. 若关键约束缺失，使用实用默认值继续执行。
+3. 先给出结构化草稿，再优化措辞以提升清晰度。
+4. 段落保持紧凑，避免空泛赘述。
+5. 若涉及领域约束，定稿前加载相关参考资料。
 
-# Constraints
-- Preserve user-provided facts, names, and numbers.
-- Do not fabricate citations or data.
-- Keep tone aligned with user intent; default to professional and concise.
-- When uncertainty affects correctness, ask one focused clarification question.
+# 约束
+- 保留用户提供的事实、名称和数字。
+- 不得编造引用或数据。
+- 语气与用户意图保持一致；默认采用专业、简洁风格。
+- 当不确定性会影响正确性时，只提出一个聚焦澄清问题。
 
-# Output Contract
-Return Markdown with this shape:
-- `Result:` final text
-- `Optional Notes:` only when assumptions or ambiguities matter
+# 输出约定
+返回 Markdown，结构如下：
+- `结果：` 最终文本
+- `可选说明：` 仅在存在假设或歧义且会影响理解时提供

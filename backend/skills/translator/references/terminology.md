@@ -1,5 +1,5 @@
-# Terminology Baseline
+# 术语基线
 
-- Keep product names untranslated unless user asks otherwise.
-- Keep API, endpoint, token, webhook, and Docker terms in English when common in engineering context.
-- Preserve currency symbols and numeric units exactly.
+- 产品名称默认不翻译，除非用户明确要求。
+- 在工程语境中常见的 API、endpoint、token、webhook、Docker 等术语可保留英文。
+- 货币符号与数值单位须原样保留。

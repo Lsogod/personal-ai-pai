@@ -279,11 +279,11 @@ async def _llm_select_relevant_memory_ids(
     runnable_schema = MemoryIdSelection
     system = SystemMessage(
         content=(
-            "You are a memory retriever. Return JSON only as {\"ids\":[...]}. "
-            "Given a user query and candidate memories, select the most relevant memory ids. "
-            "Use semantic meaning (cross-lingual allowed), not only keyword overlap. "
-            "Prioritize stable user preferences/facts/goals over transient noise. "
-            "Return at most top_k ids in relevance order."
+            "你是记忆检索器。请仅返回 schema 定义的结构化字段（ids 数组）。"
+            "给定用户查询和候选记忆，选择最相关的记忆 id。"
+            "应基于语义匹配（可跨语言），而非仅关键词重叠。"
+            "优先稳定的用户偏好/事实/目标，弱化短期噪声。"
+            "最多返回 top_k 个 id，并按相关性排序。"
         )
     )
     candidates: list[dict[str, Any]] = []
@@ -349,23 +349,22 @@ async def extract_memory_candidates(
 
     system = SystemMessage(
         content=(
-            "You are a long-term memory extractor. Return JSON only as {\"memories\":[...]}. "
-            "Extract candidate memories from user_text only. assistant_text is context, not fact source. "
-            "Keep candidates only if they may remain useful after 30 days. "
-            "Preserve user wording and language; do not translate memory content to another language. "
-            "Do not save transient state, one-shot task status, weather snapshots, daily/weekly totals, "
-            "or operational/system/tooling internals. "
-            "Do not save raw database logs; prefer abstracted and reusable user-level semantics. "
-            "Do not output identity/profile memory (nickname/name/assistant name/emoji). "
-            "Each row fields: op(save|delete), memory_type(preference|fact|goal|project|constraint), "
-            "key(optional), content, importance(1-5), confidence(0-1), ttl_days(optional int)."
+            "你是长期记忆提取器。请仅返回 schema 定义的结构化字段（memories 数组）。"
+            "只从用户输入提取候选记忆；助手回复仅作上下文，不是事实来源。"
+            "仅保留在 30 天后仍可能有价值的候选。"
+            "尽量保持用户原始措辞与语言，不要随意翻译记忆内容。"
+            "不要保存短期状态、一次性任务进度、天气快照、日/周汇总、运维/系统/工具内部信息。"
+            "不要保存原始数据库日志；应抽象为可复用的用户语义信息。"
+            "不要输出身份档案记忆（昵称/姓名/助手名/emoji）。"
+            "每条字段：op(save|delete), memory_type(preference|fact|goal|project|constraint), "
+            "key(可选), content, importance(1-5), confidence(0-1), ttl_days(可选整数)。"
         )
     )
     human = HumanMessage(
         content=(
-            f"conversation_summary:\n{conversation_summary}\n\n"
-            f"user_text:\n{content}\n\n"
-            f"assistant_text(reference only, not a fact source):\n{reply}"
+            f"会话摘要:\n{conversation_summary}\n\n"
+            f"用户输入:\n{content}\n\n"
+            f"助手回复（仅作参考，不是事实来源）:\n{reply}"
         )
     )
     try:
@@ -391,24 +390,24 @@ async def _llm_refine_memory_candidates(
 
     system = SystemMessage(
         content=(
-            "You are a memory consolidator. Decide final write operations for long-term memory. "
-            "Admission rule: keep only memories likely useful after 30 days. "
-            "Reject transient state, one-turn context, short-lived reports, tool outputs, and system internals. "
-            "Preserve original user language in content whenever possible; avoid unnecessary translation. "
-            "Use semantic judgment only. "
-            "Deduplicate against existing memories: if semantically the same, update existing memory instead of creating a new one. "
-            "For similar memories with different wording, produce one canonical abstract statement. "
-            "Return JSON only as {\"decisions\":[...]}. "
-            "Each decision fields: index(int), keep(bool), op(save|delete), merge_target_id(optional int), "
-            "memory_type(preference|fact|goal|project|constraint), key(optional), content, "
-            "importance(1-5), confidence(0-1), ttl_days(optional int)."
+            "你是记忆整合器，负责决定长期记忆的最终写入动作。"
+            "准入规则：仅保留 30 天后仍可能有用的记忆。"
+            "拒绝短期状态、单轮上下文、短时报告、工具输出和系统内部信息。"
+            "内容尽量保留用户原始语言，避免不必要翻译。"
+            "仅基于语义判断。"
+            "需与已有记忆去重：若语义等价，优先更新旧记忆而非新建。"
+            "对语义相同但表述不同的候选，应归并为一个规范抽象表述。"
+            "请仅返回 schema 定义的结构化字段（decisions 数组）。"
+            "每条 decision 字段：index(int), keep(bool), op(save|delete), merge_target_id(可选 int), "
+            "memory_type(preference|fact|goal|project|constraint), key(可选), content, "
+            "importance(1-5), confidence(0-1), ttl_days(可选 int)。"
         )
     )
     human = HumanMessage(
         content=(
-            f"user_text:\n{(user_text or '').strip()}\n\n"
-            f"candidates_json:\n{json.dumps(prepared, ensure_ascii=False)}\n\n"
-            f"existing_memories_json:\n{json.dumps(_serialize_existing_memories(existing_rows), ensure_ascii=False)}"
+            f"用户输入:\n{(user_text or '').strip()}\n\n"
+            f"候选记忆JSON:\n{json.dumps(prepared, ensure_ascii=False)}\n\n"
+            f"已有记忆JSON:\n{json.dumps(_serialize_existing_memories(existing_rows), ensure_ascii=False)}"
         )
     )
     try:
@@ -634,13 +633,13 @@ async def consolidate_user_long_term_memories(
 
     system = SystemMessage(
         content=(
-            "You are a long-term memory cleaner. Return JSON only as {\"decisions\":[...]}. "
-            "For each memory id, decide whether to keep it. Admission rule: keep only if still useful after 30 days. "
-            "Remove transient state, stale one-shot facts, system-internal statements, and duplicates. "
-            "If duplicate memories exist, keep one canonical memory and set merge_into_id for the others. "
-            "Each decision fields: id(int), keep(bool), merge_into_id(optional int), "
+            "你是长期记忆清理器。请仅返回 schema 定义的结构化字段（decisions 数组）。"
+            "你需要对每个记忆 id 判断是否保留。准入规则：仅保留 30 天后仍有价值的信息。"
+            "清理短期状态、过时一次性事实、系统内部描述和重复项。"
+            "如果存在重复记忆，保留一个规范记忆，其它项通过 merge_into_id 合并。"
+            "每条 decision 字段：id(int), keep(bool), merge_into_id(可选 int), "
             "memory_type(preference|fact|goal|project|constraint), content, importance(1-5), confidence(0-1), "
-            "ttl_days(optional int)."
+            "ttl_days(可选 int)。"
         )
     )
     human = HumanMessage(content=json.dumps({"memories": _serialize_existing_memories(rows)}, ensure_ascii=False))

@@ -20,7 +20,7 @@ from app.models.ledger import Ledger
 from app.models.schedule import Schedule
 from app.services.langchain_tools import ToolInvocationContext
 from app.services.llm import get_llm
-from app.services.toolsets import invoke_node_tool
+from app.services.toolsets import invoke_node_tool_typed
 from app.services.runtime_context import get_session
 from app.models.user import User
 
@@ -167,6 +167,40 @@ class ConditionalWeatherReminderExtraction(BaseModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
+class ReminderFallbackExtraction(BaseModel):
+    is_reminder: bool = Field(default=False)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    run_at_local: str = Field(default="")
+    reminder_content: str = Field(default="")
+    event_type: str = Field(default="")
+    priority: str = Field(default="")
+    explicit_offsets_minutes: list[int] = Field(default_factory=list)
+    event_tags: list[str] = Field(default_factory=list)
+
+
+class ScheduleIntentExtraction(BaseModel):
+    intent: str = Field(default="unknown")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    run_at_local: str = Field(default="")
+    reminder_content: str = Field(default="")
+    target_content: str = Field(default="")
+    target_ids: list[int] = Field(default_factory=list)
+    reference_mode: str = Field(default="auto")
+    selection_mode: str = Field(default="auto")
+    event_type: str = Field(default="")
+    priority: str = Field(default="")
+    explicit_offsets_minutes: list[int] = Field(default_factory=list)
+    event_tags: list[str] = Field(default_factory=list)
+    calendar_scope: str = Field(default="")
+    calendar_date: str = Field(default="")
+    schedule_status_filter: str = Field(default="all")
+
+
+class ScheduleTargetSelection(BaseModel):
+    schedule_ids: list[int] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
 MAX_REMINDER_COUNT = 3
 MIN_OFFSET_GAP_MINUTES = 10
 WEATHER_RAIN_TOKENS = (
@@ -262,8 +296,14 @@ def _resolve_calendar_window(text: str) -> tuple[datetime, datetime, str] | None
     return None
 
 
-def _parse_json_object(content: str) -> dict:
-    text = (content or "").strip()
+def _parse_json_object(content: Any) -> dict:
+    if isinstance(content, dict):
+        return content
+    if content is None:
+        return {}
+    if isinstance(content, list):
+        return {}
+    text = str(content).strip()
     if text.startswith("```"):
         lines = text.splitlines()
         if len(lines) >= 3:
@@ -275,8 +315,14 @@ def _parse_json_object(content: str) -> dict:
         return {}
 
 
-def _parse_json_list(content: str) -> list[dict[str, Any]]:
-    text = (content or "").strip()
+def _parse_json_list(content: Any) -> list[dict[str, Any]]:
+    if isinstance(content, list):
+        return [item for item in content if isinstance(item, dict)]
+    if content is None:
+        return []
+    if isinstance(content, dict):
+        return []
+    text = str(content).strip()
     if text.startswith("```"):
         lines = text.splitlines()
         if len(lines) >= 3:
@@ -345,8 +391,8 @@ async def _call_maps_weather_tool(
     platform: str,
     conversation_id: int | None,
     city: str,
-) -> str:
-    return await invoke_node_tool(
+) -> Any:
+    return await invoke_node_tool_typed(
         context=ToolInvocationContext(
             user_id=user_id,
             platform=platform,
@@ -426,8 +472,8 @@ async def _invoke_schedule_tool(
     conversation_id: int | None,
     tool_name: str,
     args: dict[str, Any] | None = None,
-) -> str:
-    return await invoke_node_tool(
+) -> Any:
+    return await invoke_node_tool_typed(
         context=ToolInvocationContext(
             user_id=user_id,
             platform=platform,
@@ -843,14 +889,19 @@ async def _understand_reminder_fallback(content: str, conversation_context: str)
     tz = settings.timezone
     now_local = datetime.now(ZoneInfo(tz)).strftime("%Y-%m-%d %H:%M")
     llm = get_llm(node_name="schedule_manager")
+    runnable = llm.with_structured_output(ReminderFallbackExtraction)
     messages = build_schedule_reminder_fallback_messages(
         content=content,
         conversation_context=conversation_context,
         timezone=tz,
         now_local=now_local,
     )
-    response = await llm.ainvoke(messages)
-    return _parse_json_object(str(response.content))
+    parsed = await runnable.ainvoke(messages)
+    if isinstance(parsed, ReminderFallbackExtraction):
+        return parsed.model_dump()
+    if isinstance(parsed, dict):
+        return parsed
+    return {}
 
 
 async def _create_reminder(
@@ -923,14 +974,19 @@ async def _understand_schedule_message(content: str, conversation_context: str) 
     tz = settings.timezone
     now_local = datetime.now(ZoneInfo(tz)).strftime("%Y-%m-%d %H:%M")
     llm = get_llm(node_name="schedule_manager")
+    runnable = llm.with_structured_output(ScheduleIntentExtraction)
     messages = build_schedule_intent_messages(
         content=content,
         conversation_context=conversation_context,
         timezone=tz,
         now_local=now_local,
     )
-    response = await llm.ainvoke(messages)
-    return _parse_json_object(str(response.content))
+    parsed = await runnable.ainvoke(messages)
+    if isinstance(parsed, ScheduleIntentExtraction):
+        return parsed.model_dump()
+    if isinstance(parsed, dict):
+        return parsed
+    return {}
 
 
 async def _answer_context_recall(content: str, conversation_context: str) -> str:
@@ -1463,10 +1519,11 @@ async def _select_schedule_ids_by_llm(
     if not candidates:
         return []
     llm = get_llm(node_name="schedule_manager")
+    runnable = llm.with_structured_output(ScheduleTargetSelection)
     payload = _build_schedule_target_payload(candidates)
     system = SystemMessage(
         content=(
-            "你是提醒目标选择器，只输出 JSON。"
+            "你是提醒目标选择器，请按 schema 输出结构化字段。"
             "字段: schedule_ids, confidence。"
             "根据用户输入，从候选提醒中选择应被操作的提醒ID列表。"
             "operation 仅为 update 或 delete。"
@@ -1486,9 +1543,10 @@ async def _select_schedule_ids_by_llm(
             f"候选提醒(JSON):\n{json.dumps(payload, ensure_ascii=False)}"
         )
     )
-    response = await asyncio.wait_for(llm.ainvoke([system, human]), timeout=45)
-    parsed = _parse_json_object(str(response.content))
-    raw_ids = parsed.get("schedule_ids")
+    parsed = await asyncio.wait_for(runnable.ainvoke([system, human]), timeout=45)
+    raw_ids = getattr(parsed, "schedule_ids", None)
+    if raw_ids is None and isinstance(parsed, dict):
+        raw_ids = parsed.get("schedule_ids")
     if not isinstance(raw_ids, list):
         return []
     valid_ids = {int(row.id) for row in candidates if int(row.id or 0) > 0}
@@ -1514,10 +1572,11 @@ async def _select_schedule_ids_from_context(
     if not candidates:
         return []
     llm = get_llm(node_name="schedule_manager")
+    runnable = llm.with_structured_output(ScheduleTargetSelection)
     payload = _build_schedule_target_payload(candidates)
     system = SystemMessage(
         content=(
-            "你是提醒上下文引用解析器，只输出 JSON。"
+            "你是提醒上下文引用解析器，请按 schema 输出结构化字段。"
             "字段: schedule_ids, confidence。"
             "当用户说‘这几个/这些/刚才那些提醒’时，需依据会话上下文中最近助手列举的提醒项目，映射到候选ID。"
             "若仍不确定，返回空数组。"
@@ -1530,9 +1589,11 @@ async def _select_schedule_ids_from_context(
             f"候选提醒(JSON):\n{json.dumps(payload, ensure_ascii=False)}"
         )
     )
-    response = await asyncio.wait_for(llm.ainvoke([system, human]), timeout=45)
-    parsed = _parse_json_object(str(response.content))
-    return _parse_int_list(parsed.get("schedule_ids"))
+    parsed = await asyncio.wait_for(runnable.ainvoke([system, human]), timeout=45)
+    raw_ids = getattr(parsed, "schedule_ids", None)
+    if raw_ids is None and isinstance(parsed, dict):
+        raw_ids = parsed.get("schedule_ids")
+    return _parse_int_list(raw_ids)
 
 
 async def _delete_schedules_by_ids(

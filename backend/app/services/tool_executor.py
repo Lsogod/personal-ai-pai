@@ -39,6 +39,7 @@ class ToolExecResult(TypedDict):
     source: str
     name: str
     output: str
+    output_data: Any | None
     error: str
     latency_ms: int
 
@@ -53,22 +54,32 @@ def _render_now_time(timezone: str) -> str:
     tz = (timezone or "").strip() or "Asia/Shanghai"
     try:
         now = datetime.now(ZoneInfo(tz))
-        return f"{tz} current time: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+        return f"{tz} 当前时间：{now.strftime('%Y-%m-%d %H:%M:%S')}"
     except Exception:
         now = datetime.utcnow()
-        return f"UTC current time: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+        return f"UTC 当前时间：{now.strftime('%Y-%m-%d %H:%M:%S')}"
 
 
 def _render_mcp_tool_rows(rows: list[dict[str, Any]]) -> str:
     if not rows:
-        return "No external tools available."
+        return "当前无可用外部工具。"
     lines: list[str] = []
     for item in rows:
         name = str(item.get("name") or "").strip() or "unknown"
-        desc = str(item.get("description") or "").strip() or "no description"
+        desc = str(item.get("description") or "").strip() or "无描述"
         enabled = bool(item.get("enabled") is True)
         lines.append(f"- {name} | enabled={str(enabled).lower()} | {desc}")
     return "\n".join(lines)
+
+
+def _try_parse_json_payload(text: str) -> Any | None:
+    payload = (text or "").strip()
+    if not payload:
+        return None
+    try:
+        return json.loads(payload)
+    except Exception:
+        return None
 
 
 def _resolve_user_id(value: Any) -> int:
@@ -164,13 +175,22 @@ async def execute_capability(
     params = dict(args or {})
     settings = get_settings()
 
-    def _result(ok: bool, output: str = "", error: str = "") -> ToolExecResult:
+    def _result(
+        ok: bool,
+        output: str = "",
+        output_data: Any | None = None,
+        error: str = "",
+    ) -> ToolExecResult:
         latency_ms = int((time.perf_counter() - started) * 1000)
+        parsed_output = output_data
+        if ok and parsed_output is None:
+            parsed_output = _try_parse_json_payload(output)
         return {
             "ok": ok,
             "source": src,
             "name": tool,
             "output": output if ok else "",
+            "output_data": parsed_output if ok else None,
             "error": error if not ok else "",
             "latency_ms": latency_ms,
         }
@@ -238,7 +258,11 @@ async def execute_capability(
                     return _result(False, error="missing required arg: image_url")
                 output = await analyze_receipt(image_url)
                 payload = output if isinstance(output, dict) else {"result": str(output)}
-                return _result(True, output=json.dumps(payload, ensure_ascii=False))
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
 
             if tool_l == "ledger_text2sql":
                 uid_raw = params.get("user_id", user_id)
@@ -285,7 +309,12 @@ async def execute_capability(
                     image_url=image_url,
                     platform=platform,
                 )
-                return _result(True, output=json.dumps(_ledger_to_payload(row), ensure_ascii=False))
+                payload = _ledger_to_payload(row)
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
 
             if tool_l == "ledger_update":
                 uid = _resolve_user_id(params.get("user_id", user_id))
@@ -317,7 +346,12 @@ async def execute_capability(
                 )
                 if row is None:
                     return _result(False, error="ledger not found")
-                return _result(True, output=json.dumps(_ledger_to_payload(row), ensure_ascii=False))
+                payload = _ledger_to_payload(row)
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
 
             if tool_l == "ledger_delete":
                 uid = _resolve_user_id(params.get("user_id", user_id))
@@ -335,7 +369,12 @@ async def execute_capability(
                 )
                 if row is None:
                     return _result(False, error="ledger not found")
-                return _result(True, output=json.dumps(_ledger_to_payload(row), ensure_ascii=False))
+                payload = _ledger_to_payload(row)
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
 
             if tool_l == "ledger_get_latest":
                 uid = _resolve_user_id(params.get("user_id", user_id))
@@ -344,8 +383,13 @@ async def execute_capability(
                 session = get_session()
                 row = await get_latest_ledger(session=session, user_id=uid)
                 if row is None:
-                    return _result(True, output=json.dumps({}, ensure_ascii=False))
-                return _result(True, output=json.dumps(_ledger_to_payload(row), ensure_ascii=False))
+                    return _result(True, output=json.dumps({}, ensure_ascii=False), output_data={})
+                payload = _ledger_to_payload(row)
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
 
             if tool_l == "ledger_list_recent":
                 uid = _resolve_user_id(params.get("user_id", user_id))
@@ -355,7 +399,11 @@ async def execute_capability(
                 session = get_session()
                 rows = await list_recent_ledgers(session=session, user_id=uid, limit=limit)
                 payload = [_ledger_to_payload(item) for item in rows]
-                return _result(True, output=json.dumps(payload, ensure_ascii=False))
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
 
             if tool_l == "ledger_list":
                 uid = _resolve_user_id(params.get("user_id", user_id))
@@ -403,7 +451,11 @@ async def execute_capability(
                 result = await session.execute(stmt)
                 rows = list(result.scalars().all())
                 payload = [_ledger_to_payload(item) for item in rows]
-                return _result(True, output=json.dumps(payload, ensure_ascii=False))
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
 
             if tool_l == "schedule_insert":
                 uid = _resolve_user_id(params.get("user_id", user_id))
@@ -432,7 +484,12 @@ async def execute_capability(
                     scheduler.add_job(job_id, trigger_time, send_reminder_job, int(row.id or 0))
                 await session.commit()
                 await session.refresh(row)
-                return _result(True, output=json.dumps(_schedule_to_payload(row), ensure_ascii=False))
+                payload = _schedule_to_payload(row)
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
 
             if tool_l == "schedule_update":
                 uid = _resolve_user_id(params.get("user_id", user_id))
@@ -464,7 +521,12 @@ async def execute_capability(
                 session.add(row)
                 await session.commit()
                 await session.refresh(row)
-                return _result(True, output=json.dumps(_schedule_to_payload(row), ensure_ascii=False))
+                payload = _schedule_to_payload(row)
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
 
             if tool_l == "schedule_delete":
                 uid = _resolve_user_id(params.get("user_id", user_id))
@@ -486,7 +548,11 @@ async def execute_capability(
                 await session.execute(delete(ReminderDelivery).where(ReminderDelivery.schedule_id == schedule_id))
                 await session.delete(row)
                 await session.commit()
-                return _result(True, output=json.dumps(payload, ensure_ascii=False))
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
 
             if tool_l == "schedule_list":
                 uid = _resolve_user_id(params.get("user_id", user_id))
@@ -532,7 +598,11 @@ async def execute_capability(
                 result = await session.execute(stmt)
                 rows = list(result.scalars().all())
                 payload = [_schedule_to_payload(item) for item in rows]
-                return _result(True, output=json.dumps(payload, ensure_ascii=False))
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
 
             return _result(False, error=f"unsupported builtin tool: {tool_l}")
 
