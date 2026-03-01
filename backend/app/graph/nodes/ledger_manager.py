@@ -88,37 +88,96 @@ async def _tracked_text2sql(
     return text or None
 
 
+async def _tracked_text2sql_preview_write(
+    *,
+    user_id: int,
+    message: str,
+    operation: str,
+    update_fields: dict[str, Any] | None = None,
+    preview_hints: dict[str, Any] | None = None,
+    conversation_context: str = "",
+    platform: str = "",
+    conversation_id: int | None = None,
+) -> dict[str, Any] | None:
+    output = await invoke_node_tool_typed(
+        context=ToolInvocationContext(
+            user_id=user_id,
+            platform=platform or "unknown",
+            conversation_id=conversation_id,
+        ),
+        node_name="ledger_manager",
+        tool_name="ledger_text2sql",
+        args={
+            "mode": "preview_write",
+            "operation": operation,
+            "message": message,
+            "update_fields": dict(update_fields or {}),
+            "preview_hints": dict(preview_hints or {}),
+            "conversation_context": conversation_context,
+            "preview_limit": 50,
+        },
+    )
+    if isinstance(output, str) and _looks_like_tool_error(output):
+        raise RuntimeError(output)
+    payload = _parse_json_object(output)
+    if payload:
+        return payload
+    if isinstance(output, dict):
+        return output
+    return None
+
+
+async def _tracked_text2sql_commit_write_by_ids(
+    *,
+    user_id: int,
+    operation: str,
+    target_ids: list[int],
+    expected_count: int,
+    update_fields: dict[str, Any] | None = None,
+    platform: str = "",
+    conversation_id: int | None = None,
+) -> dict[str, Any]:
+    output = await invoke_node_tool_typed(
+        context=ToolInvocationContext(
+            user_id=user_id,
+            platform=platform or "unknown",
+            conversation_id=conversation_id,
+        ),
+        node_name="ledger_manager",
+        tool_name="ledger_text2sql",
+        args={
+            "mode": "commit_write_by_ids",
+            "operation": operation,
+            "message": "commit_write_by_ids",
+            "target_ids": list(target_ids or []),
+            "expected_count": int(expected_count or 0),
+            "update_fields": dict(update_fields or {}),
+        },
+    )
+    if isinstance(output, str) and _looks_like_tool_error(output):
+        raise RuntimeError(output)
+    payload = _parse_json_object(output)
+    if payload:
+        return payload
+    if isinstance(output, dict):
+        return output
+    return {}
+
+
 DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
 TECHNICAL_LEAK_PATTERN = re.compile(r"(json|payload|字段|数组|schema|schedules|ledgers)", re.IGNORECASE)
-PENDING_INDEX_PATTERN = re.compile(r"(?:第\s*([1-9]\d*)\s*(?:个|条)?|选\s*([1-9]\d*)|#([1-9]\d*))")
-PENDING_CN_INDEX_PATTERN = re.compile(r"第\s*([一二三四五六七八九十两])\s*(?:个|条)?")
-PENDING_BATCH_SELECT_PATTERN = re.compile(r"选\s*([1-9]\d*(?:\s*[,，、和及]\s*[1-9]\d*)+)")
-CN_NUM_MAP = {
-    "一": 1,
-    "二": 2,
-    "两": 2,
-    "三": 3,
-    "四": 4,
-    "五": 5,
-    "六": 6,
-    "七": 7,
-    "八": 8,
-    "九": 9,
-    "十": 10,
-}
 
 CATEGORY_MAP = {
     "餐饮": "餐饮",
     "吃饭": "餐饮",
     "午饭": "餐饮",
     "晚饭": "餐饮",
-    "早餐": "餐饮",
+    "早饭": "餐饮",
     "交通": "交通",
     "打车": "交通",
     "地铁": "交通",
     "公交": "交通",
     "购物": "购物",
-    "买": "购物",
     "超市": "购物",
     "居家": "居家",
     "房租": "居家",
@@ -128,6 +187,7 @@ CATEGORY_MAP = {
     "医疗": "医疗",
     "看病": "医疗",
 }
+
 MAX_IMAGES = 6
 
 
@@ -154,9 +214,25 @@ class LedgerIntentExtraction(BaseModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
-class LedgerTargetSelection(BaseModel):
-    ledger_ids: list[int] = Field(default_factory=list)
-    ledger_id: int | None = Field(default=None)
+class LedgerUpdateRewriteExtraction(BaseModel):
+    target_item: str = Field(default="")
+    item: str = Field(default="")
+    category: str = Field(default="")
+    amount: float | None = Field(default=None)
+    amount_explicit: bool = Field(default=False)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class LedgerPreviewControlExtraction(BaseModel):
+    action: str = Field(default="unknown")
+    indexes: list[int] = Field(default_factory=list)
+    comparator: str = Field(default="")
+    threshold: float | None = Field(default=None)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class LedgerHandoffDecision(BaseModel):
+    handoff: bool = Field(default=False)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
@@ -179,6 +255,15 @@ def _normalize_category(text: str | None) -> str:
         if key in raw:
             return value
     return raw if len(raw) <= 10 else "其他"
+
+
+def _resolve_query_category_hint(content: str, parsed_category: str | None) -> str | None:
+    normalized = _normalize_category(parsed_category)
+    if not (normalized or "").strip():
+        return None
+    if normalized == _normalize_category(""):
+        return None
+    return normalized
 
 
 def _parse_json_object(content: Any) -> dict:
@@ -348,11 +433,75 @@ def _sanitize_llm_text(text: str) -> str:
     return "\n".join(lines).strip()
 
 
+async def _render_fixed_reply_with_llm(
+    *,
+    fallback: str,
+    style: str,
+    facts: dict[str, Any] | None = None,
+    required_keywords: list[str] | None = None,
+) -> str:
+    base = (fallback or "").strip()
+    facts_payload = dict(facts or {})
+    facts_text = json.dumps(facts_payload, ensure_ascii=False)
+    llm = get_llm(node_name="ledger_manager")
+    system = SystemMessage(
+        content=(
+            "你是账单助手文案渲染器。"
+            "请基于给定事实输出最终用户回复，使其自然、清晰、简洁。"
+            "不得改变事实，不得新增事实，不得遗漏关键操作指令。"
+            "仅输出最终文本，不输出解释。"
+        )
+    )
+    attempts = 2
+    last_error = "llm_render_failed"
+    for attempt in range(attempts):
+        retry_hint = "请确保输出更直接、简洁。" if attempt > 0 else ""
+        try:
+            human = HumanMessage(
+                content=(
+                    f"style: {style}\n\n"
+                    f"facts_json:\n{json.dumps(facts_payload, ensure_ascii=False)}\n\n"
+                    f"source_text:\n{base}\n\n"
+                    f"retry_hint:\n{retry_hint}"
+                )
+            )
+            response = await llm.ainvoke([system, human])
+            candidate = _sanitize_llm_text(str(response.content or ""))
+            if not candidate:
+                last_error = "empty_llm_output"
+                continue
+            return candidate
+        except Exception as exc:
+            last_error = str(exc)
+            continue
+    try:
+        rescue = await llm.ainvoke(
+            [
+                system,
+                HumanMessage(
+                    content=(
+                        f"style: {style}\n\n"
+                        f"facts_json:\n{facts_text}\n\n"
+                        "请直接生成一条自然、简洁的最终回复。"
+                    )
+                ),
+            ]
+        )
+        rescue_text = _sanitize_llm_text(str(rescue.content or ""))
+        if rescue_text:
+            return rescue_text
+    except Exception as exc:
+        last_error = str(exc)
+    if base:
+        return base
+    raise RuntimeError(f"llm_render_failed:{last_error}")
+
+
 def _clean_item(item: str) -> str:
     value = (item or "").strip()
     if not value:
         return ""
-    value = re.sub(r"(?:第\s*\d+\s*(?:个|条)?|#\s*\d+)", "", value)
+    value = re.sub(r"(?:第\s*\d+\s*(?:笔|条)|#\s*\d+)", "", value)
     value = re.sub(
         r"^(错了|更正|修正|记错|不对|不是|把|改成|改为|应该是|应为|我说的是)\s*[:：]?\s*",
         "",
@@ -364,8 +513,8 @@ def _clean_item(item: str) -> str:
     value = value.replace("元", "").replace("块", "").replace("记账", "").strip()
     value = value.replace("和", " ").replace("及", " ").replace("并且", " ")
     value = re.sub(r"\s+", " ", value).strip()
-    value = value.strip("：:，,。.!！？?;；")
-    if value in {"和", "及", "跟"}:
+    value = value.strip("，。,.!?！？;；:：")
+    if value in {"和", "及", "并"}:
         return ""
     return value
 
@@ -400,45 +549,6 @@ def _is_generic_target_item(value: str) -> bool:
     return False
 
 
-def _has_explicit_multi_selector(content: str, target_item: str) -> bool:
-    text = (content or "").strip().lower()
-    if re.search(r"(都|全部|所有|这几笔|这些|刚才那些|那几笔|一起|批量)", text):
-        return True
-    tokens = [token for token in re.split(r"\s+", (target_item or "").strip()) if token]
-    return len(tokens) >= 2
-
-
-def _filter_ledger_candidates_by_target_item(candidates: list[Ledger], target_item: str) -> list[Ledger]:
-    if not candidates:
-        return []
-    hint = (target_item or "").strip()
-    if not hint or _is_generic_target_item(hint):
-        return candidates
-
-    normalized_hint = re.sub(r"\s+", "", hint).lower()
-    if not normalized_hint:
-        return candidates
-
-    matched = [
-        row
-        for row in candidates
-        if normalized_hint in re.sub(r"\s+", "", str(row.item or "")).lower()
-    ]
-    if matched:
-        return matched
-
-    tokens = [token for token in re.split(r"\s+", hint) if token and len(token) >= 2]
-    if len(tokens) >= 2:
-        fallback = [
-            row
-            for row in candidates
-            if all(token.lower() in re.sub(r"\s+", "", str(row.item or "")).lower() for token in tokens)
-        ]
-        if fallback:
-            return fallback
-    return candidates
-
-
 def _unique_positive_amounts(values: list[float]) -> list[float]:
     result: list[float] = []
     for value in values:
@@ -460,62 +570,6 @@ def _pending_amount_candidates(payload: dict) -> list[float]:
         except Exception:
             continue
     return _unique_positive_amounts(values)
-
-
-def _extract_pending_indices(content: str, max_len: int) -> list[int]:
-    source = content or ""
-    indices: list[int] = []
-    seen: set[int] = set()
-
-    for matched in PENDING_INDEX_PATTERN.finditer(source):
-        for group in matched.groups():
-            if not group:
-                continue
-            try:
-                idx = int(group)
-            except Exception:
-                continue
-            if 1 <= idx <= max_len and idx not in seen:
-                seen.add(idx)
-                indices.append(idx)
-
-    for matched in PENDING_CN_INDEX_PATTERN.finditer(source):
-        idx = CN_NUM_MAP.get(matched.group(1), 0)
-        if 1 <= idx <= max_len and idx not in seen:
-            seen.add(idx)
-            indices.append(idx)
-
-    for matched in PENDING_BATCH_SELECT_PATTERN.finditer(source):
-        parts = re.split(r"\s*[,，、和及]\s*", matched.group(1))
-        for token in parts:
-            token = (token or "").strip()
-            if not token.isdigit():
-                continue
-            idx = int(token)
-            if 1 <= idx <= max_len and idx not in seen:
-                seen.add(idx)
-                indices.append(idx)
-
-    # Loose fallback for "1 2" / "1和2" / "1,2" style selection.
-    if not indices:
-        has_decimal = bool(re.search(r"\d+\.\d+", source))
-        has_currency = bool(re.search(r"(?:元|块|rmb|RMB|人民币)", source))
-        if not has_decimal and not has_currency:
-            tokens = re.findall(r"(?<!\d)(\d+)(?!\d)", source)
-            parsed = [int(token) for token in tokens]
-            if parsed and all(1 <= idx <= max_len for idx in parsed):
-                for idx in parsed:
-                    if idx not in seen:
-                        seen.add(idx)
-                        indices.append(idx)
-
-    if not indices:
-        if "前两个" in source and max_len >= 2:
-            indices = [1, 2]
-        elif "后两个" in source and max_len >= 2:
-            indices = [max_len - 1, max_len]
-
-    return indices
 
 
 def _pick_amount_from_indexes(raw_indexes: object, candidates: list[float]) -> float | None:
@@ -574,14 +628,23 @@ async def _understand_pending_selection(
 
 
 def _render_pending_candidates(candidates: list[float]) -> str:
-    lines = ["我识别到多个支付金额："]
+    lines = ["我识别到多个可能金额："]
     for idx, value in enumerate(candidates, start=1):
         lines.append(f"{idx}. {value:.2f} 元")
     lines.append("请回复要记账的金额（可回复“第1个”或直接“28.50”）。")
-    lines.append("支持多选合并记账，例如：`第二个和第三个`、`选2和3`。")
+    lines.append("支持多选合并记账，例如：`第2个和第3个` 或 `选2和3`。")
     lines.append("可附带分类和摘要，例如：`第1个 餐饮 午饭`。")
     lines.append("不记这张图可回复：`取消`。")
     return "\n".join(lines)
+
+
+async def _render_pending_candidates_with_llm(candidates: list[float]) -> str:
+    return await _render_fixed_reply_with_llm(
+        fallback="请基于候选金额生成确认提示。",
+        style="pending_amount_candidates",
+        facts={"candidates": [round(float(v), 2) for v in candidates[:5]]},
+        required_keywords=["取消"],
+    )
 
 
 def _parse_vision_result(result: dict) -> dict:
@@ -621,12 +684,25 @@ def _parse_vision_result(result: dict) -> dict:
     }
 
 
-async def _understand_ledger_message(content: str, conversation_context: str) -> dict:
+async def _understand_ledger_message(
+    content: str,
+    conversation_context: str,
+    *,
+    pending_preview_hint: str = "",
+) -> dict:
     llm = get_llm(node_name="ledger_manager")
     runnable = llm.with_structured_output(LedgerIntentExtraction)
+    tz_name = get_settings().timezone
+    now_local = datetime.now(ZoneInfo(tz_name)).strftime("%Y-%m-%d %H:%M:%S")
+    enriched_context = (
+        f"{conversation_context}\n\n"
+        f"当前时间基准({tz_name}): {now_local}\n"
+        "相对时间词（今天/昨天/本月/上月/上周）必须以上述时间基准计算。"
+    )
     messages = build_ledger_intent_messages(
         content=content,
-        conversation_context=conversation_context,
+        conversation_context=enriched_context,
+        pending_preview_hint=pending_preview_hint,
     )
     parsed = await runnable.ainvoke(messages)
     if isinstance(parsed, LedgerIntentExtraction):
@@ -636,158 +712,106 @@ async def _understand_ledger_message(content: str, conversation_context: str) ->
     return {}
 
 
-def _build_ledger_target_payload(rows: list[Ledger]) -> dict[str, Any]:
-    return {
-        "candidates": [
-            {
-                "id": row.id,
-                "item": row.item,
-                "category": row.category,
-                "amount": round(float(row.amount), 2),
-                "currency": row.currency,
-                "datetime": _fmt_dt(row.transaction_date),
-            }
-            for row in rows[:120]
-        ]
-    }
-
-
-async def _select_ledger_id_by_llm(
-    *,
-    content: str,
-    conversation_context: str,
-    target_item: str,
-    operation: str,
-    candidates: list[Ledger],
-) -> int | None:
-    if not candidates:
-        return None
+async def _extract_update_rewrite_fields(content: str, conversation_context: str) -> dict[str, Any]:
     llm = get_llm(node_name="ledger_manager")
-    runnable = llm.with_structured_output(LedgerTargetSelection)
-    payload = _build_ledger_target_payload(candidates)
+    runnable = llm.with_structured_output(LedgerUpdateRewriteExtraction)
     system = SystemMessage(
         content=(
-            "你是账单目标选择器，请按 schema 输出结构化字段。"
-            "字段: ledger_id, confidence。"
-            "根据用户输入，从候选账单中选择唯一目标账单ID。"
-            "如果无法确定，ledger_id=null。"
-            "operation 仅用于语义参考（correct 或 delete）。"
+            "Extract update rewrite intent for ledger operations. "
+            "Return structured fields only: target_item, item, category, amount, amount_explicit, confidence. "
+            "For expressions like '把A改成B/将A修改为B', target_item must be A and item must be B. "
+            "For multi-source rewrites like '把A和B改成C', target_item must contain the full source set (A and B) "
+            "and item must be C. Do not collapse source set into destination. "
+            "Set amount_explicit=true only when current user message explicitly gives a new numeric amount to set. "
+            "If user only changes item/category wording and does not explicitly set amount, amount_explicit=false and amount=null. "
+            "If uncertain, keep fields empty and confidence low."
         )
     )
     human = HumanMessage(
         content=(
-            f"operation: {operation}\n"
-            f"target_item_hint: {target_item or ''}\n\n"
-            f"会话上下文:\n{conversation_context}\n\n"
-            f"用户输入:\n{content}\n\n"
-            f"候选账单(JSON):\n{json.dumps(payload, ensure_ascii=False)}"
+            f"conversation_context:\n{conversation_context}\n\n"
+            f"user_message:\n{content}"
         )
     )
     parsed = await runnable.ainvoke([system, human])
-    selected = getattr(parsed, "ledger_id", None)
-    if selected is None and isinstance(parsed, dict):
-        selected = parsed.get("ledger_id")
-    try:
-        ledger_id = int(selected) if selected is not None else None
-    except Exception:
-        return None
-    valid_ids = {int(row.id) for row in candidates if int(row.id or 0) > 0}
-    return ledger_id if ledger_id in valid_ids else None
+    if isinstance(parsed, LedgerUpdateRewriteExtraction):
+        return parsed.model_dump()
+    if isinstance(parsed, dict):
+        return parsed
+    return {}
 
 
-async def _select_ledger_ids_by_llm(
+async def _understand_preview_control_message(
     *,
     content: str,
     conversation_context: str,
-    target_item: str,
-    operation: str,
-    selection_mode: str,
-    candidates: list[Ledger],
-) -> list[int]:
-    if not candidates:
-        return []
+    pending: dict[str, Any],
+) -> dict[str, Any]:
     llm = get_llm(node_name="ledger_manager")
-    runnable = llm.with_structured_output(LedgerTargetSelection)
-    payload = _build_ledger_target_payload(candidates)
+    runnable = llm.with_structured_output(LedgerPreviewControlExtraction)
+    summary = dict(pending.get("summary") or {})
+    candidate_rows = [dict(item) for item in list(pending.get("candidate_rows") or []) if isinstance(item, dict)][:10]
     system = SystemMessage(
         content=(
-            "你是账单目标批量选择器，请按 schema 输出结构化字段。"
-            "字段: ledger_ids, confidence。"
-            "根据用户输入，从候选账单中选择应操作的账单ID列表。"
-            "operation 仅为 correct 或 delete。"
-            "selection_mode 为 all/single/subset/auto。"
-            "若用户明确说‘全部/都/这几笔’，优先返回多个ID。"
-            "若用户表达单笔操作，返回一个ID。"
-            "无法确定时返回空数组。"
+            "Classify user message under an existing pending preview-commit task. "
+            "Return structured fields only: action, indexes, comparator, threshold, confidence. "
+            "action must be one of: confirm, cancel, pick_indexes, refine_amount, new_request, unknown. "
+            "pick_indexes means the user selected subset rows by display index (1-based). "
+            "refine_amount means filtering current candidates by amount comparator and threshold. "
+            "Use refine_amount only when user explicitly states a concrete amount condition in the current message "
+            "(for example: 金额>30, 大于30, 小于等于20, 等于30). "
+            "Do not infer refine_amount from complaints/questions like '你怎么把金额改了' or '金额是30不是60'. "
+            "new_request means user started a different full request and should not be treated as pending control."
         )
     )
     human = HumanMessage(
         content=(
-            f"operation: {operation}\n"
-            f"selection_mode: {selection_mode}\n"
-            f"target_item_hint: {target_item or ''}\n\n"
-            f"会话上下文:\n{conversation_context}\n\n"
-            f"用户输入:\n{content}\n\n"
-            f"候选账单(JSON):\n{json.dumps(payload, ensure_ascii=False)}"
+            f"conversation_context:\n{conversation_context}\n\n"
+            f"pending_operation: {str(pending.get('operation') or '').strip().lower()}\n"
+            f"pending_summary_json:\n{json.dumps(summary, ensure_ascii=False)}\n\n"
+            f"pending_candidate_rows_json:\n{json.dumps(candidate_rows, ensure_ascii=False)}\n\n"
+            f"user_message:\n{content}"
         )
     )
     parsed = await runnable.ainvoke([system, human])
-    raw_ids = getattr(parsed, "ledger_ids", None)
-    if raw_ids is None and isinstance(parsed, dict):
-        raw_ids = parsed.get("ledger_ids")
-    if not isinstance(raw_ids, list):
-        single_id = getattr(parsed, "ledger_id", None)
-        if single_id is None and isinstance(parsed, dict):
-            single_id = parsed.get("ledger_id")
-        picked = _parse_int_list(single_id)
-        raw_ids = picked
-    valid_ids = {int(row.id) for row in candidates if int(row.id or 0) > 0}
-    result: list[int] = []
-    seen: set[int] = set()
-    for value in raw_ids:
-        try:
-            ledger_id = int(value)
-        except Exception:
-            continue
-        if ledger_id in valid_ids and ledger_id not in seen:
-            seen.add(ledger_id)
-            result.append(ledger_id)
-    if selection_mode == "single" and len(result) > 1:
-        return result[:1]
-    return result
+    if isinstance(parsed, LedgerPreviewControlExtraction):
+        return parsed.model_dump()
+    if isinstance(parsed, dict):
+        return parsed
+    return {}
 
 
-async def _select_ledger_ids_from_context(
+async def _decide_handoff_to_chat_manager(
     *,
     content: str,
     conversation_context: str,
-    candidates: list[Ledger],
-) -> list[int]:
-    if not candidates:
-        return []
+    pending_preview_hint: str = "",
+) -> dict[str, Any]:
     llm = get_llm(node_name="ledger_manager")
-    runnable = llm.with_structured_output(LedgerTargetSelection)
-    payload = _build_ledger_target_payload(candidates)
+    runnable = llm.with_structured_output(LedgerHandoffDecision)
     system = SystemMessage(
         content=(
-            "你是账单上下文引用解析器，请按 schema 输出结构化字段。"
-            "字段: ledger_ids, confidence。"
-            "当用户使用代词（如‘这几笔/这些/刚才那些’）时，需结合会话上下文和候选列表选择目标ID。"
-            "若仍不确定，返回空数组。"
+            "You are a routing guard for ledger_manager. Return structured fields only: handoff, confidence. "
+            "Set handoff=true only when user message is primarily meta/general conversation "
+            "(assistant identity, product/project capabilities, usage guidance, chitchat) "
+            "and not an actionable ledger task. "
+            "Set handoff=false for actionable ledger intents: insert/query/list/update/delete/confirm/cancel/refine selection. "
+            "Do not rely on keyword matching; judge semantic intent from full context."
         )
     )
     human = HumanMessage(
         content=(
-            f"会话上下文:\n{conversation_context}\n\n"
-            f"用户输入:\n{content}\n\n"
-            f"候选账单(JSON):\n{json.dumps(payload, ensure_ascii=False)}"
+            f"conversation_context:\n{conversation_context}\n\n"
+            f"pending_preview_hint:\n{pending_preview_hint or 'none'}\n\n"
+            f"user_message:\n{content}"
         )
     )
     parsed = await runnable.ainvoke([system, human])
-    raw_ids = getattr(parsed, "ledger_ids", None)
-    if raw_ids is None and isinstance(parsed, dict):
-        raw_ids = parsed.get("ledger_ids")
-    return _parse_int_list(raw_ids)
+    if isinstance(parsed, LedgerHandoffDecision):
+        return parsed.model_dump()
+    if isinstance(parsed, dict):
+        return parsed
+    return {}
 
 
 def _to_utc_naive(local_dt: datetime, tz_name: str) -> datetime:
@@ -805,7 +829,20 @@ def _format_window_label(name: str, start_local_date: date, end_local_date_exclu
 def _resolve_ledger_window_from_fields(scope: str, query_date: str | None) -> tuple[datetime, datetime, str] | None:
     tz_name = get_settings().timezone
     today_local = datetime.now(ZoneInfo(tz_name)).date()
-    key = (scope or "").strip().lower()
+    key = (scope or "").strip().lower().replace("-", "_").replace(" ", "_")
+    scope_alias = {
+        "lastmonth": "last_month",
+        "prev_month": "last_month",
+        "previous_month": "last_month",
+        "month_last": "last_month",
+        "上月": "last_month",
+        "上个月": "last_month",
+        "上個月": "last_month",
+        "本月": "month",
+        "这个月": "month",
+        "這個月": "month",
+    }
+    key = scope_alias.get(key, key)
 
     if key == "yesterday":
         target = today_local - timedelta(days=1)
@@ -822,20 +859,20 @@ def _resolve_ledger_window_from_fields(scope: str, query_date: str | None) -> tu
     if key == "today":
         start_local = datetime.combine(today_local, datetime.min.time())
         end_local = start_local + timedelta(days=1)
-        label = _format_window_label("今天", today_local, today_local + timedelta(days=1))
+        label = _format_window_label("浠婂ぉ", today_local, today_local + timedelta(days=1))
         return _to_utc_naive(start_local, tz_name), _to_utc_naive(end_local, tz_name), label
     if key == "last_week":
         week_start = today_local - timedelta(days=today_local.weekday() + 7)
         week_end = week_start + timedelta(days=7)
         start_local = datetime.combine(week_start, datetime.min.time())
         end_local = datetime.combine(week_end, datetime.min.time())
-        label = _format_window_label("上周", week_start, week_end)
+        label = _format_window_label("涓婂懆", week_start, week_end)
         return _to_utc_naive(start_local, tz_name), _to_utc_naive(end_local, tz_name), label
     if key == "week":
         week_start = today_local - timedelta(days=today_local.weekday())
         start_local = datetime.combine(week_start, datetime.min.time())
         end_local = start_local + timedelta(days=7)
-        label = _format_window_label("本周", week_start, week_start + timedelta(days=7))
+        label = _format_window_label("鏈懆", week_start, week_start + timedelta(days=7))
         return _to_utc_naive(start_local, tz_name), _to_utc_naive(end_local, tz_name), label
     if key == "month":
         month_start = today_local.replace(day=1)
@@ -846,6 +883,16 @@ def _resolve_ledger_window_from_fields(scope: str, query_date: str | None) -> tu
         start_local = datetime.combine(month_start, datetime.min.time())
         end_local = datetime.combine(next_month, datetime.min.time())
         label = _format_window_label("本月", month_start, next_month)
+        return _to_utc_naive(start_local, tz_name), _to_utc_naive(end_local, tz_name), label
+    if key == "last_month":
+        this_month_start = today_local.replace(day=1)
+        if this_month_start.month == 1:
+            last_month_start = date(this_month_start.year - 1, 12, 1)
+        else:
+            last_month_start = date(this_month_start.year, this_month_start.month - 1, 1)
+        start_local = datetime.combine(last_month_start, datetime.min.time())
+        end_local = datetime.combine(this_month_start, datetime.min.time())
+        label = _format_window_label("上月", last_month_start, this_month_start)
         return _to_utc_naive(start_local, tz_name), _to_utc_naive(end_local, tz_name), label
     if key == "date" and query_date:
         try:
@@ -858,6 +905,9 @@ def _resolve_ledger_window_from_fields(scope: str, query_date: str | None) -> tu
         return _to_utc_naive(start_local, tz_name), _to_utc_naive(end_local, tz_name), label
     return None
 
+
+def _scope_hint_from_content(content: str) -> str | None:
+    return None
 
 async def _query_ledger_rows(
     user_id: int,
@@ -891,6 +941,8 @@ async def _query_ledger_rows(
         tool_name="ledger_list",
         args=args,
     )
+    if isinstance(output, str) and _looks_like_tool_error(output):
+        raise RuntimeError(output.strip())
     return [
         row
         for row in (
@@ -938,116 +990,252 @@ def _parse_int_list(value: Any) -> list[int]:
     return picked
 
 
-def _read_last_ledger_ids_from_state(state: GraphState) -> list[int]:
-    extra = dict(state.get("extra") or {})
-    payload = extra.get("ledger_last_query")
-    if not isinstance(payload, dict):
-        return []
-    return _parse_int_list(payload.get("ids"))
-
-
-async def _query_ledgers_by_ids(
-    user_id: int,
-    ledger_ids: list[int],
+def _build_preview_pending_payload_from_text2sql(
     *,
-    platform: str,
-    conversation_id: int | None,
-) -> list[Ledger]:
-    valid_ids = _parse_int_list(ledger_ids)
-    if not valid_ids:
+    operation: str,
+    source: str,
+    preview_payload: dict[str, Any],
+    update_fields: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    candidate_rows = [
+        dict(item)
+        for item in list(preview_payload.get("candidate_rows") or [])
+        if isinstance(item, dict)
+    ][:50]
+    target_ids = _parse_int_list(preview_payload.get("target_ids"))[:200]
+    summary = dict(preview_payload.get("summary") or {})
+    if not summary:
+        summary = _build_preview_summary_from_row_dicts(candidate_rows)
+    return {
+        "pending_type": "preview_commit",
+        "operation": operation,
+        "source": source,
+        "target_ids": target_ids,
+        "candidate_rows": candidate_rows,
+        "summary": summary,
+        "preview_sql": str(preview_payload.get("preview_sql") or ""),
+        "preview_params": dict(preview_payload.get("preview_params") or {}),
+        "update_fields": dict(update_fields or {}),
+        "requires_double_confirm": len(target_ids) > 20,
+        "double_confirmed": False,
+        "created_at": datetime.utcnow().isoformat(),
+    }
+
+
+def _build_update_preview_diffs(
+    rows: list[dict[str, Any]],
+    update_fields: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    fields = dict(update_fields or {})
+    has_amount = fields.get("amount") is not None
+    has_category = bool(str(fields.get("category") or "").strip())
+    has_item = bool(str(fields.get("item") or "").strip())
+    if not (has_amount or has_category or has_item):
         return []
-    output = await _invoke_ledger_tool(
-        user_id=user_id,
-        platform=platform,
-        conversation_id=conversation_id,
-        tool_name="ledger_list",
-        args={
-            "user_id": user_id,
-            "ledger_ids": valid_ids,
-            "limit": max(100, len(valid_ids) * 3),
-            "order": "desc",
+
+    result: list[dict[str, Any]] = []
+    for idx, row in enumerate(rows[:10], start=1):
+        before_amount = float(row.get("amount") or 0)
+        before_currency = str(row.get("currency") or "CNY")
+        before_category = str(row.get("category") or "")
+        before_item = str(row.get("item") or "")
+
+        after_amount = before_amount
+        if has_amount:
+            try:
+                after_amount = float(fields.get("amount"))
+            except Exception:
+                after_amount = before_amount
+        after_category = str(fields.get("category") or "").strip() if has_category else before_category
+        after_item = str(fields.get("item") or "").strip() if has_item else before_item
+
+        changes: list[str] = []
+        if abs(after_amount - before_amount) > 1e-9:
+            changes.append(f"金额：{before_amount:.2f} -> {after_amount:.2f} {before_currency}")
+        if after_category != before_category:
+            changes.append(f"分类：{before_category or '（空）'} -> {after_category or '（空）'}")
+        if after_item != before_item:
+            changes.append(f"摘要：{before_item or '（空）'} -> {after_item or '（空）'}")
+        if not changes:
+            changes.append("无变化")
+
+        result.append(
+            {
+                "index": idx,
+                "datetime": str(row.get("datetime") or ""),
+                "changes": changes,
+            }
+        )
+    return result
+
+
+def _render_preview_confirmation(payload: dict[str, Any]) -> str:
+    operation = str(payload.get("operation") or "").strip().lower()
+    summary = dict(payload.get("summary") or {})
+    rows = [dict(item) for item in list(payload.get("candidate_rows") or []) if isinstance(item, dict)]
+    update_fields = dict(payload.get("update_fields") or {})
+    count = int(summary.get("count") or 0)
+    total = float(summary.get("total") or 0)
+    time_start = str(summary.get("time_start") or "").strip()
+    time_end = str(summary.get("time_end") or "").strip()
+    categories = list(summary.get("categories") or [])
+    verb = "删除" if operation == "delete" else "修改"
+    lines: list[str] = []
+    lines.append(f"将{verb} {count} 条账单。")
+    if time_start or time_end:
+        lines.append(f"时间范围：{time_start or '?'} ~ {time_end or '?'}")
+    lines.append(f"总金额：{total:.2f} CNY")
+    if categories:
+        cat_text = "，".join([f"{str(name)}({int(num)})" for name, num in categories[:3]])
+        lines.append(f"类别分布：{cat_text}")
+    lines.append("样例（前10条）：")
+    if not rows:
+        lines.append("- 无可展示样例")
+    else:
+        for idx, row in enumerate(rows[:10], start=1):
+            lines.append(
+                f"{idx}. {row.get('datetime') or ''} | {row.get('item') or ''} | "
+                f"{float(row.get('amount') or 0):.2f} {row.get('currency') or 'CNY'} | "
+                f"{row.get('category') or ''}"
+            )
+    if operation == "update":
+        diffs = _build_update_preview_diffs(rows, update_fields)
+        if diffs:
+            lines.append("修改预览（前 -> 后）：")
+            for diff in diffs:
+                changes_text = "；".join([str(item) for item in list(diff.get("changes") or []) if str(item).strip()])
+                lines.append(f"{int(diff.get('index') or 0)}. {diff.get('datetime') or ''} | {changes_text or '无变化'}")
+    if operation == "delete":
+        lines.append("回复“确认删除”执行；或回复“只删第1、3条”；或回复“金额>30”先缩小范围。")
+    else:
+        lines.append("回复“确认修改”执行；或回复“只改第1、3条”；或回复“金额>30”先缩小范围。")
+    lines.append("回复“取消”可终止本次操作。")
+    return "\n".join(lines)
+
+
+async def _render_preview_confirmation_with_llm(payload: dict[str, Any]) -> str:
+    operation = str(payload.get("operation") or "").strip().lower()
+    required = ["取消", "确认删除"] if operation == "delete" else ["取消", "确认修改"]
+    candidate_rows = [dict(item) for item in list(payload.get("candidate_rows") or []) if isinstance(item, dict)][:10]
+    update_fields = dict(payload.get("update_fields") or {})
+    diffs = _build_update_preview_diffs(candidate_rows, update_fields) if operation == "update" else []
+    return await _render_fixed_reply_with_llm(
+        fallback="请基于预览事实生成待确认文案。",
+        style="preview_confirmation",
+        facts={
+            "operation": operation,
+            "summary": dict(payload.get("summary") or {}),
+            "candidate_rows": candidate_rows,
+            "update_fields": update_fields,
+            "update_diffs": diffs,
         },
+        required_keywords=required,
     )
-    rows = [
-        row
-        for row in (
-            _ledger_from_payload(item)
-            for item in _parse_json_list(output)
-        )
-        if row is not None
-    ]
-    index_map = {int(row.id): row for row in rows if int(row.id or 0) > 0}
-    ordered: list[Ledger] = []
-    for lid in valid_ids:
-        row = index_map.get(lid)
-        if row is not None:
-            ordered.append(row)
-    return ordered
 
 
-async def _delete_ledgers_by_ids(
+def _build_preview_summary_from_row_dicts(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    total = round(sum(float(row.get("amount") or 0) for row in rows), 2)
+    times = [str(row.get("datetime") or "").strip() for row in rows if str(row.get("datetime") or "").strip()]
+    categories: dict[str, int] = {}
+    for row in rows:
+        key = str(row.get("category") or "其他").strip() or "其他"
+        categories[key] = categories.get(key, 0) + 1
+    top_categories = sorted(categories.items(), key=lambda x: x[1], reverse=True)[:5]
+    return {
+        "count": len(rows),
+        "total": total,
+        "time_start": times[-1] if times else "",
+        "time_end": times[0] if times else "",
+        "categories": top_categories,
+    }
+
+
+def _refine_preview_rows_by_rule(
+    rows: list[dict[str, Any]],
+    comparator: str,
+    threshold: float | None,
+) -> tuple[list[dict[str, Any]] | None, str]:
+    op = str(comparator or "").strip()
+    if op not in {">", ">=", "<", "<=", "="} or threshold is None:
+        return None, ""
+    try:
+        bound = float(threshold)
+    except Exception:
+        return None, ""
+
+    def _ok(value: float) -> bool:
+        if op == ">":
+            return value > bound
+        if op == ">=":
+            return value >= bound
+        if op == "<":
+            return value < bound
+        if op == "<=":
+            return value <= bound
+        return abs(value - bound) < 1e-9
+
+    filtered = [row for row in rows if _ok(float(row.get("amount") or 0))]
+    return filtered, f"金额{op}{bound:.2f}"
+
+
+async def _execute_preview_commit(
     *,
+    operation: str,
     user_id: int,
     user_platform: str,
     conversation_id: int | None,
     ledger_ids: list[int],
-) -> tuple[int, list[Ledger]]:
-    rows = await _query_ledgers_by_ids(
-        user_id,
-        ledger_ids,
+    update_fields: dict[str, Any] | None = None,
+) -> str:
+    picked_ids = _parse_int_list(ledger_ids)[:200]
+    expected = len(picked_ids)
+    if expected <= 0:
+        return "没有可执行的账单目标，请先重新筛选。"
+    fields = dict(update_fields or {})
+    if operation == "update":
+        amount_raw = fields.get("amount")
+        try:
+            amount = float(amount_raw) if amount_raw is not None else None
+        except Exception:
+            amount = None
+        if amount is not None:
+            fields["amount"] = amount
+        has_amount = fields.get("amount") is not None
+        has_category = bool(str(fields.get("category") or "").strip())
+        has_item = bool(str(fields.get("item") or "").strip())
+        if not (has_amount or has_category or has_item):
+            return "缺少可修改字段（金额/分类/摘要），无法执行。请重新发起更正请求。"
+
+    result = await _tracked_text2sql_commit_write_by_ids(
+        user_id=user_id,
+        operation=operation,
+        target_ids=picked_ids,
+        expected_count=expected,
+        update_fields=fields,
         platform=user_platform,
         conversation_id=conversation_id,
     )
-    deleted: list[Ledger] = []
-    for row in rows:
-        output = await _invoke_ledger_tool(
-            user_id=user_id,
-            platform=user_platform,
-            conversation_id=conversation_id,
-            tool_name="ledger_delete",
-            args={"user_id": user_id, "ledger_id": int(row.id or 0)},
-        )
-        removed = _ledger_from_payload(_parse_json_object(output))
-        if removed:
-            deleted.append(removed)
-    return len(rows), deleted
+    if not bool(result.get("ok")):
+        error = str(result.get("error") or "").strip()
+        if error == "count_mismatch":
+            exp = int(result.get("expected") or expected)
+            act = int(result.get("actual") or 0)
+            return f"执行被拦截：目标集合已变化（确认 {exp} 条，当前 {act} 条）。请重新预览后再确认。"
+        if error == "rowcount_guard_triggered":
+            exp = int(result.get("expected") or expected)
+            act = int(result.get("actual") or 0)
+            return f"执行被拦截：实际影响条数异常（确认 {exp} 条，执行 {act} 条）。请重新预览。"
+        if error in {"missing_update_fields", "missing_amount_for_update"}:
+            return "缺少可修改字段（金额/分类/摘要），无法执行。请重新发起更正请求。"
+        return "执行失败，请稍后重试。"
 
-
-async def _update_ledgers_by_ids(
-    *,
-    user_id: int,
-    user_platform: str,
-    conversation_id: int | None,
-    ledger_ids: list[int],
-    amount: float,
-    category: str | None,
-    item: str | None,
-) -> tuple[int, list[Ledger]]:
-    rows = await _query_ledgers_by_ids(
-        user_id,
-        ledger_ids,
-        platform=user_platform,
-        conversation_id=conversation_id,
-    )
-    updated: list[Ledger] = []
-    for row in rows:
-        output = await _invoke_ledger_tool(
-            user_id=user_id,
-            platform=user_platform,
-            conversation_id=conversation_id,
-            tool_name="ledger_update",
-            args={
-                "user_id": user_id,
-                "ledger_id": int(row.id or 0),
-                "amount": amount,
-                "category": category or "",
-                "item": item or "",
-            },
-        )
-        changed = _ledger_from_payload(_parse_json_object(output))
-        if changed:
-            updated.append(changed)
-    return len(rows), updated
+    matched = int(result.get("matched") or 0)
+    affected = int(result.get("affected") or 0)
+    if affected <= 0:
+        return "没有实际变更，可能目标已被修改。请重新预览。"
+    if operation == "delete":
+        return f"已确认删除：目标 {expected} 条，实际删除 {affected} 条（匹配 {matched} 条）。"
+    return f"已确认修改：目标 {expected} 条，实际修改 {affected} 条（匹配 {matched} 条）。"
 
 
 def _with_last_ledger_query(
@@ -1081,29 +1269,21 @@ async def _answer_ledger_with_llm(
     payload = _build_ledger_payload(rows)
     system = SystemMessage(
         content=(
-            "你是账单查询答复助手。你只能根据提供的账单数据回答，禁止编造。"
-            "按用户问题有针对性回答，不要固定模板。"
-            "若用户问今天/本周/本月或某个日期，按对应范围说明。"
-            "若用户问分类，请按分类回答。"
-            "若没有记录，明确说明没有。"
-            "涉及明细时要包含时间。"
-            "默认给出简洁自然的中文回答，不要输出技术说明。"
-            "不要提到 JSON、数组、字段、数据源、会话上下文，也不要做“当前数据为准”的提示。"
-            "不要重复句子或段落。"
+            "You are a ledger query assistant. Answer only from provided ledger rows. "
+            "Be concise and do not mention JSON/schema/internal details."
         )
     )
     human = HumanMessage(
         content=(
-            f"查询范围: {label}\n"
-            f"分类筛选: {category or '无'}\n\n"
-            f"会话上下文:\n{conversation_context}\n\n"
-            f"用户问题:\n{content}\n\n"
-            f"数据(JSON):\n{json.dumps(payload, ensure_ascii=False)}"
+            f"query_label: {label}\n"
+            f"category_filter: {category or 'none'}\n\n"
+            f"conversation_context:\n{conversation_context}\n\n"
+            f"user_question:\n{content}\n\n"
+            f"ledger_json:\n{json.dumps(payload, ensure_ascii=False)}"
         )
     )
     response = await llm.ainvoke([system, human])
     return _sanitize_llm_text(str(response.content or ""))
-
 
 def _render_ledger_fallback(rows: list[Ledger], label: str, category: str | None) -> str:
     title = f"{label}账单" if label else "账单"
@@ -1122,364 +1302,472 @@ def _render_ledger_fallback(rows: list[Ledger], label: str, category: str | None
     return "\n".join(lines)
 
 
-async def _handle_ledger_command(
+def _render_ledger_metric_answer(
     *,
     content: str,
+    label: str,
+    category: str | None,
+    rows: list[Ledger],
+) -> str | None:
+    return None
+
+def _build_pending_preview_hint(pending: dict[str, Any]) -> str:
+    operation = str(pending.get("operation") or "").strip().lower()
+    verb = "删除" if operation == "delete" else "修改"
+    summary = dict(pending.get("summary") or {})
+    count = int(summary.get("count") or 0)
+    total = float(summary.get("total") or 0)
+    time_start = str(summary.get("time_start") or "").strip()
+    time_end = str(summary.get("time_end") or "").strip()
+    rows = [dict(item) for item in list(pending.get("candidate_rows") or []) if isinstance(item, dict)]
+    samples = ", ".join(
+        f"{str(row.get('item') or '').strip()}({float(row.get('amount') or 0):.2f})"
+        for row in rows[:3]
+    )
+    return (
+        f"当前有待确认{verb}任务：{count}条，总额{total:.2f} CNY，"
+        f"时间范围 {time_start or '?'} ~ {time_end or '?'}，"
+        f"样例: {samples or '无'}。"
+    )
+
+
+def _is_actionable_new_intent(intent: str) -> bool:
+    return intent in {
+        "insert",
+        "correct_latest",
+        "correct_by_id",
+        "correct_by_name",
+        "correct_by_scope",
+        "delete_latest",
+        "delete_by_id",
+        "delete_by_name",
+        "delete_by_scope",
+        "query",
+        "list",
+    }
+
+
+async def _handle_pending_preview_commit(
+    *,
+    state: GraphState,
+    content: str,
+    pending: dict[str, Any],
     user_id: int,
     user_platform: str,
-    conversation_id: int | None,
-) -> list[str] | None:
-    if not content.startswith("/ledger"):
-        return None
-
-    if content.startswith("/ledger list"):
-        list_output = await _invoke_ledger_tool(
-            user_id=user_id,
-            platform=user_platform,
-            conversation_id=conversation_id,
-            tool_name="ledger_list_recent",
-            args={"user_id": user_id, "limit": 10},
+    conversation_id: int,
+    conversation_context: str,
+    parsed_control: dict[str, Any] | None = None,
+) -> GraphState:
+    async def _resp(
+        text: str,
+        *,
+        style: str = "status",
+        facts: dict[str, Any] | None = None,
+        required_keywords: list[str] | None = None,
+    ) -> GraphState:
+        rendered = await _render_fixed_reply_with_llm(
+            fallback=text,
+            style=style,
+            facts=facts or {},
+            required_keywords=required_keywords or [],
         )
-        rows = [_ledger_from_payload(item) for item in _parse_json_list(list_output)]
-        rows = [row for row in rows if row is not None]
-        if not rows:
-            return ["暂无账单记录。"]
-        lines = ["最近账单："]
-        for row in rows:
-            lines.append(
-                f"#{row.id} | {_fmt_dt(row.transaction_date)} | {row.amount:.2f} {row.currency} | {row.category} | {row.item}"
+        return {**state, "responses": [rendered]}
+
+    operation = str(pending.get("operation") or "").strip().lower()
+    if operation not in {"delete", "update"}:
+        await clear_pending_ledger(user_id=user_id, conversation_id=conversation_id)
+        return await _resp("待确认任务已失效，请重新发起删除/修改请求。", style="error")
+
+    target_ids = _parse_int_list(pending.get("target_ids"))
+    candidate_rows = [dict(item) for item in list(pending.get("candidate_rows") or []) if isinstance(item, dict)]
+    if not target_ids:
+        await clear_pending_ledger(user_id=user_id, conversation_id=conversation_id)
+        return await _resp("待确认任务中没有可执行目标，请重新发起请求。", style="error")
+
+    control = dict(parsed_control or {})
+    if not control:
+        try:
+            control = await _understand_preview_control_message(
+                content=content,
+                conversation_context=conversation_context,
+                pending=pending,
             )
-        lines.append("可用：`/ledger update <id> <金额> [分类] [摘要]`、`/ledger delete <id|latest>`")
-        return ["\n".join(lines)]
+        except Exception:
+            control = {}
+    action = str(control.get("action") or "").strip().lower()
 
-    if content.startswith("/ledger update"):
-        m = re.match(
-            r"^/ledger\s+update\s+(\d+)\s+(\d+(?:\.\d{1,2})?)\s*(.*)$",
-            content,
+    if action == "cancel":
+        await clear_pending_ledger(user_id=user_id, conversation_id=conversation_id)
+        return await _resp("已取消本次批量操作。", style="status")
+
+    if action == "refine_amount" and candidate_rows:
+        refine_rows, refine_desc = _refine_preview_rows_by_rule(
+            candidate_rows,
+            str(control.get("comparator") or "").strip(),
+            control.get("threshold"),
         )
-        if not m:
-            return [
-                "用法：`/ledger update <id> <金额> [分类] [摘要]`，例如 `/ledger update 12 28 餐饮 晚饭`。"
-            ]
-        ledger_id = int(m.group(1))
-        amount = float(m.group(2))
-        tail = (m.group(3) or "").strip()
-        category = "其他"
-        item = ""
-        if tail:
-            parts = tail.split(maxsplit=1)
-            category = _normalize_category(parts[0])
-            item = parts[1] if len(parts) > 1 else ""
-
-        updated_output = await _invoke_ledger_tool(
+        if refine_rows is None:
+            return await _resp("未能理解缩小范围条件，请换一种说法。", style="hint")
+        if not refine_rows:
+            return await _resp("按该金额条件没有匹配账单，请调整条件后重试。", style="hint")
+        refined_id_set = {int(item.get("id") or 0) for item in refine_rows if int(item.get("id") or 0) > 0}
+        refined_target_ids = [lid for lid in target_ids if lid in refined_id_set][:200]
+        if not refined_target_ids:
+            return await _resp("缩小范围后没有可执行目标，请调整条件后重试。", style="hint")
+        next_payload = dict(pending)
+        next_payload["target_ids"] = refined_target_ids
+        next_payload["candidate_rows"] = refine_rows[:50]
+        next_payload["summary"] = _build_preview_summary_from_row_dicts(next_payload["candidate_rows"])
+        next_payload["requires_double_confirm"] = len(refined_target_ids) > 20
+        next_payload["double_confirmed"] = False
+        await set_pending_ledger(
             user_id=user_id,
-            platform=user_platform,
             conversation_id=conversation_id,
-            tool_name="ledger_update",
-            args={
-                "user_id": user_id,
-                "ledger_id": ledger_id,
-                "amount": amount,
-                "category": category,
-                "item": item or "",
-            },
+            payload=next_payload,
         )
-        updated = _ledger_from_payload(_parse_json_object(updated_output))
-        if not updated:
-            return [f"未找到账单 #{ledger_id}，或它不属于你。"]
-        return [
-            f"已更新账单 #{updated.id}：{updated.item} {updated.amount} {updated.currency}，分类 {updated.category}，时间 {_fmt_dt(updated.transaction_date)}。"
-        ]
+        preview_text = await _render_preview_confirmation_with_llm(next_payload)
+        merged = f"已按“{refine_desc}”缩小范围。\n{preview_text}"
+        rendered = await _render_fixed_reply_with_llm(
+            fallback=merged,
+            style="preview_refine",
+            facts={"refine": refine_desc},
+            required_keywords=["缩小范围"],
+        )
+        return {**state, "responses": [rendered]}
 
-    if content.startswith("/ledger delete"):
-        m = re.match(r"^/ledger\s+delete\s+(.+)$", content)
-        if not m:
-            return ["用法：`/ledger delete <id|latest>`，例如 `/ledger delete 12`。"]
-        target = m.group(1).strip().lower().lstrip("#")
-        if target == "latest":
-            latest_output = await _invoke_ledger_tool(
+    if action == "pick_indexes" and candidate_rows:
+        raw_indexes = control.get("indexes")
+        if not isinstance(raw_indexes, list):
+            return await _resp("没有解析到可执行的样例序号，请重试。", style="hint")
+        picked_ids: list[int] = []
+        seen: set[int] = set()
+        for value in raw_indexes:
+            try:
+                idx = int(value)
+            except Exception:
+                continue
+            if 1 <= idx <= len(candidate_rows):
+                lid = int(candidate_rows[idx - 1].get("id") or 0)
+                if lid > 0 and lid in target_ids and lid not in seen:
+                    seen.add(lid)
+                    picked_ids.append(lid)
+        if not picked_ids:
+            return await _resp("没有解析到可执行的样例序号，请重试。", style="hint")
+        response = await _execute_preview_commit(
+            operation=operation,
+            user_id=user_id,
+            user_platform=user_platform,
+            conversation_id=conversation_id,
+            ledger_ids=picked_ids,
+            update_fields=dict(pending.get("update_fields") or {}),
+        )
+        response = await _render_fixed_reply_with_llm(
+            fallback=response,
+            style="commit_result",
+            facts={"operation": operation},
+        )
+        await clear_pending_ledger(user_id=user_id, conversation_id=conversation_id)
+        return {**state, "responses": [response]}
+
+    if action == "confirm":
+        requires_double = bool(pending.get("requires_double_confirm"))
+        double_confirmed = bool(pending.get("double_confirmed"))
+        if requires_double and not double_confirmed:
+            next_payload = dict(pending)
+            next_payload["double_confirmed"] = True
+            await set_pending_ledger(
                 user_id=user_id,
-                platform=user_platform,
                 conversation_id=conversation_id,
-                tool_name="ledger_get_latest",
-                args={"user_id": user_id},
+                payload=next_payload,
             )
-            latest = _ledger_from_payload(_parse_json_object(latest_output))
-            if not latest:
-                return ["暂无可删除的账单。"]
-            deleted_output = await _invoke_ledger_tool(
-                user_id=user_id,
-                platform=user_platform,
-                conversation_id=conversation_id,
-                tool_name="ledger_delete",
-                args={"user_id": user_id, "ledger_id": int(latest.id or 0)},
+            count = int(dict(next_payload.get("summary") or {}).get("count") or len(target_ids))
+            verb = "删除" if operation == "delete" else "修改"
+            tip = f"该操作将影响 {count} 条账单。请再次回复“确认{verb}”以继续，或回复“取消”。"
+            rendered_tip = await _render_fixed_reply_with_llm(
+                fallback=tip,
+                style="double_confirm",
+                facts={"count": count, "operation": operation},
+                required_keywords=[f"确认{verb}", "取消"],
             )
-            deleted = _ledger_from_payload(_parse_json_object(deleted_output))
-            if not deleted:
-                return ["删除失败，请稍后重试。"]
-            return [
-                f"已删除最近一笔：#{deleted.id} {deleted.item} {deleted.amount} {deleted.currency}，时间 {_fmt_dt(deleted.transaction_date)}。"
-            ]
-        if not target.isdigit():
-            return ["用法：`/ledger delete <id|latest>`，例如 `/ledger delete 12`。"]
-        ledger_id = int(target)
-        deleted_output = await _invoke_ledger_tool(
+            return {
+                **state,
+                "responses": [rendered_tip],
+            }
+        response = await _execute_preview_commit(
+            operation=operation,
             user_id=user_id,
-            platform=user_platform,
+            user_platform=user_platform,
             conversation_id=conversation_id,
-            tool_name="ledger_delete",
-            args={"user_id": user_id, "ledger_id": ledger_id},
+            ledger_ids=target_ids,
+            update_fields=dict(pending.get("update_fields") or {}),
         )
-        deleted = _ledger_from_payload(_parse_json_object(deleted_output))
-        if not deleted:
-            return [f"未找到账单 #{ledger_id}，或它不属于你。"]
-        return [
-            f"已删除账单 #{deleted.id}：{deleted.item} {deleted.amount} {deleted.currency}，时间 {_fmt_dt(deleted.transaction_date)}。"
-        ]
+        response = await _render_fixed_reply_with_llm(
+            fallback=response,
+            style="commit_result",
+            facts={"operation": operation},
+        )
+        await clear_pending_ledger(user_id=user_id, conversation_id=conversation_id)
+        return {**state, "responses": [response]}
 
-    return ["可用命令：`/ledger list`、`/ledger update <id> <金额> [分类] [摘要]`、`/ledger delete <id|latest>`。"]
-
+    return {
+        **state,
+        "responses": [await _render_preview_confirmation_with_llm(pending)],
+    }
 
 async def ledger_manager_node(state: GraphState) -> GraphState:
     message = state["message"]
     session = get_session()
     user = await session.get(User, state["user_id"])
     if not user:
-        return {**state, "responses": ["未找到用户信息。"]}
+        rendered = await _render_fixed_reply_with_llm(
+            fallback="未找到用户信息。",
+            style="error",
+            facts={},
+        )
+        return {**state, "responses": [rendered]}
+
     user_id = user.id
     user_platform = user.platform
     conversation_id = int(state.get("conversation_id") or 0)
-
     content = (message.content or "").strip()
     context_text = render_conversation_context(state)
+    prefetched_parsed_intent: dict[str, Any] | None = None
+
+    async def _resp(
+        text: str,
+        *,
+        style: str = "status",
+        facts: dict[str, Any] | None = None,
+        required_keywords: list[str] | None = None,
+    ) -> GraphState:
+        rendered = await _render_fixed_reply_with_llm(
+            fallback=text,
+            style=style,
+            facts=facts or {},
+            required_keywords=required_keywords or [],
+        )
+        return {**state, "responses": [rendered]}
 
     if not message.image_urls and conversation_id > 0:
         pending = await get_pending_ledger(user_id=user_id, conversation_id=conversation_id)
         if pending:
-            candidates = _pending_amount_candidates(pending)
-            amount: float | None = None
-            llm_category: str | None = None
-            llm_item: str | None = None
-
-            # LLM-first: use semantic understanding for pending confirmation.
-            try:
-                parsed = await _understand_pending_selection(
-                    content,
-                    candidates,
-                    pending,
-                    context_text,
-                )
-            except Exception:
-                parsed = {}
-
-            mode = str(parsed.get("mode") or "").strip().lower()
-            if mode == "cancel":
-                await clear_pending_ledger(user_id=user_id, conversation_id=conversation_id)
-                return {**state, "responses": ["已取消这张图片的记账。"]}
-            if mode == "indexes":
-                amount = _pick_amount_from_indexes(parsed.get("indexes"), candidates)
-            elif mode == "amount":
+            pending_type = str(pending.get("pending_type") or "receipt_amount").strip().lower()
+            if pending_type == "preview_commit":
                 try:
-                    parsed_amount = float(parsed.get("amount"))
-                    if parsed_amount > 0:
-                        amount = parsed_amount
+                    control = await _understand_preview_control_message(
+                        content=content,
+                        conversation_context=context_text,
+                        pending=pending,
+                    )
                 except Exception:
-                    amount = None
+                    control = {}
+                control_action = str(control.get("action") or "").strip().lower()
+                pending_hint = _build_pending_preview_hint(pending)
+                if control_action == "new_request":
+                    try:
+                        maybe_new = await _understand_ledger_message(
+                            content,
+                            context_text,
+                            pending_preview_hint=pending_hint,
+                        )
+                    except Exception:
+                        maybe_new = {}
+                    maybe_intent = str(maybe_new.get("intent") or "").strip().lower()
+                    if _is_actionable_new_intent(maybe_intent):
+                        await clear_pending_ledger(user_id=user_id, conversation_id=conversation_id)
+                        prefetched_parsed_intent = maybe_new
+                    else:
+                        return await _handle_pending_preview_commit(
+                            state=state,
+                            content=content,
+                            pending=pending,
+                            user_id=user_id,
+                            user_platform=user_platform,
+                            conversation_id=conversation_id,
+                            conversation_context=context_text,
+                            parsed_control=control,
+                        )
+                else:
+                    return await _handle_pending_preview_commit(
+                        state=state,
+                        content=content,
+                        pending=pending,
+                        user_id=user_id,
+                        user_platform=user_platform,
+                        conversation_id=conversation_id,
+                        conversation_context=context_text,
+                        parsed_control=control,
+                    )
 
-            llm_category_raw = str(parsed.get("category") or "").strip()
-            if llm_category_raw:
-                llm_category = _normalize_category(llm_category_raw)
-            llm_item = _clean_item(str(parsed.get("item") or ""))
+            if pending_type == "preview_commit":
+                # Interrupted by a new actionable request; continue with normal intent flow.
+                continue_pending_amount = False
+            else:
+                continue_pending_amount = True
 
-            if amount is None:
-                # Minimal deterministic fallback: only accept a plain numeric reply.
-                amount = _extract_plain_amount(content)
+            if continue_pending_amount:
+                candidates = _pending_amount_candidates(pending)
+                amount: float | None = None
+                llm_category: str | None = None
+                llm_item: str | None = None
+                try:
+                    parsed = await _understand_pending_selection(
+                        content,
+                        candidates,
+                        pending,
+                        context_text,
+                    )
+                except Exception:
+                    parsed = {}
 
-            if amount is None:
-                if candidates:
-                    return {**state, "responses": [_render_pending_candidates(candidates)]}
-                return {
-                    **state,
-                    "responses": ["请直接回复要记账的金额和分类，例如：`28 餐饮 午饭`。"],
-                }
+                mode = str(parsed.get("mode") or "").strip().lower()
+                if mode == "cancel":
+                    await clear_pending_ledger(user_id=user_id, conversation_id=conversation_id)
+                    return await _resp("已取消本次图片记账。", style="status")
+                if mode == "indexes":
+                    amount = _pick_amount_from_indexes(parsed.get("indexes"), candidates)
+                elif mode == "amount":
+                    try:
+                        parsed_amount = float(parsed.get("amount"))
+                        if parsed_amount > 0:
+                            amount = parsed_amount
+                    except Exception:
+                        amount = None
 
-            category = llm_category or _normalize_category(str(pending.get("category") or "其他"))
-            item = llm_item
-            if not item:
-                item = str(pending.get("item") or pending.get("merchant") or "消费")
-            if len(item) > 40:
-                item = item[:40]
+                llm_category_raw = str(parsed.get("category") or "").strip()
+                if llm_category_raw:
+                    llm_category = _normalize_category(llm_category_raw)
+                llm_item = _clean_item(str(parsed.get("item") or ""))
 
-            ledger = await _insert_ledger_via_tool(
-                user_id=user_id,
-                platform=user_platform,
-                conversation_id=conversation_id,
-                amount=float(amount),
-                category=category,
-                item=item,
-                transaction_date=datetime.utcnow(),
-                image_url=str(pending.get("image_url") or ""),
-            )
-            if ledger is None:
-                return {**state, "responses": ["记账失败，请稍后重试。"]}
-            await clear_pending_ledger(user_id=user_id, conversation_id=conversation_id)
-            return {
-                **state,
-                "responses": [
-                    f"已记账：{ledger.item} {ledger.amount:.2f} {ledger.currency}，分类 {ledger.category}，时间 {_fmt_dt(ledger.transaction_date)}。"
-                ],
-            }
+                if amount is None:
+                    amount = _extract_plain_amount(content)
 
-    if message.image_urls:
-        image_inputs = [item for item in message.image_urls if isinstance(item, str) and item.strip()][:MAX_IMAGES]
-        if len(image_inputs) > 1:
-            parsed_images: list[dict] = []
-            for idx, image_ref in enumerate(image_inputs, start=1):
-                result = await _tracked_analyze_receipt(
-                    image_ref,
+                if amount is None:
+                    if candidates:
+                        candidate_text = await _render_pending_candidates_with_llm(candidates)
+                        return {**state, "responses": [candidate_text]}
+                    return await _resp("请直接回复要记账的金额和分类，例如：`28 餐饮 午饭`。", style="hint")
+
+                category = llm_category or _normalize_category(str(pending.get("category") or "其他"))
+                item = llm_item or str(pending.get("item") or pending.get("merchant") or "消费")
+                if len(item) > 40:
+                    item = item[:40]
+
+                ledger = await _insert_ledger_via_tool(
                     user_id=user_id,
                     platform=user_platform,
                     conversation_id=conversation_id,
+                    amount=float(amount),
+                    category=category,
+                    item=item,
+                    transaction_date=datetime.utcnow(),
+                    image_url=str(pending.get("image_url") or ""),
                 )
-                parsed = _parse_vision_result(result)
-                parsed_images.append({**parsed, "index": idx, "image_url": image_ref})
-
-            created_rows: list[tuple[dict, object]] = []
-            unresolved_rows: list[dict] = []
-            for parsed in parsed_images:
-                amount = parsed.get("amount")
-                confidence = float(parsed.get("confidence") or 0.0)
-                threshold = float(parsed.get("threshold") or 1.0)
-                if amount is not None and float(amount) > 0 and confidence >= threshold:
-                    ledger = await _insert_ledger_via_tool(
-                        user_id=user_id,
-                        platform=user_platform,
-                        conversation_id=conversation_id,
-                        amount=float(amount),
-                        category=str(parsed.get("category") or "其他"),
-                        item=str(parsed.get("item") or "消费"),
-                        transaction_date=datetime.utcnow(),
-                        image_url=str(parsed.get("image_url") or ""),
-                    )
-                    if ledger is not None:
-                        created_rows.append((parsed, ledger))
-                else:
-                    unresolved_rows.append(parsed)
-
-            lines: list[str] = []
-            if created_rows:
-                lines.append(f"已解析 {len(image_inputs)} 张图片，并自动记账 {len(created_rows)} 笔：")
-                for parsed, ledger in created_rows[:6]:
-                    source_hint = "（支付截图识别）" if parsed.get("image_type") == "payment_screenshot" else ""
-                    lines.append(
-                        f"- 图{parsed.get('index')} {source_hint}：#{ledger.id} {ledger.item} {ledger.amount:.2f} {ledger.currency}，分类 {ledger.category}，时间 {_fmt_dt(ledger.transaction_date)}"
-                    )
-                if len(created_rows) > 6:
-                    lines.append(f"- ... 其余 {len(created_rows) - 6} 笔")
-
-            if unresolved_rows:
-                lines.append(f"{len(unresolved_rows)} 张图片仍需确认金额：")
-                for parsed in unresolved_rows[:4]:
-                    candidates = list(parsed.get("candidate_values") or [])[:3]
-                    if candidates:
-                        values_text = "、".join([f"{value:.2f}" for value in candidates])
-                        lines.append(f"- 图{parsed.get('index')} 候选金额：{values_text} 元")
-                    else:
-                        lines.append(f"- 图{parsed.get('index')} 未识别到有效金额")
-                lines.append("可逐张重发更清晰图片，或直接告诉我金额与分类。")
-
-            if lines:
-                return {**state, "responses": ["\n".join(lines)]}
-
-        result = await _tracked_analyze_receipt(
-            image_inputs[0] if image_inputs else message.image_urls[0],
-            user_id=user_id,
-            platform=user_platform,
-            conversation_id=conversation_id,
-        )
-        parsed_single = _parse_vision_result(result)
-        image_type = str(parsed_single.get("image_type") or "other")
-        confidence = float(parsed_single.get("confidence") or 0.0)
-        amount = parsed_single.get("amount")
-        candidate_values = list(parsed_single.get("candidate_values") or [])
-        threshold = float(parsed_single.get("threshold") or 1.0)
-
-        if len(candidate_values) > 1 and conversation_id > 0:
-            await set_pending_ledger(
-                user_id=user_id,
-                conversation_id=conversation_id,
-                payload={
-                    "image_url": image_inputs[0] if image_inputs else message.image_urls[0],
-                    "image_type": image_type,
-                    "amount_candidates": candidate_values,
-                    "category": str(parsed_single.get("category") or "其他"),
-                    "item": str(parsed_single.get("item") or "消费"),
-                    "merchant": str(parsed_single.get("merchant") or ""),
-                    "confidence": confidence,
-                },
-            )
-            return {
-                **state,
-                "responses": [_render_pending_candidates(candidate_values)],
-            }
-
-        if amount is not None and float(amount) > 0 and confidence >= threshold:
-            if conversation_id > 0:
+                if ledger is None:
+                    return await _resp("记账失败，请稍后重试。", style="error")
                 await clear_pending_ledger(user_id=user_id, conversation_id=conversation_id)
-            ledger = await _insert_ledger_via_tool(
+                done_text = await _render_fixed_reply_with_llm(
+                    fallback=(
+                        f"已记账：{ledger.item} {ledger.amount:.2f} {ledger.currency}，分类 {ledger.category}，时间 {_fmt_dt(ledger.transaction_date)}。"
+                    ),
+                    style="insert_result",
+                    facts={
+                        "item": ledger.item,
+                        "amount": float(ledger.amount),
+                        "currency": ledger.currency,
+                        "category": ledger.category,
+                        "time": _fmt_dt(ledger.transaction_date),
+                    },
+                )
+                return {
+                    **state,
+                    "responses": [done_text],
+                }
+
+    if message.image_urls:
+        image_inputs = [item for item in message.image_urls if isinstance(item, str) and item.strip()][:MAX_IMAGES]
+        if image_inputs:
+            result = await _tracked_analyze_receipt(
+                image_inputs[0],
                 user_id=user_id,
                 platform=user_platform,
                 conversation_id=conversation_id,
-                amount=float(amount),
-                category=str(parsed_single.get("category") or "其他"),
-                item=str(parsed_single.get("item") or "消费"),
-                transaction_date=datetime.utcnow(),
-                image_url=image_inputs[0] if image_inputs else message.image_urls[0],
             )
-            if ledger is None:
-                return {**state, "responses": ["记账失败，请稍后重试。"]}
-            source_hint = "（支付截图识别）" if image_type == "payment_screenshot" else ""
-            return {
-                **state,
-                "responses": [
-                    f"已记账{source_hint}：{ledger.item} {ledger.amount} {ledger.currency}，分类 {ledger.category}，时间 {_fmt_dt(ledger.transaction_date)}。"
-                ],
-            }
+            parsed_single = _parse_vision_result(result)
+            image_type = str(parsed_single.get("image_type") or "other")
+            confidence = float(parsed_single.get("confidence") or 0.0)
+            amount = parsed_single.get("amount")
+            candidate_values = list(parsed_single.get("candidate_values") or [])
+            threshold = float(parsed_single.get("threshold") or 1.0)
 
-        candidate_values = candidate_values[:3]
-        if candidate_values:
-            if conversation_id > 0:
+            if amount is not None and float(amount) > 0 and confidence >= threshold:
+                if conversation_id > 0:
+                    await clear_pending_ledger(user_id=user_id, conversation_id=conversation_id)
+                ledger = await _insert_ledger_via_tool(
+                    user_id=user_id,
+                    platform=user_platform,
+                    conversation_id=conversation_id,
+                    amount=float(amount),
+                    category=str(parsed_single.get("category") or "其他"),
+                    item=str(parsed_single.get("item") or "消费"),
+                    transaction_date=datetime.utcnow(),
+                    image_url=image_inputs[0],
+                )
+                if ledger is None:
+                    return await _resp("记账失败，请稍后重试。", style="error")
+                source_hint = "（支付截图识别）" if image_type == "payment_screenshot" else ""
+                done_text = await _render_fixed_reply_with_llm(
+                    fallback=(
+                        f"已记账{source_hint}：{ledger.item} {ledger.amount:.2f} {ledger.currency}，分类 {ledger.category}，时间 {_fmt_dt(ledger.transaction_date)}。"
+                    ),
+                    style="insert_result",
+                    facts={
+                        "source_hint": source_hint,
+                        "item": ledger.item,
+                        "amount": float(ledger.amount),
+                        "currency": ledger.currency,
+                        "category": ledger.category,
+                        "time": _fmt_dt(ledger.transaction_date),
+                    },
+                )
+                return {
+                    **state,
+                    "responses": [done_text],
+                }
+
+            if candidate_values and conversation_id > 0:
                 await set_pending_ledger(
                     user_id=user_id,
                     conversation_id=conversation_id,
                     payload={
-                        "image_url": image_inputs[0] if image_inputs else message.image_urls[0],
+                        "pending_type": "receipt_amount",
+                        "image_url": image_inputs[0],
                         "image_type": image_type,
-                        "amount_candidates": candidate_values,
+                        "amount_candidates": candidate_values[:5],
                         "category": str(parsed_single.get("category") or "其他"),
                         "item": str(parsed_single.get("item") or "消费"),
                         "merchant": str(parsed_single.get("merchant") or ""),
                         "confidence": confidence,
                     },
                 )
-            values_text = "、".join([f"{v:.2f}" for v in candidate_values])
+                candidate_text = await _render_pending_candidates_with_llm(candidate_values[:5])
+                return {**state, "responses": [candidate_text]}
+
             return {
                 **state,
-                "responses": [
-                    f"我识别到这张图可能的金额有：{values_text} 元。请直接回复准确金额和分类，例如：`{candidate_values[0]:.2f} 餐饮 晚饭`。"
-                ],
+                "responses": [await _render_fixed_reply_with_llm(
+                    fallback="我没能准确识别这张图片，请告诉我金额和分类。",
+                    style="hint",
+                    facts={},
+                )],
             }
-        return {
-            **state,
-            "responses": ["我没能准确识别这张图片（可能是支付截图或小票信息不完整），请告诉我金额和分类。"],
-        }
 
-    # LLM-first: understand natural-language ledger intent first.
-    parsed: dict = {}
-    try:
-        parsed = await _understand_ledger_message(content, context_text)
-    except Exception:
-        parsed = {}
+    parsed: dict = dict(prefetched_parsed_intent or {})
+    if not parsed:
+        try:
+            parsed = await _understand_ledger_message(content, context_text)
+        except Exception:
+            parsed = {}
 
     intent = str(parsed.get("intent") or "").strip().lower()
     allowed_intents = {
@@ -1498,14 +1786,32 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
     }
     if intent not in allowed_intents:
         intent = "unknown"
+    try:
+        handoff = await _decide_handoff_to_chat_manager(
+            content=content,
+            conversation_context=context_text,
+            pending_preview_hint="",
+        )
+    except Exception:
+        handoff = {}
+    handoff_conf = float(handoff.get("confidence") or 0.0)
+    if bool(handoff.get("handoff")):
+        extra = dict(state.get("extra") or {})
+        extra["ledger_handoff"] = {
+            "target": "chat_manager",
+            "confidence": handoff_conf,
+            "at": datetime.utcnow().isoformat(),
+        }
+        return {**state, "intent": "chat_manager", "extra": extra}
 
     async def _resolve_query_rows() -> tuple[list[Ledger], str, str, str | None]:
         scope = str(parsed.get("query_scope") or "").strip().lower()
+        hint_scope = _scope_hint_from_content(content)
+        if hint_scope:
+            scope = hint_scope
         query_date = str(parsed.get("query_date") or "").strip() or None
         llm_window = _resolve_ledger_window_from_fields(scope, query_date)
-        category_hint = _normalize_category(str(parsed.get("category") or ""))
-        if category_hint == "其他":
-            category_hint = None
+        category_hint = _resolve_query_category_hint(content, str(parsed.get("category") or ""))
         if llm_window:
             start_at, end_at, label = llm_window
             rows = await _query_ledger_rows(
@@ -1530,6 +1836,14 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
         return rows, "最近", (scope or "recent"), category_hint
 
     async def answer_ledger_query(rows: list[Ledger], label: str, category_hint: str | None) -> str:
+        metric_reply = _render_ledger_metric_answer(
+            content=content,
+            label=label,
+            category=category_hint,
+            rows=rows,
+        )
+        if metric_reply:
+            return metric_reply
         try:
             llm_text = await _answer_ledger_with_llm(
                 content=content,
@@ -1539,6 +1853,9 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
                 rows=rows,
             )
             if llm_text:
+                if rows and re.search(r"(无记录|暂无|没有.*记录|未找到)", llm_text):
+                    # Guard against occasional LLM false negatives when rows are present.
+                    return _render_ledger_fallback(rows, label, category_hint)
                 return llm_text
         except Exception:
             pass
@@ -1567,8 +1884,6 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
         if category == "其他":
             category = _normalize_category(content)
     elif category == "其他":
-        # For correction/delete/query flows, never derive category from full sentence.
-        # This avoids accidental category overwrite such as "不对是45" -> category.
         category = ""
 
     target_item = _clean_item(str(parsed.get("target_item") or ""))
@@ -1578,12 +1893,38 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
         if not target_item:
             target_item = item
     else:
-        # For correction/delete flows, do not derive replacement item from whole sentence.
-        # Keep item empty unless the model explicitly extracted a new item field.
         if not target_item:
             target_item = parsed_item or _clean_item(content)
-    if intent.startswith("correct_") and item and target_item and item == target_item:
-        item = ""
+    if intent.startswith("correct_"):
+        try:
+            rewrite = await _extract_update_rewrite_fields(content, context_text)
+        except Exception:
+            rewrite = {}
+        rewrite_conf = float(rewrite.get("confidence") or 0.0)
+        if rewrite_conf >= 0.55:
+            rewrite_target = _clean_item(str(rewrite.get("target_item") or ""))
+            rewrite_item = _clean_item(str(rewrite.get("item") or ""))
+            if rewrite_target:
+                target_item = rewrite_target
+            if rewrite_item:
+                item = rewrite_item
+            rewrite_category = str(rewrite.get("category") or "").strip()
+            if rewrite_category:
+                normalized_rewrite_category = _normalize_category(rewrite_category)
+                if normalized_rewrite_category and normalized_rewrite_category != _normalize_category(""):
+                    category = normalized_rewrite_category
+            rewrite_amount_explicit = bool(rewrite.get("amount_explicit"))
+            if rewrite_amount_explicit:
+                rewrite_amount_raw = rewrite.get("amount")
+                try:
+                    rewrite_amount = float(rewrite_amount_raw) if rewrite_amount_raw is not None else None
+                except Exception:
+                    rewrite_amount = None
+                amount = rewrite_amount
+            else:
+                amount = None
+        if item and target_item and item == target_item:
+            item = ""
 
     reference_mode = str(parsed.get("reference_mode") or "auto").strip().lower()
     if reference_mode not in {"by_id", "by_name", "by_scope", "latest", "last_result_set", "auto"}:
@@ -1593,7 +1934,6 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
         selection_mode = "auto"
 
     has_named_target = bool(target_item) and not _is_generic_target_item(target_item)
-    explicit_multi = _has_explicit_multi_selector(content, target_item)
     if intent == "correct_latest" and has_named_target:
         intent = "correct_by_name"
     elif intent == "delete_latest" and has_named_target:
@@ -1602,121 +1942,10 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
     if intent in {"correct_by_name", "delete_by_name"}:
         if reference_mode in {"auto", "latest"}:
             reference_mode = "by_name"
-        if selection_mode in {"auto", "all", "subset"} and not explicit_multi:
-            selection_mode = "single"
-
-    async def _resolve_operation_ledgers(operation: str) -> tuple[list[Ledger], str]:
-        # 1) explicit id(s)
-        if target_ids and (reference_mode in {"by_id", "auto"} or intent in {"delete_by_id", "correct_by_id"}):
-            rows = await _query_ledgers_by_ids(
-                user_id,
-                target_ids,
-                platform=user_platform,
-                conversation_id=conversation_id,
-            )
-            return rows, "by_id"
-
-        # 2) previous result set
-        if reference_mode == "last_result_set":
-            last_ids = _read_last_ledger_ids_from_state(state)
-            rows = await _query_ledgers_by_ids(
-                user_id,
-                last_ids,
-                platform=user_platform,
-                conversation_id=conversation_id,
-            )
-            return rows, "last_result_set"
-
-        # 3) scope based
-        if intent in {"delete_by_scope", "correct_by_scope"} or reference_mode == "by_scope":
-            scope = str(parsed.get("query_scope") or "").strip().lower()
-            query_date = str(parsed.get("query_date") or "").strip() or None
-            category_hint = _normalize_category(str(parsed.get("category") or ""))
-            if category_hint == "其他":
-                category_hint = None
-            llm_window = _resolve_ledger_window_from_fields(scope, query_date)
-            if llm_window:
-                start_at, end_at, _ = llm_window
-                rows = await _query_ledger_rows(
-                    user_id,
-                    platform=user_platform,
-                    conversation_id=conversation_id,
-                    start_at=start_at,
-                    end_at=end_at,
-                    category=category_hint,
-                    limit=300,
-                )
-                return rows, "by_scope"
-            # Fallback to last query if scope parse failed.
-            last_ids = _read_last_ledger_ids_from_state(state)
-            rows = await _query_ledgers_by_ids(
-                user_id,
-                last_ids,
-                platform=user_platform,
-                conversation_id=conversation_id,
-            )
-            return rows, "last_result_set"
-
-        # 4) latest
-        if intent in {"delete_latest", "correct_latest"} or reference_mode == "latest":
-            latest_output = await _invoke_ledger_tool(
-                user_id=user_id,
-                platform=user_platform,
-                conversation_id=conversation_id,
-                tool_name="ledger_get_latest",
-                args={"user_id": user_id},
-            )
-            latest = _ledger_from_payload(_parse_json_object(latest_output))
-            return ([latest] if latest else []), "latest"
-
-        # 5) by name or semantic selection from candidates
-        candidates = await _query_ledger_rows(
-            user_id,
-            platform=user_platform,
-            conversation_id=conversation_id,
-            start_at=None,
-            end_at=None,
-            category=None,
-            limit=160,
-        )
-        candidates = _filter_ledger_candidates_by_target_item(candidates, target_item)
-        if not candidates:
-            return [], "by_name"
-        picked_ids = await _select_ledger_ids_by_llm(
-            content=content,
-            conversation_context=context_text,
-            target_item=target_item,
-            operation=operation,
-            selection_mode=selection_mode,
-            candidates=candidates,
-        )
-        if not picked_ids:
-            picked_ids = await _select_ledger_ids_from_context(
-                content=content,
-                conversation_context=context_text,
-                candidates=candidates,
-            )
-        if not picked_ids and selection_mode != "single":
-            # one-shot fallback for single selection
-            maybe_one = await _select_ledger_id_by_llm(
-                content=content,
-                conversation_context=context_text,
-                target_item=target_item,
-                operation=operation,
-                candidates=candidates,
-            )
-            if maybe_one:
-                picked_ids = [maybe_one]
-        rows = await _query_ledgers_by_ids(
-            user_id,
-            picked_ids,
-            platform=user_platform,
-            conversation_id=conversation_id,
-        )
-        return rows, "by_name"
+        if selection_mode == "auto":
+            selection_mode = "all"
 
     if intent == "unknown":
-        # LLM SQL fallback for long-tail ledger CRUD queries.
         try:
             sql_response = await _tracked_text2sql(
                 user_id=user_id,
@@ -1728,28 +1957,52 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
         except Exception:
             sql_response = None
         if sql_response:
-            return {**state, "responses": [sql_response]}
-
-        # Deterministic command fallback.
-        command_responses = await _handle_ledger_command(
-            content=content,
-            user_id=user_id,
-            user_platform=user_platform,
-            conversation_id=conversation_id,
-        )
-        if command_responses:
-            return {**state, "responses": command_responses}
+            rendered_sql = await _render_fixed_reply_with_llm(
+                fallback=sql_response,
+                style="sql_result",
+                facts={"raw": sql_response},
+            )
+            return {**state, "responses": [rendered_sql]}
 
         return {
             **state,
             "responses": [
-                "我没完全理解你的账单意图。可直接说：`记一笔 午饭30`、`删除账单#12`、`把账单#12改成28元`、`列出最近账单`。"
+                await _render_fixed_reply_with_llm(
+                    fallback="我没完全理解你的账单意图。可直接说：`记一笔 午饭30`、`删除账单#12`、`把账单#12改成28元`、`列出最近账单`。",
+                    style="hint",
+                    facts={},
+                )
             ],
         }
 
     if intent == "list":
-        rows, label, scope_key, category_hint = await _resolve_query_rows()
+        try:
+            sql_response = await _tracked_text2sql(
+                user_id=user_id,
+                message=content,
+                conversation_context=context_text,
+                platform=user_platform,
+                conversation_id=conversation_id,
+            )
+        except Exception:
+            sql_response = None
+        if sql_response:
+            rendered_sql = await _render_fixed_reply_with_llm(
+                fallback=sql_response,
+                style="sql_result",
+                facts={"raw": sql_response},
+            )
+            return {**state, "responses": [rendered_sql]}
+        try:
+            rows, label, scope_key, category_hint = await _resolve_query_rows()
+        except RuntimeError as exc:
+            return await _resp(f"账单查询失败：{str(exc)}。请稍后重试。", style="error")
         reply = await answer_ledger_query(rows, label, category_hint)
+        rendered_reply = await _render_fixed_reply_with_llm(
+            fallback=reply,
+            style="query_answer",
+            facts={"label": label, "category": category_hint or "", "count": len(rows)},
+        )
         next_state = _with_last_ledger_query(
             state,
             rows=rows,
@@ -1757,11 +2010,36 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
             scope=scope_key,
             category=category_hint,
         )
-        return {**next_state, "responses": [reply]}
+        return {**next_state, "responses": [rendered_reply]}
 
     if intent == "query":
-        rows, label, scope_key, category_hint = await _resolve_query_rows()
+        try:
+            sql_response = await _tracked_text2sql(
+                user_id=user_id,
+                message=content,
+                conversation_context=context_text,
+                platform=user_platform,
+                conversation_id=conversation_id,
+            )
+        except Exception:
+            sql_response = None
+        if sql_response:
+            rendered_sql = await _render_fixed_reply_with_llm(
+                fallback=sql_response,
+                style="sql_result",
+                facts={"raw": sql_response},
+            )
+            return {**state, "responses": [rendered_sql]}
+        try:
+            rows, label, scope_key, category_hint = await _resolve_query_rows()
+        except RuntimeError as exc:
+            return await _resp(f"账单查询失败：{str(exc)}。请稍后重试。", style="error")
         reply = await answer_ledger_query(rows, label, category_hint)
+        rendered_reply = await _render_fixed_reply_with_llm(
+            fallback=reply,
+            style="query_answer",
+            facts={"label": label, "category": category_hint or "", "count": len(rows)},
+        )
         next_state = _with_last_ledger_query(
             state,
             rows=rows,
@@ -1769,62 +2047,148 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
             scope=scope_key,
             category=category_hint,
         )
-        return {**next_state, "responses": [reply]}
+        return {**next_state, "responses": [rendered_reply]}
 
     if intent in {"delete_by_name", "delete_by_id", "delete_latest", "delete_by_scope"}:
-        target_rows, source = await _resolve_operation_ledgers("delete")
-        matched_count, deleted_rows = await _delete_ledgers_by_ids(
+        preview_data = await _tracked_text2sql_preview_write(
+            user_id=user_id,
+            message=content,
+            operation="delete",
+            update_fields={},
+            preview_hints={
+                "intent": intent,
+                "target_ids": target_ids,
+                "target_item": target_item,
+                "query_scope": str(parsed.get("query_scope") or ""),
+                "query_date": str(parsed.get("query_date") or ""),
+                "category": str(parsed.get("category") or ""),
+                "reference_mode": reference_mode,
+                "selection_mode": selection_mode,
+            },
+            conversation_context=context_text,
+            platform=user_platform,
+            conversation_id=conversation_id,
+        )
+        if not preview_data:
+            return await _resp("无法生成删除预览，请补充更明确的筛选条件。", style="hint")
+        if not bool(preview_data.get("ok", True)):
+            return await _resp(
+                f"删除预览失败：{str(preview_data.get('error') or 'unknown')}。请调整条件后重试。",
+                style="error",
+            )
+        target_ids = _parse_int_list(preview_data.get("target_ids"))
+        if not target_ids:
+            return await _resp("没有匹配到可删除的账单。", style="status")
+        if len(target_ids) > 200:
+            return await _resp(
+                f"本次命中 {len(target_ids)} 条，超过单次可确认上限 200。请先缩小范围后重试。",
+                style="hint",
+            )
+        preview_payload = _build_preview_pending_payload_from_text2sql(
+            operation="delete",
+            source="text2sql_preview",
+            preview_payload=preview_data,
+            update_fields={},
+        )
+        if conversation_id > 0:
+            await set_pending_ledger(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                payload=preview_payload,
+            )
+            preview_text = await _render_preview_confirmation_with_llm(preview_payload)
+            return {**state, "responses": [preview_text]}
+        response = await _execute_preview_commit(
+            operation="delete",
             user_id=user_id,
             user_platform=user_platform,
             conversation_id=conversation_id,
-            ledger_ids=[int(row.id or 0) for row in target_rows if int(row.id or 0) > 0],
+            ledger_ids=target_ids,
+            update_fields={},
         )
-        deleted_count = len(deleted_rows)
-        if matched_count == 0:
-            return {
-                **state,
-                "responses": ["我还不能定位要删除的账单。请补充账单名称、ID、范围，或先查询后说“删这几笔”。"],
-            }
-        preview = ""
-        if deleted_rows:
-            head = deleted_rows[0]
-            preview = f" 示例：#{head.id} {head.item} {head.amount:.2f} {head.currency}（{_fmt_dt(head.transaction_date)}）。"
-        return {
-            **state,
-            "responses": [f"已定位 {matched_count} 条（来源：{source}），成功删除 {deleted_count} 条。{preview}".strip()],
-        }
-
-    if amount is None:
-        return {**state, "responses": ["请告诉我金额，例如：今天晚饭 28 元。"]}
+        response = await _render_fixed_reply_with_llm(
+            fallback=response,
+            style="commit_result",
+            facts={"operation": "delete"},
+        )
+        return {**state, "responses": [response]}
 
     if intent in {"correct_by_name", "correct_by_id", "correct_latest", "correct_by_scope"}:
-        target_rows, source = await _resolve_operation_ledgers("correct")
-        if not target_rows:
-            return {
-                **state,
-                "responses": ["我还不能定位要更正的账单。请补充账单名称、ID、范围，或先查询后说“改这几笔”。"],
-            }
-        matched_count, updated_rows = await _update_ledgers_by_ids(
+        update_fields = {
+            "amount": amount,
+            "category": (category if category and category != "其他" else ""),
+            "item": (item or ""),
+        }
+        has_amount = update_fields["amount"] is not None
+        has_category = bool(update_fields["category"])
+        has_item = bool(update_fields["item"])
+        if not (has_amount or has_category or has_item):
+            return await _resp("请告诉我要修改成什么（金额/分类/摘要）。例如：把晚饭改成早饭。", style="hint")
+        preview_data = await _tracked_text2sql_preview_write(
+            user_id=user_id,
+            message=content,
+            operation="update",
+            update_fields=update_fields,
+            preview_hints={
+                "intent": intent,
+                "target_ids": target_ids,
+                "target_item": target_item,
+                "query_scope": str(parsed.get("query_scope") or ""),
+                "query_date": str(parsed.get("query_date") or ""),
+                "category": str(parsed.get("category") or ""),
+                "reference_mode": reference_mode,
+                "selection_mode": selection_mode,
+            },
+            conversation_context=context_text,
+            platform=user_platform,
+            conversation_id=conversation_id,
+        )
+        if not preview_data:
+            return await _resp("无法生成修改预览，请补充更明确的筛选条件。", style="hint")
+        if not bool(preview_data.get("ok", True)):
+            return await _resp(
+                f"修改预览失败：{str(preview_data.get('error') or 'unknown')}。请调整条件后重试。",
+                style="error",
+            )
+        target_ids = _parse_int_list(preview_data.get("target_ids"))
+        if not target_ids:
+            return await _resp("没有匹配到可修改的账单。", style="status")
+        if len(target_ids) > 200:
+            return await _resp(
+                f"本次命中 {len(target_ids)} 条，超过单次可确认上限 200。请先缩小范围后重试。",
+                style="hint",
+            )
+        preview_payload = _build_preview_pending_payload_from_text2sql(
+            operation="update",
+            source="text2sql_preview",
+            preview_payload=preview_data,
+            update_fields=update_fields,
+        )
+        if conversation_id > 0:
+            await set_pending_ledger(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                payload=preview_payload,
+            )
+            preview_text = await _render_preview_confirmation_with_llm(preview_payload)
+            return {**state, "responses": [preview_text]}
+        response = await _execute_preview_commit(
+            operation="update",
             user_id=user_id,
             user_platform=user_platform,
             conversation_id=conversation_id,
-            ledger_ids=[int(row.id or 0) for row in target_rows if int(row.id or 0) > 0],
-            amount=amount,
-            category=(category if category and category != "其他" else None),
-            item=(item or None),
+            ledger_ids=target_ids,
+            update_fields=dict(preview_payload.get("update_fields") or {}),
         )
-        updated_count = len(updated_rows)
-        preview = ""
-        if updated_rows:
-            head = updated_rows[0]
-            preview = (
-                f" 示例：#{head.id} {head.item} {head.amount:.2f} {head.currency}，"
-                f"分类 {head.category}（{_fmt_dt(head.transaction_date)}）。"
-            )
-        return {
-            **state,
-            "responses": [f"已定位 {matched_count} 条（来源：{source}），成功更正 {updated_count} 条。{preview}".strip()],
-        }
+        response = await _render_fixed_reply_with_llm(
+            fallback=response,
+            style="commit_result",
+            facts={"operation": "update"},
+        )
+        return {**state, "responses": [response]}
+
+    if amount is None:
+        return await _resp("请告诉我金额，例如：今天晚饭 28 元。", style="hint")
 
     ledger = await _insert_ledger_via_tool(
         user_id=user_id,
@@ -1836,10 +2200,24 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
         transaction_date=datetime.utcnow(),
     )
     if ledger is None:
-        return {**state, "responses": ["记账失败，请稍后重试。"]}
+        return await _resp("记账失败，请稍后重试。", style="error")
+    done_text = await _render_fixed_reply_with_llm(
+        fallback=f"已记账：{ledger.item} {ledger.amount} {ledger.currency}，分类 {ledger.category}，时间 {_fmt_dt(ledger.transaction_date)}。",
+        style="insert_result",
+        facts={
+            "item": ledger.item,
+            "amount": float(ledger.amount),
+            "currency": ledger.currency,
+            "category": ledger.category,
+            "time": _fmt_dt(ledger.transaction_date),
+        },
+    )
     return {
         **state,
-        "responses": [
-            f"已记账：{ledger.item} {ledger.amount} {ledger.currency}，分类 {ledger.category}，时间 {_fmt_dt(ledger.transaction_date)}。"
-        ],
+        "responses": [done_text],
     }
+
+
+
+
+

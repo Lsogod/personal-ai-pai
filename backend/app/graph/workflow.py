@@ -19,6 +19,13 @@ _redis_cm_sync = None
 _redis_cm_async = None
 
 
+def _route_after_ledger(state: GraphState) -> str:
+    routed = str(state.get("intent") or "").strip().lower()
+    if routed == "chat_manager":
+        return "chat_manager"
+    return "end"
+
+
 def _build_graph(checkpointer):
     graph = StateGraph(GraphState)
 
@@ -49,7 +56,14 @@ def _build_graph(checkpointer):
 
     graph.add_edge("onboarding", END)
     graph.add_edge("complex_task", END)
-    graph.add_edge("ledger_manager", END)
+    graph.add_conditional_edges(
+        "ledger_manager",
+        _route_after_ledger,
+        {
+            "chat_manager": "chat_manager",
+            "end": END,
+        },
+    )
     graph.add_edge("schedule_manager", END)
     graph.add_edge("chat_manager", END)
     graph.add_edge("skill_manager", END)

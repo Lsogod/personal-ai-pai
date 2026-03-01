@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from app.db.session import AsyncSessionLocal
 from app.services.llm import get_llm
@@ -21,6 +22,7 @@ _OTHER_TABLES = re.compile(
 )
 _USER_FILTER = re.compile(r"(?:\w+\.)?user_id\s*=\s*:user_id", re.IGNORECASE)
 _DELETE_ALL_HINT = re.compile(r"(所有|全部|清空|all)", re.IGNORECASE)
+_LIMIT_PATTERN = re.compile(r"\blimit\s+(\d+|:\w+)\b", re.IGNORECASE)
 
 
 class LedgerText2SQLPlan(BaseModel):
@@ -61,17 +63,31 @@ def _normalize_params(params: dict[str, Any]) -> dict[str, Any]:
 
 def _strip_user_filter(where_clause: str) -> str:
     compact = re.sub(r"\s+", " ", where_clause).strip()
-    compact = _USER_FILTER.sub("", compact)
+    compact = _USER_FILTER.sub("__USER_FILTER__", compact)
+    compact = re.sub(
+        r"(?i)\b(?:and|or)\b\s*__USER_FILTER__\s*\b(?:and|or)\b",
+        " AND ",
+        compact,
+    )
+    compact = re.sub(r"(?i)\b(?:and|or)\b\s*__USER_FILTER__", " ", compact)
+    compact = re.sub(r"(?i)__USER_FILTER__\s*\b(?:and|or)\b", " ", compact)
+    compact = compact.replace("__USER_FILTER__", " ")
     compact = re.sub(r"\(\s*\)", "", compact)
-    compact = re.sub(r"\b(and|or)\b", " ", compact, flags=re.IGNORECASE)
+    compact = re.sub(r"(?i)^(and|or)\b", " ", compact)
+    compact = re.sub(r"(?i)\b(and|or)$", " ", compact)
     compact = re.sub(r"\s+", " ", compact).strip()
     return compact
 
 
-def _is_safe_sql(sql: str, intent: str, user_message: str) -> tuple[bool, str]:
+def _strip_single_statement(sql: str) -> str:
     stmt = (sql or "").strip()
     if stmt.endswith(";") and stmt.count(";") == 1:
         stmt = stmt[:-1].strip()
+    return stmt
+
+
+def _is_safe_sql(sql: str, intent: str, user_message: str) -> tuple[bool, str]:
+    stmt = _strip_single_statement(sql)
     lower = stmt.lower()
     if not stmt:
         return False, "empty_sql"
@@ -117,26 +133,81 @@ def _is_safe_sql(sql: str, intent: str, user_message: str) -> tuple[bool, str]:
     return False, "unsupported_intent"
 
 
+def _is_safe_preview_sql(sql: str) -> tuple[bool, str]:
+    ok, reason = _is_safe_sql(sql, "select", "")
+    if not ok:
+        return False, reason
+    stmt = _strip_single_statement(sql)
+    lower = stmt.lower()
+    if " order by " not in lower:
+        return False, "preview_missing_order_by"
+    if not _LIMIT_PATTERN.search(lower):
+        return False, "preview_missing_limit"
+    select_match = re.search(r"(?is)^\s*select\s+(.*?)\s+from\s+", stmt)
+    if not select_match:
+        return False, "preview_missing_select_projection"
+    projection = select_match.group(1)
+    projection_l = projection.lower()
+    id_projected = bool(
+        re.search(r"\bas\s+id\b", projection_l)
+        or re.search(r"(^|,)\s*(?:\w+\.)?id\s*(,|$)", projection_l)
+    )
+    if not id_projected:
+        return False, "preview_missing_id_projection"
+    for required in ("amount", "category", "item"):
+        if required not in projection_l:
+            return False, f"preview_missing_{required}_projection"
+    return True, ""
+
+
+def _extract_where_clause(stmt: str) -> str:
+    sql = _strip_single_statement(stmt)
+    match = re.search(r"\bwhere\b", sql, flags=re.IGNORECASE)
+    if not match:
+        return ""
+    where_part = sql[match.end() :].strip()
+    where_part = re.split(
+        r"\b(returning|order\s+by|limit)\b",
+        where_part,
+        flags=re.IGNORECASE,
+        maxsplit=1,
+    )[0].strip()
+    return where_part
+
+
+def _build_fallback_preview_sql_from_write_sql(write_sql: str) -> str:
+    where_raw = _extract_where_clause(write_sql)
+    where_rest = _strip_user_filter(where_raw)
+    final_where = "user_id = :user_id"
+    if where_rest:
+        final_where = f"{final_where} AND ({where_rest})"
+    return (
+        "SELECT id, transaction_date AS occurred_at, amount, category, item, "
+        "'' AS merchant, '' AS account, currency "
+        f"FROM ledgers WHERE {final_where} "
+        "ORDER BY transaction_date DESC, id DESC LIMIT :preview_limit"
+    )
+
+
 async def _plan_sql(message: str, conversation_context: str = "") -> dict[str, Any]:
     llm = get_llm(node_name="ledger_text2sql")
     runnable = llm.with_structured_output(LedgerText2SQLPlan)
     now = datetime.utcnow().isoformat()
     system_prompt = (
-        "你是账单 Text-to-SQL 规划器（PostgreSQL）。"
-        "只允许操作 ledgers 表，不允许出现任何其他表。"
-        "请仅返回结构化字段: matched, intent, sql, params, summary, confidence。"
-        "intent 仅可为 select/insert/update/delete/unknown。"
-        "如果不是账单请求，matched=false，intent=unknown。"
-        "必须使用命名参数占位符（如 :user_id）。"
-        "select/update/delete 必须带 WHERE user_id = :user_id。"
-        "insert 必须显式写入 user_id。"
-        "若用户说“今天/本周/本月”，请将时间转成 start_at/end_at 参数（ISO 格式）。"
-        "对“删除今天所有订单”这类请求，输出 delete SQL，条件必须为 user_id + 时间范围。"
-        "当前时间(UTC): "
-        f"{now}。所有 today/week/month 必须基于这个时间计算。"
-        "插入账单时只可使用列: user_id, amount, currency, category, item, transaction_date, image_url。"
-        "不得使用不存在的列（例如 description）。"
-        "禁止输出 Markdown、解释文本、代码块。"
+        "You are a ledger Text-to-SQL planner for PostgreSQL.\n"
+        "Operate only on table ledgers.\n"
+        "Return structured fields only: matched, intent, sql, params, summary, confidence.\n"
+        "intent must be one of select/insert/update/delete/unknown.\n"
+        "If request is unrelated to ledgers, return matched=false and intent=unknown.\n"
+        "Use named parameters (for example :user_id).\n"
+        "For select/update/delete: SQL must include WHERE user_id = :user_id.\n"
+        "For insert: include user_id explicitly in inserted columns.\n"
+        "Allowed insert columns: user_id, amount, currency, category, item, transaction_date, image_url.\n"
+        "Do not use non-existing columns.\n"
+        "Keep category/item literals in user's original wording/language.\n"
+        "For row-level select results (not aggregate stats), include id, transaction_date, amount, category, item, currency "
+        "and prefer ORDER BY transaction_date DESC, id DESC with a reasonable LIMIT.\n"
+        f"Current UTC time: {now}. Relative time expressions must be based on this timestamp."
     )
     result = await runnable.ainvoke(
         [
@@ -144,8 +215,8 @@ async def _plan_sql(message: str, conversation_context: str = "") -> dict[str, A
             {
                 "role": "user",
                 "content": (
-                    f"会话上下文:\n{conversation_context or '（无）'}\n\n"
-                    f"用户输入:\n{message}"
+                    f"conversation_context:\n{conversation_context or '(none)'}\n\n"
+                    f"user_message:\n{message}"
                 ),
             },
         ]
@@ -155,6 +226,434 @@ async def _plan_sql(message: str, conversation_context: str = "") -> dict[str, A
     if isinstance(result, dict):
         return result
     return {}
+async def _plan_write_preview_sql(
+    *,
+    operation: str,
+    message: str,
+    preview_hints: dict[str, Any] | None = None,
+    conversation_context: str = "",
+) -> dict[str, Any]:
+    llm = get_llm(node_name="ledger_text2sql")
+    runnable = llm.with_structured_output(LedgerText2SQLPlan)
+    now = datetime.utcnow().isoformat()
+    system_prompt = (
+        "You are a ledger write-preview SQL planner for PostgreSQL.\n"
+        f"Current operation is: {operation} (only delete/update).\n"
+        "Return structured fields only: matched, intent, sql, params, summary, confidence.\n"
+        "intent must be select.\n"
+        "Generate SELECT SQL for previewing candidate rows before commit.\n"
+        "Safety rules:\n"
+        "1) Query only table ledgers.\n"
+        "2) Must contain WHERE user_id = :user_id.\n"
+        "3) Must contain ORDER BY transaction_date DESC, id DESC.\n"
+        "4) Must contain LIMIT :preview_limit.\n"
+        "5) Must return columns (or aliases): id, occurred_at, amount, category, item, merchant, account.\n"
+        "Use ledgers.id AS id and transaction_date AS occurred_at.\n"
+        "id must be the real ledger primary key value, not null and not a constant.\n"
+        "If merchant/account do not exist, return empty-string aliases.\n"
+        "Keep text literals in user's original wording/language.\n"
+        "For update requests, WHERE should target rows to change, not destination values.\n"
+        "For rewrite-style updates (A->B), WHERE should use source value A; do not filter by destination value B unless user explicitly asks.\n"
+        "For multi-source rewrite updates (A and B -> C), WHERE must target source set {A,B} with OR/IN semantics.\n"
+        "Never collapse multi-source rewrite into a single concatenated literal like 'A B'.\n"
+        "For multi-source rewrite, destination C must only appear in update_fields/SET side, not in preview WHERE.\n"
+        "Use preview_hints only for disambiguation when user text is ambiguous.\n"
+        "If preview_hints contains target_item, treat it as preferred source-side filter for update previews.\n"
+        "If preview_hints.target_item contains multiple source tokens (for example split by spaces, commas, '和', '或', '/'), "
+        "expand them as source alternatives in WHERE.\n"
+        f"Current UTC time: {now}."
+    )
+    result = await runnable.ainvoke(
+        [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": (
+                    f"conversation_context:\n{conversation_context or '(none)'}\n\n"
+                    f"preview_hints_json:\n{json.dumps(preview_hints or {}, ensure_ascii=False)}\n\n"
+                    f"user_message:\n{message}"
+                ),
+            },
+        ]
+    )
+    if isinstance(result, BaseModel):
+        return result.model_dump()
+    if isinstance(result, dict):
+        return result
+    return {}
+def _to_iso_text(value: Any) -> str:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).replace(tzinfo=None).isoformat(sep=" ", timespec="seconds")
+    return str(value or "").strip()
+
+
+def _extract_row_id(row: dict[str, Any]) -> int:
+    for key in ("id", "ledger_id", "bill_id"):
+        try:
+            value = int(row.get(key) or 0)
+        except Exception:
+            value = 0
+        if value > 0:
+            return value
+    return 0
+
+
+def _normalize_preview_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": _extract_row_id(row),
+        "datetime": _to_iso_text(row.get("occurred_at") or row.get("transaction_date") or row.get("created_at")),
+        "amount": round(float(row.get("amount") or 0), 2),
+        "currency": str(row.get("currency") or "CNY"),
+        "category": str(row.get("category") or ""),
+        "item": str(row.get("item") or ""),
+        "merchant": str(row.get("merchant") or ""),
+        "account": str(row.get("account") or ""),
+    }
+
+
+def _summarize_preview_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    total = round(sum(float(row.get("amount") or 0) for row in rows), 2)
+    times = [str(row.get("datetime") or "").strip() for row in rows if str(row.get("datetime") or "").strip()]
+    categories: dict[str, int] = {}
+    for row in rows:
+        key = str(row.get("category") or "其他").strip() or "其他"
+        categories[key] = categories.get(key, 0) + 1
+    top_categories = sorted(categories.items(), key=lambda x: x[1], reverse=True)[:5]
+    return {
+        "count": len(rows),
+        "total": total,
+        "time_start": times[-1] if times else "",
+        "time_end": times[0] if times else "",
+        "categories": top_categories,
+    }
+
+
+def _jsonable_params(params: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in (params or {}).items():
+        if isinstance(value, datetime):
+            result[key] = _to_iso_text(value)
+        else:
+            result[key] = value
+    return result
+
+
+def _normalize_preview_hints(
+    preview_hints: dict[str, Any] | None,
+    update_fields: dict[str, Any] | None,
+) -> dict[str, Any]:
+    hints: dict[str, Any] = {}
+    if isinstance(preview_hints, dict):
+        for key in (
+            "intent",
+            "target_item",
+            "query_scope",
+            "query_date",
+            "category",
+            "reference_mode",
+            "selection_mode",
+        ):
+            value = preview_hints.get(key)
+            if isinstance(value, str):
+                cleaned = value.strip()
+                if cleaned:
+                    hints[key] = cleaned
+        raw_ids = preview_hints.get("target_ids")
+        if isinstance(raw_ids, list):
+            ids: list[int] = []
+            for value in raw_ids:
+                try:
+                    ledger_id = int(value)
+                except Exception:
+                    continue
+                if ledger_id > 0:
+                    ids.append(ledger_id)
+            if ids:
+                hints["target_ids"] = ids[:200]
+    if isinstance(update_fields, dict):
+        updates: dict[str, Any] = {}
+        amount_raw = update_fields.get("amount")
+        try:
+            amount = float(amount_raw) if amount_raw is not None else None
+        except Exception:
+            amount = None
+        if amount is not None:
+            updates["amount"] = amount
+        category = str(update_fields.get("category") or "").strip()
+        if category:
+            updates["category"] = category
+        item = str(update_fields.get("item") or "").strip()
+        if item:
+            updates["item"] = item
+        if updates:
+            hints["update_fields"] = updates
+    return hints
+
+
+async def plan_write_preview_text2sql(
+    *,
+    user_id: int,
+    message: str,
+    operation: str,
+    conversation_context: str = "",
+    preview_limit: int = 50,
+    preview_hints: dict[str, Any] | None = None,
+    update_fields: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    op = (operation or "").strip().lower()
+    if op not in {"delete", "update"}:
+        return None
+
+    normalized_hints = _normalize_preview_hints(preview_hints, update_fields)
+    plan = await _plan_write_preview_sql(
+        operation=op,
+        message=message,
+        preview_hints=normalized_hints,
+        conversation_context=conversation_context,
+    )
+    if not plan or not plan.get("matched"):
+        return None
+
+    intent = str(plan.get("intent") or "").strip().lower()
+    if intent != "select":
+        return None
+    confidence = float(plan.get("confidence") or 0.0)
+    if confidence < 0.60:
+        return None
+
+    sql = _strip_single_statement(str(plan.get("sql") or ""))
+    ok, reason = _is_safe_preview_sql(sql)
+    if not ok:
+        sql = ""
+
+    params = _normalize_params(dict(plan.get("params") or {}))
+    params["user_id"] = user_id
+    params["preview_limit"] = max(1, min(50, int(preview_limit or 50)))
+    params.setdefault("now_utc", datetime.utcnow())
+
+    stmt = text(sql) if sql else None
+    async with AsyncSessionLocal() as db:
+        try:
+            rows: list[dict[str, Any]] = []
+            if stmt is not None:
+                result = await db.execute(stmt, params)
+                rows = [dict(item) for item in result.mappings().all()]
+            else:
+                raise RuntimeError("invalid_preview_sql")
+        except Exception as exc:
+            await db.rollback()
+            write_plan = await _plan_sql(message, conversation_context)
+            write_intent = str(write_plan.get("intent") or "").strip().lower()
+            write_sql = _strip_single_statement(str(write_plan.get("sql") or ""))
+            write_ok, _ = _is_safe_sql(write_sql, write_intent, message)
+            if not write_ok or write_intent not in {"delete", "update"}:
+                return {
+                    "ok": False,
+                    "error": "preview_execute_failed",
+                    "plan_intent": write_intent,
+                    "plan_sql": write_sql[:500],
+                    "detail": str(exc)[:300],
+                    "operation": op,
+                }
+            if op == "delete" and write_intent != "delete":
+                return {"ok": False, "error": "intent_mismatch", "operation": op}
+            if op == "update" and write_intent != "update":
+                return {"ok": False, "error": "intent_mismatch", "operation": op}
+
+            sql = _build_fallback_preview_sql_from_write_sql(write_sql)
+            ok2, reason2 = _is_safe_preview_sql(sql)
+            if not ok2:
+                return {
+                    "ok": False,
+                    "error": f"fallback_preview_blocked:{reason2}",
+                    "operation": op,
+                }
+            params = _normalize_params(dict(write_plan.get("params") or {}))
+            params["user_id"] = user_id
+            params["preview_limit"] = max(1, min(50, int(preview_limit or 50)))
+            params.setdefault("now_utc", datetime.utcnow())
+            try:
+                result = await db.execute(text(sql), params)
+                rows = [dict(item) for item in result.mappings().all()]
+            except Exception as exc2:
+                return {
+                    "ok": False,
+                    "error": "preview_execute_failed",
+                    "plan_intent": write_intent,
+                    "plan_sql": write_sql[:500],
+                    "preview_sql": sql[:500],
+                    "detail": str(exc2)[:300],
+                    "operation": op,
+                }
+
+    candidate_rows = [_normalize_preview_row(row) for row in rows[:50]]
+    target_ids = [int(row.get("id") or 0) for row in candidate_rows if int(row.get("id") or 0) > 0][:200]
+    if candidate_rows and not target_ids:
+        write_plan = await _plan_sql(message, conversation_context)
+        write_intent = str(write_plan.get("intent") or "").strip().lower()
+        write_sql = _strip_single_statement(str(write_plan.get("sql") or ""))
+        write_ok, _ = _is_safe_sql(write_sql, write_intent, message)
+        if write_ok and write_intent == op:
+            fallback_sql = _build_fallback_preview_sql_from_write_sql(write_sql)
+            ok3, _ = _is_safe_preview_sql(fallback_sql)
+            if ok3:
+                fallback_params = _normalize_params(dict(write_plan.get("params") or {}))
+                fallback_params["user_id"] = user_id
+                fallback_params["preview_limit"] = max(1, min(50, int(preview_limit or 50)))
+                fallback_params.setdefault("now_utc", datetime.utcnow())
+                async with AsyncSessionLocal() as db:
+                    try:
+                        result = await db.execute(text(fallback_sql), fallback_params)
+                        rows = [dict(item) for item in result.mappings().all()]
+                    except Exception:
+                        rows = []
+                if rows:
+                    sql = fallback_sql
+                    params = fallback_params
+                    candidate_rows = [_normalize_preview_row(row) for row in rows[:50]]
+                    target_ids = [int(row.get("id") or 0) for row in candidate_rows if int(row.get("id") or 0) > 0][:200]
+    if candidate_rows and not target_ids:
+        return {
+            "ok": False,
+            "error": "preview_missing_row_ids",
+            "operation": op,
+        }
+    summary = _summarize_preview_rows(candidate_rows)
+    return {
+        "ok": True,
+        "operation": op,
+        "preview_sql": sql,
+        "preview_params": _jsonable_params(params),
+        "summary": summary,
+        "candidate_rows": candidate_rows,
+        "target_ids": target_ids,
+    }
+
+
+def _build_ids_select_stmt() -> Any:
+    return (
+        text("SELECT id FROM ledgers WHERE user_id = :user_id AND id IN :target_ids ORDER BY id")
+        .bindparams(bindparam("target_ids", expanding=True))
+    )
+
+
+def _build_delete_stmt() -> Any:
+    return (
+        text("DELETE FROM ledgers WHERE user_id = :user_id AND id IN :target_ids")
+        .bindparams(bindparam("target_ids", expanding=True))
+    )
+
+
+def _build_update_stmt(set_clauses: list[str]) -> Any:
+    sql = (
+        f"UPDATE ledgers SET {', '.join(set_clauses)} "
+        "WHERE user_id = :user_id AND id IN :target_ids"
+    )
+    return text(sql).bindparams(bindparam("target_ids", expanding=True))
+
+
+async def commit_write_by_ids_text2sql(
+    *,
+    user_id: int,
+    operation: str,
+    target_ids: list[int],
+    expected_count: int,
+    update_fields: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    op = (operation or "").strip().lower()
+    ids: list[int] = []
+    seen: set[int] = set()
+    for item in list(target_ids or []):
+        try:
+            lid = int(item)
+        except Exception:
+            continue
+        if lid <= 0 or lid in seen:
+            continue
+        seen.add(lid)
+        ids.append(lid)
+    ids = ids[:200]
+    if op not in {"delete", "update"}:
+        return {"ok": False, "error": "unsupported_operation"}
+    if not ids:
+        return {"ok": False, "error": "empty_target_ids"}
+
+    expected = max(0, int(expected_count or 0))
+    if expected <= 0:
+        expected = len(ids)
+
+    params: dict[str, Any] = {
+        "user_id": int(user_id),
+        "target_ids": ids,
+    }
+    fields = dict(update_fields or {})
+
+    set_clauses: list[str] = []
+    if op == "update":
+        amount_value = fields.get("amount")
+        try:
+            amount = float(amount_value) if amount_value is not None else None
+        except Exception:
+            amount = None
+        if amount is not None:
+            params["amount"] = amount
+            set_clauses.append("amount = :amount")
+
+        category = str(fields.get("category") or "").strip()
+        if category:
+            params["category"] = category
+            set_clauses.append("category = :category")
+        item = str(fields.get("item") or "").strip()
+        if item:
+            params["item"] = item
+            set_clauses.append("item = :item")
+        if not set_clauses:
+            return {"ok": False, "error": "missing_update_fields"}
+
+    select_stmt = _build_ids_select_stmt()
+    delete_stmt = _build_delete_stmt()
+    update_stmt = _build_update_stmt(set_clauses) if op == "update" else None
+
+    async with AsyncSessionLocal() as db:
+        try:
+            exists_result = await db.execute(select_stmt, params)
+            existing_ids = [int(row[0]) for row in exists_result.all()]
+            existing_count = len(existing_ids)
+            if existing_count != expected:
+                await db.rollback()
+                return {
+                    "ok": False,
+                    "error": "count_mismatch",
+                    "expected": expected,
+                    "actual": existing_count,
+                }
+
+            if op == "delete":
+                result = await db.execute(delete_stmt, params)
+            else:
+                result = await db.execute(update_stmt, params)  # type: ignore[arg-type]
+            affected = int(result.rowcount or 0)
+            if affected > expected:
+                await db.rollback()
+                return {
+                    "ok": False,
+                    "error": "rowcount_guard_triggered",
+                    "expected": expected,
+                    "actual": affected,
+                }
+            await db.commit()
+            return {
+                "ok": True,
+                "operation": op,
+                "expected": expected,
+                "matched": existing_count,
+                "affected": affected,
+            }
+        except Exception:
+            await db.rollback()
+            return {"ok": False, "error": "commit_execute_failed"}
 
 
 async def try_execute_ledger_text2sql(
@@ -174,9 +673,7 @@ async def try_execute_ledger_text2sql(
     if confidence < 0.60:
         return None
 
-    sql = str(plan.get("sql") or "").strip()
-    if sql.endswith(";") and sql.count(";") == 1:
-        sql = sql[:-1].strip()
+    sql = _strip_single_statement(str(plan.get("sql") or ""))
     ok, reason = _is_safe_sql(sql, intent, message)
     if not ok:
         return f"该账单操作被安全策略拦截：{reason}。请换一种更明确的说法。"
@@ -203,15 +700,19 @@ async def try_execute_ledger_text2sql(
                     return f"统计结果：共 {count} 笔，总额 {total:.2f} CNY。"
                 lines = ["账单结果："]
                 for row in rows[:12]:
-                    row_id = row.get("id")
+                    row_data = dict(row)
+                    row_id = _extract_row_id(row_data)
                     amount = float(row.get("amount") or 0)
                     currency = str(row.get("currency") or "CNY")
                     category = str(row.get("category") or "其他")
                     item = str(row.get("item") or "")
-                    transaction_date = str(row.get("transaction_date") or row.get("created_at") or "")
+                    transaction_date = str(
+                        row.get("occurred_at") or row.get("transaction_date") or row.get("created_at") or ""
+                    )
                     time_text = transaction_date.replace("T", " ")[:16] if transaction_date else "未知时间"
+                    row_prefix = f"#{row_id} | " if row_id > 0 else ""
                     lines.append(
-                        f"#{row_id} | {time_text} | {amount:.2f} {currency} | {category} | {item}"
+                        f"{row_prefix}{time_text} | {amount:.2f} {currency} | {category} | {item}"
                     )
                 return "\n".join(lines)
 
@@ -248,3 +749,5 @@ async def try_execute_ledger_text2sql(
             return None
 
     return None
+
+

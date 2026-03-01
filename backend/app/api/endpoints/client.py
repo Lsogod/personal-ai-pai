@@ -89,7 +89,13 @@ from app.services.skills import (
     publish_skill,
     render_skill_from_request,
 )
-from app.tools.finance import delete_ledger, insert_ledger, query_stats, update_ledger
+from app.tools.finance import (
+    delete_ledger,
+    insert_ledger,
+    query_stats,
+    summarize_ledgers_in_range,
+    update_ledger,
+)
 from app.services.realtime import get_notification_hub
 from app.services.scheduler import get_scheduler
 from app.services.scheduler_tasks import send_reminder_job
@@ -856,10 +862,25 @@ async def notifications_ws(websocket: WebSocket):
 
 @router.get("/stats/ledger")
 async def ledger_stats(
+    scope: str | None = Query(default=None, pattern="^(day|week|month)$"),
     days: int = Query(default=30, ge=1, le=365),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
+    if scope:
+        now_local = _now_local_naive()
+        start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        if scope == "week":
+            start_local = start_local - timedelta(days=start_local.weekday())
+        elif scope == "month":
+            start_local = start_local.replace(day=1)
+
+        start_at = _local_naive_to_utc_naive(start_local)
+        end_at = _local_naive_to_utc_naive(now_local)
+        if end_at <= start_at:
+            end_at = start_at + timedelta(seconds=1)
+        return await summarize_ledgers_in_range(session, user_id=user.id, start_at=start_at, end_at=end_at)
+
     return await query_stats(session, user_id=user.id, days=days)
 
 

@@ -30,7 +30,11 @@ from app.tools.finance import (
     list_recent_ledgers,
     update_ledger,
 )
-from app.tools.ledger_text2sql import try_execute_ledger_text2sql
+from app.tools.ledger_text2sql import (
+    commit_write_by_ids_text2sql,
+    plan_write_preview_text2sql,
+    try_execute_ledger_text2sql,
+)
 from app.tools.vision import analyze_receipt
 
 
@@ -276,6 +280,51 @@ async def execute_capability(
                 if not message:
                     return _result(False, error="missing required arg: message")
                 conversation_context = str(params.get("conversation_context") or "").strip()
+                mode = str(params.get("mode") or "execute").strip().lower()
+                if mode == "preview_write":
+                    operation = str(params.get("operation") or "").strip().lower()
+                    preview_limit = int(params.get("preview_limit") or 50)
+                    preview_hints = params.get("preview_hints")
+                    if not isinstance(preview_hints, dict):
+                        preview_hints = {}
+                    update_fields = params.get("update_fields")
+                    if not isinstance(update_fields, dict):
+                        update_fields = {}
+                    output_data = await plan_write_preview_text2sql(
+                        user_id=uid,
+                        message=message,
+                        operation=operation,
+                        conversation_context=conversation_context,
+                        preview_limit=preview_limit,
+                        preview_hints=preview_hints,
+                        update_fields=update_fields,
+                    )
+                    return _result(
+                        True,
+                        output=json.dumps(output_data or {}, ensure_ascii=False),
+                        output_data=output_data or {},
+                    )
+                if mode == "commit_write_by_ids":
+                    operation = str(params.get("operation") or "").strip().lower()
+                    raw_ids = params.get("target_ids")
+                    target_ids = raw_ids if isinstance(raw_ids, list) else []
+                    expected_count = int(params.get("expected_count") or 0)
+                    update_fields = params.get("update_fields")
+                    if not isinstance(update_fields, dict):
+                        update_fields = {}
+                    output_data = await commit_write_by_ids_text2sql(
+                        user_id=uid,
+                        operation=operation,
+                        target_ids=target_ids,
+                        expected_count=expected_count,
+                        update_fields=update_fields,
+                    )
+                    return _result(
+                        True,
+                        output=json.dumps(output_data or {}, ensure_ascii=False),
+                        output_data=output_data or {},
+                    )
+
                 output = await try_execute_ledger_text2sql(
                     user_id=uid,
                     message=message,
