@@ -53,6 +53,7 @@ import {
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
+import { formatYmdHmLocal, parseServerDate } from "../../lib/datetime";
 
 const ADMIN_TOKEN_KEY = "pai_admin_token";
 const PIE_COLORS = [
@@ -86,14 +87,14 @@ function fmtNum(n: number | null | undefined): string {
 
 function fmtDateTime(value: string | null | undefined): string {
   if (!value) return "-";
-  const date = new Date(value);
+  const date = parseServerDate(value);
   if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleString();
+  return formatYmdHmLocal(value);
 }
 
 function toDatetimeLocalValue(value: string | null | undefined): string {
   if (!value) return "";
-  const date = new Date(value);
+  const date = parseServerDate(value);
   if (Number.isNaN(date.getTime())) return "";
   date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
   return date.toISOString().slice(0, 16);
@@ -476,7 +477,7 @@ export function AdminPage() {
     mutationFn: (payload: AdminMiniappHomePopupConfig) => saveAdminMiniappHomePopup(token, payload),
     onSuccess: async (res) => {
       setPopupDraft(res.config);
-      setPopupSaveMessage(`保存成功：${new Date(res.updated_at).toLocaleString()}`);
+      setPopupSaveMessage(`保存成功：${fmtDateTime(res.updated_at)}`);
       await queryClient.invalidateQueries({ queryKey: ["admin", "miniapp-home-popup", token] });
     },
     onError: (error) => {
@@ -987,7 +988,7 @@ export function AdminPage() {
                             <td className="py-2 pr-2 max-w-[220px] truncate">#{row.id} {row.title}</td>
                             <td className="py-2 pr-2">{row.user_nickname || row.user_id}</td>
                             <td className="py-2 pr-2">{row.message_count}</td>
-                            <td className="py-2 pr-2">{new Date(row.last_message_at).toLocaleString()}</td>
+                            <td className="py-2 pr-2">{fmtDateTime(row.last_message_at)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1014,7 +1015,7 @@ export function AdminPage() {
                         className={`rounded-xl border px-3 py-2 text-sm ${msg.role === "user" ? "border-border bg-surface" : "border-border bg-surface-card"}`}
                       >
                         <div className="text-xs text-content-secondary mb-1">
-                          {msg.role} · {msg.platform} · {new Date(msg.created_at).toLocaleString()}
+                          {msg.role} · {msg.platform} · {fmtDateTime(msg.created_at)}
                         </div>
                         <div className="whitespace-pre-wrap break-words">{msg.content}</div>
                       </div>
@@ -1387,7 +1388,7 @@ export function AdminPage() {
                             <div>{row.app_version || "-"}</div>
                             <div className="text-xs text-content-secondary">{row.env_version || "-"}</div>
                           </td>
-                          <td className="py-2 pr-2">{new Date(row.created_at).toLocaleString()}</td>
+                          <td className="py-2 pr-2">{fmtDateTime(row.created_at)}</td>
                         </tr>
                       ))}
                       {(!feedbacks.data?.items || feedbacks.data.items.length === 0) ? (
@@ -1446,7 +1447,7 @@ export function AdminPage() {
                     <div key={row.id} className="rounded-xl border border-border px-3 py-2">
                       <div className="font-medium">{row.action}</div>
                       <div className="text-content-secondary">
-                        user={row.user_id || "-"} platform={row.platform} {new Date(row.created_at).toLocaleString()}
+                        user={row.user_id || "-"} platform={row.platform} {fmtDateTime(row.created_at)}
                       </div>
                       <pre className="mt-2 whitespace-pre-wrap break-all text-[11px] text-content-secondary bg-surface rounded-lg p-2">
                         {typeof row.detail === "string" ? row.detail : JSON.stringify(row.detail, null, 2)}
@@ -1468,5 +1469,4 @@ export function AdminPage() {
     </div>
   );
 }
-
 

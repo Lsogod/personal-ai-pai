@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Calendar, Link2, Wallet, Zap } from "../../components/ui/icons";
+import { Bot, Calendar, Link2, Wallet, Zap } from "../../components/ui/icons";
 import { BindingCard } from "../../components/chat/BindingCard";
 import { CalendarPanel } from "../../components/chat/CalendarPanel";
 import { LedgerListCard } from "../../components/chat/LedgerListCard";
@@ -9,19 +9,25 @@ import { SkillsPanel } from "../../components/skills/SkillsPanel";
 interface RightInfoPanelProps {
   token: string | null;
   stats: any;
+  executionDebug?: Record<string, unknown> | null;
 }
 
-type TabKey = "ledger" | "calendar" | "skills" | "binding";
+type TabKey = "ledger" | "calendar" | "skills" | "binding" | "execution";
 
 const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "ledger", label: "账单", icon: Wallet },
   { key: "calendar", label: "日程", icon: Calendar },
   { key: "skills", label: "技能", icon: Zap },
+  { key: "execution", label: "执行", icon: Bot },
   { key: "binding", label: "绑定", icon: Link2 },
 ];
 
-export function RightInfoPanel({ token, stats }: RightInfoPanelProps) {
+export function RightInfoPanel({ token, stats, executionDebug }: RightInfoPanelProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("ledger");
+  const routeIntent =
+    executionDebug && typeof executionDebug.route_intent === "string"
+      ? executionDebug.route_intent
+      : "";
 
   return (
     <div className="flex h-full flex-col border-l border-border bg-surface-card">
@@ -59,6 +65,28 @@ export function RightInfoPanel({ token, stats }: RightInfoPanelProps) {
         {activeTab === "binding" && (
           <div className="mx-auto max-w-lg">
             <BindingCard token={token} />
+          </div>
+        )}
+        {activeTab === "execution" && (
+          <div className="space-y-4">
+            {!executionDebug ? (
+              <div className="rounded-xl border border-border bg-surface p-4 text-sm text-content-secondary">
+                暂无执行摘要。发送消息后，这里仅展示路由与状态；中间执行细节已写入后端日志。
+              </div>
+            ) : (
+              <>
+                <div className="rounded-xl border border-border bg-surface p-4">
+                  <div className="text-xs text-content-tertiary">路由节点</div>
+                  <div className="mt-1 text-sm font-medium text-content">{routeIntent || "unknown"}</div>
+                </div>
+                <div className="rounded-xl border border-border bg-surface p-4">
+                  <div className="text-xs text-content-tertiary">执行状态</div>
+                  <div className="mt-2 text-sm text-content-secondary">
+                    中间执行结果（计划与工具轨迹）已记录到后端日志，不在前端展示。
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

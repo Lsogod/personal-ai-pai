@@ -174,7 +174,7 @@ async def analyze_receipt(image_url: str) -> dict[str, Any]:
     system = SystemMessage(
         content=(
             "你是记账视觉解析器。你会收到一张图片，可能是小票，也可能是支付截图。"
-            "请返回结构化字段。字段："
+            "请返回结构化字段。只输出一个 JSON 对象。字段："
             "image_type(receipt|payment_screenshot|other), "
             "amount(float|null), amount_candidates(float[]), merchant(str), "
             "category(str), item(str), confidence(float 0-1), evidence_text(str), notes(str)。"

@@ -4,6 +4,7 @@ from typing import Optional
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from app.core.config import get_settings
 
@@ -34,6 +35,21 @@ class SchedulerService:
             args=args,
             kwargs=kwargs,
             replace_existing=True,
+        )
+
+    def add_interval_job(self, job_id: str, seconds: int, func, *args, **kwargs) -> None:
+        interval_sec = max(1, int(seconds))
+        trigger = IntervalTrigger(seconds=interval_sec, timezone=self.settings.timezone)
+        self.scheduler.add_job(
+            func,
+            trigger=trigger,
+            id=job_id,
+            args=args,
+            kwargs=kwargs,
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+            misfire_grace_time=max(1, interval_sec),
         )
 
     def remove_job(self, job_id: str) -> None:

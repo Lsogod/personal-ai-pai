@@ -8,6 +8,7 @@ LEDGER_PENDING_SELECTION_PROMPT = ChatPromptTemplate.from_messages(
             "system",
             (
                 "你是待确认记账解析器。请严格按 schema 输出结构化字段。\n"
+                "只输出一个 JSON 对象，不要输出解释文本。\n"
                 "字段: mode, indexes, amount, category, item。\n"
                 "mode 仅可为 indexes / amount / cancel / unknown。\n"
                 "规则:\n"
@@ -39,6 +40,7 @@ LEDGER_INTENT_PROMPT = ChatPromptTemplate.from_messages(
             "system",
             (
                 "你是账单意图解析器，请按 schema 输出结构化字段。\n"
+                "只输出一个 JSON 对象，不要输出解释文本。\n"
                 "字段: intent, ledger_id, target_ids, target_item, amount, item, category, query_scope, query_date, "
                 "reference_mode, selection_mode, confidence。\n"
                 "intent 仅可为: insert, correct_latest, correct_by_id, correct_by_name, correct_by_scope, "

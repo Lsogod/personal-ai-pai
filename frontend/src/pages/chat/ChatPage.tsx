@@ -33,6 +33,8 @@ interface LedgerStats {
   count: number;
 }
 
+type ChatDebugPayload = Record<string, unknown>;
+
 const emptyStats: LedgerStats = { total: 0, count: 0 };
 const TOAST_LIMIT = 4;
 
@@ -41,6 +43,7 @@ export function ChatPage() {
   const { theme, toggleTheme } = useThemeStore();
   const queryClient = useQueryClient();
   const [streamingReply, setStreamingReply] = useState("");
+  const [lastRunDebug, setLastRunDebug] = useState<ChatDebugPayload | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -273,6 +276,7 @@ export function ChatPage() {
         streamFlushTimerRef.current = null;
       }
       setStreamingReply("");
+      setLastRunDebug(null);
       await streamSsePost(
         "/api/chat/send?stream=true",
         { content: payload.content, image_urls: payload.imageUrls },
@@ -285,7 +289,12 @@ export function ChatPage() {
               setStreamingReply(streamBufferRef.current);
             }, 40);
           }
-        }
+        },
+        (done) => {
+          if (done && done.debug && typeof done.debug === "object" && !Array.isArray(done.debug)) {
+            setLastRunDebug(done.debug as ChatDebugPayload);
+          }
+        },
       );
       if (streamFlushTimerRef.current !== null) {
         window.clearTimeout(streamFlushTimerRef.current);
@@ -440,7 +449,7 @@ export function ChatPage() {
         `}
       >
         <div className="w-[360px] h-full overflow-hidden">
-           <RightInfoPanel token={token} stats={stats} />
+           <RightInfoPanel token={token} stats={stats} executionDebug={lastRunDebug} />
         </div>
       </aside>
     </div>

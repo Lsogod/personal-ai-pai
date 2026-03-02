@@ -57,6 +57,7 @@ async def _extract_nickname_with_llm(raw: str, conversation_context: str) -> str
     system = SystemMessage(
         content=(
             "你是字段提取器。请从用户消息中提取用户昵称。"
+            "只输出一个 JSON 对象。"
             "无论用户是自然语言还是'昵称: xxx'格式，都只返回昵称值。"
             "必须去掉语气和动词前缀，例如'叫我'、'我叫'、'我是'。"
             "示例1: 输入'昵称：叫我Lsogod'，提取 nickname=Lsogod。"
@@ -94,6 +95,7 @@ async def _extract_ai_profile_with_llm(raw: str, conversation_context: str) -> t
     system = SystemMessage(
         content=(
             "你是字段提取器。请从用户消息中提取 AI 名称和 AI 表情。"
+            "只输出一个 JSON 对象。"
             "无论用户是自然语言还是'AI 名称: xxx'、'AI 表情: yyy'格式，都只返回值。"
             "AI 名称必须去掉语气和动词前缀，例如'叫你'、'你是'、'就叫'。"
             "示例: 输入'AI 名称：叫你贾维斯\\nAI 表情：👻'，提取 ai_name=贾维斯, ai_emoji=👻。"
@@ -133,6 +135,7 @@ async def _understand_binding_answer(raw: str, conversation_context: str) -> str
     system = SystemMessage(
         content=(
             "你是绑定引导意图解析器。请仅返回结构化字段。"
+            "只输出一个 JSON 对象。"
             "字段: decision。"
             "decision 仅可为: has_account, no_account, continue, unknown。"
             "当用户表示在其他客户端已有账号时，decision=has_account。"

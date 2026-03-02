@@ -14,6 +14,20 @@ services:
       - ./backend/skills:/app/skills
       - ./logs:/app/logs
 
+  memory_worker:
+    build: ./backend
+    image: pai-backend:v1.0
+    container_name: pai_memory_worker
+    restart: always
+    command: ["python", "-m", "app.memory_worker"]
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./backend/skills:/app/skills
+      - ./logs:/app/logs
+
   frontend:
     build: ./frontend
     image: pai-frontend:v1.0

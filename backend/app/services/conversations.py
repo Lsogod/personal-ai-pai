@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.conversation import Conversation
+from app.models.llm_usage import LLMUsageLog
+from app.models.memory import LongTermMemory
 from app.models.message import Message
+from app.models.tool_usage import ToolUsageLog
 from app.models.user import User
 
 
@@ -129,6 +132,34 @@ async def delete_conversation(
         return None, None
     deleted_title = conversation.title
 
+    msg_id_subq = (
+        select(Message.id)
+        .where(
+            Message.user_id == user.id,
+            Message.conversation_id == conversation.id,
+        )
+    )
+    await session.execute(
+        delete(LongTermMemory).where(
+            LongTermMemory.user_id == user.id,
+            or_(
+                LongTermMemory.conversation_id == conversation.id,
+                LongTermMemory.source_message_id.in_(msg_id_subq),
+            ),
+        )
+    )
+    await session.execute(
+        delete(LLMUsageLog).where(
+            LLMUsageLog.user_id == user.id,
+            LLMUsageLog.conversation_id == conversation.id,
+        )
+    )
+    await session.execute(
+        delete(ToolUsageLog).where(
+            ToolUsageLog.user_id == user.id,
+            ToolUsageLog.conversation_id == conversation.id,
+        )
+    )
     await session.execute(
         delete(Message).where(
             Message.user_id == user.id,

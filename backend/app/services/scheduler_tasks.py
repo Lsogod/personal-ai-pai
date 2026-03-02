@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -15,6 +16,8 @@ from app.services.conversations import apply_assistant_message_updates
 from app.services.reminder_dispatcher import dispatch_reminder
 from app.services.sender import UnifiedSender
 from app.services.scheduler import get_scheduler
+
+logger = logging.getLogger(__name__)
 
 
 async def send_reminder_job(schedule_id: int) -> None:
@@ -99,3 +102,33 @@ async def restore_pending_reminder_jobs() -> None:
             if run_at <= now:
                 run_at = now
             scheduler.add_job(row.job_id, run_at, send_reminder_job, row.id)
+
+
+async def scan_unprocessed_memory_messages_job() -> None:
+    settings = get_settings()
+    if not settings.long_term_memory_enabled or not settings.long_term_memory_scan_enabled:
+        return
+    try:
+        from app.services.message_handler import scan_unprocessed_memory_messages
+
+        await scan_unprocessed_memory_messages(
+            max_conversations=max(1, int(settings.long_term_memory_scan_max_conversations or 80)),
+            max_messages_per_conversation=max(
+                1,
+                int(settings.long_term_memory_scan_max_messages_per_conversation or 30),
+            ),
+        )
+    except Exception:
+        logger.exception("memory scan job failed")
+
+
+def ensure_memory_scan_job() -> None:
+    settings = get_settings()
+    if not settings.long_term_memory_enabled or not settings.long_term_memory_scan_enabled:
+        return
+    scheduler = get_scheduler()
+    scheduler.add_interval_job(
+        "long_term_memory_scan",
+        max(30, int(settings.long_term_memory_scan_interval_sec or 120)),
+        scan_unprocessed_memory_messages_job,
+    )

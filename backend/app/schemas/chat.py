@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -16,6 +16,7 @@ class ChatMessage(BaseModel):
 
 class ChatSendResponse(BaseModel):
     responses: List[str]
+    debug: Optional[Dict[str, Any]] = None
 
 
 class ProfileResponse(BaseModel):

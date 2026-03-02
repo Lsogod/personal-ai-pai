@@ -28,4 +28,8 @@ class Conversation(SQLModel, table=True):
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
-
+    memory_extracted_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    memory_last_processed_message_id: Optional[int] = Field(default=None, index=True)

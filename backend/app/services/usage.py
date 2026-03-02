@@ -1,8 +1,27 @@
 from __future__ import annotations
 
+import asyncio
+
 from app.db.session import AsyncSessionLocal
 from app.models.llm_usage import LLMUsageLog
 from app.models.tool_usage import ToolUsageLog
+
+_usage_tasks: set[asyncio.Task[None]] = set()
+
+
+def _track_usage_task(task: asyncio.Task[None]) -> None:
+    _usage_tasks.add(task)
+
+    def _on_done(done: asyncio.Task[None]) -> None:
+        _usage_tasks.discard(done)
+        try:
+            done.result()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            return
+
+    task.add_done_callback(_on_done)
 
 
 async def log_llm_usage(
@@ -37,6 +56,10 @@ async def log_llm_usage(
         await session.commit()
 
 
+def enqueue_llm_usage(**kwargs) -> None:
+    _track_usage_task(asyncio.create_task(log_llm_usage(**kwargs)))
+
+
 async def log_tool_usage(
     *,
     user_id: int | None,
@@ -61,3 +84,7 @@ async def log_tool_usage(
         )
         session.add(row)
         await session.commit()
+
+
+def enqueue_tool_usage(**kwargs) -> None:
+    _track_usage_task(asyncio.create_task(log_tool_usage(**kwargs)))

@@ -49,14 +49,6 @@ NODE_TOOL_NAMES: dict[str, set[str]] = {
 }
 
 
-def get_shared_tool_names() -> set[str]:
-    return set(SHARED_TOOL_NAMES)
-
-
-def get_mcp_tool_names() -> set[str]:
-    return set(MCP_TOOL_NAMES)
-
-
 def get_node_tool_names(node_name: str) -> set[str]:
     key = (node_name or "").strip().lower()
     base = NODE_TOOL_NAMES.get(key, set())

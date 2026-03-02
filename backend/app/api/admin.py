@@ -114,6 +114,15 @@ def _local_naive_to_tz_iso(value: datetime | None) -> str:
     return value.isoformat(timespec="seconds")
 
 
+def _utc_naive_to_tz_iso(value: datetime | None) -> str:
+    if not value:
+        return ""
+    tz = ZoneInfo(get_settings().timezone)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=ZoneInfo("UTC"))
+    return value.astimezone(tz).isoformat(timespec="seconds")
+
+
 def _parse_detail(value: str) -> object:
     raw = (value or "").strip()
     if not raw:
@@ -357,7 +366,7 @@ async def admin_users(
             .group_by(Message.user_id)
         )
         last_active_map = {
-            int(uid): (ts.isoformat() if ts else "")
+            int(uid): _utc_naive_to_tz_iso(ts)
             for uid, ts in last_active.all()
         }
 
@@ -386,7 +395,7 @@ async def admin_users(
                 "skill_count": skill_count_map.get(row.id, 0),
                 "identity_platform_count": identity_count_map.get(row.id, 0),
                 "last_active_at": last_active_map.get(row.id, ""),
-                "created_at": row.created_at.isoformat(),
+                "created_at": _utc_naive_to_tz_iso(row.created_at),
             }
             for row in rows
         ],
@@ -508,9 +517,9 @@ async def admin_user_detail(
         "blocked_reason": user.blocked_reason or "",
         "daily_message_limit": int(user.daily_message_limit or 0),
         "monthly_message_limit": int(user.monthly_message_limit or 0),
-        "created_at": user.created_at.isoformat(),
-        "updated_at": user.updated_at.isoformat(),
-        "last_active_at": last_active_at.isoformat() if last_active_at else "",
+        "created_at": _utc_naive_to_tz_iso(user.created_at),
+        "updated_at": _utc_naive_to_tz_iso(user.updated_at),
+        "last_active_at": _utc_naive_to_tz_iso(last_active_at),
         "profile": {
             "nickname": user.nickname,
             "ai_name": user.ai_name,
@@ -520,14 +529,14 @@ async def admin_user_detail(
             "email": user.email,
             "setup_stage": user.setup_stage,
             "binding_stage": user.binding_stage,
-            "created_at": user.created_at.isoformat(),
-            "updated_at": user.updated_at.isoformat(),
+            "created_at": _utc_naive_to_tz_iso(user.created_at),
+            "updated_at": _utc_naive_to_tz_iso(user.updated_at),
         },
         "identities": [
             {
                 "platform": row.platform,
                 "platform_id": row.platform_id,
-                "created_at": row.created_at.isoformat(),
+                "created_at": _utc_naive_to_tz_iso(row.created_at),
             }
             for row in identities
         ],
@@ -541,10 +550,10 @@ async def admin_user_detail(
                 "confidence": float(row.confidence or 0.0),
                 "conversation_id": row.conversation_id,
                 "source_message_id": row.source_message_id,
-                "last_accessed_at": row.last_accessed_at.isoformat() if row.last_accessed_at else "",
-                "expires_at": row.expires_at.isoformat() if row.expires_at else "",
-                "created_at": row.created_at.isoformat() if row.created_at else "",
-                "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+                "last_accessed_at": _utc_naive_to_tz_iso(row.last_accessed_at),
+                "expires_at": _utc_naive_to_tz_iso(row.expires_at),
+                "created_at": _utc_naive_to_tz_iso(row.created_at),
+                "updated_at": _utc_naive_to_tz_iso(row.updated_at),
             }
             for row in memory_rows
         ],

@@ -17,7 +17,7 @@ class ToolMeta(TypedDict):
     enabled: bool
 
 
-_RUNTIME_TOOL_CACHE_TTL_SEC = 30.0
+_RUNTIME_TOOL_CACHE_TTL_SEC_DEFAULT = 30.0
 _runtime_tool_cache_lock = asyncio.Lock()
 _runtime_tool_cache_rows: list[ToolMeta] | None = None
 _runtime_tool_cache_expire_at: float = 0.0
@@ -59,18 +59,6 @@ def is_mcp_tool_allowed(name: str) -> bool:
     if not allowed:
         return True
     return tool_name in allowed
-
-
-def filter_allowed_mcp_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    for item in tools:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("name") or "").strip()
-        if not is_mcp_tool_allowed(name):
-            continue
-        rows.append(item)
-    return rows
 
 
 def list_builtin_tool_metas() -> list[ToolMeta]:
@@ -199,8 +187,18 @@ async def list_runtime_tool_metas() -> list[ToolMeta]:
 
         rows = await _list_runtime_tool_metas_uncached()
         _runtime_tool_cache_rows = [dict(item) for item in rows]
-        _runtime_tool_cache_expire_at = now + _RUNTIME_TOOL_CACHE_TTL_SEC
+        ttl = float(get_settings().runtime_tool_cache_ttl_sec or _RUNTIME_TOOL_CACHE_TTL_SEC_DEFAULT)
+        if ttl <= 0:
+            ttl = _RUNTIME_TOOL_CACHE_TTL_SEC_DEFAULT
+        _runtime_tool_cache_expire_at = now + ttl
         return [dict(item) for item in _runtime_tool_cache_rows]
+
+
+async def warm_runtime_tool_cache() -> None:
+    try:
+        await list_runtime_tool_metas()
+    except Exception:
+        return
 
 
 async def _list_runtime_tool_metas_uncached() -> list[ToolMeta]:

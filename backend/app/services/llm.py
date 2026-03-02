@@ -13,7 +13,7 @@ from app.services.runtime_context import (
     get_tool_platform,
     get_tool_user_id,
 )
-from app.services.usage import log_llm_usage
+from app.services.usage import enqueue_llm_usage
 
 
 def _safe_int(value: Any) -> int:
@@ -141,7 +141,7 @@ class TrackingChatOpenAI(ChatOpenAI):
             else:
                 output = await super().ainvoke(input, config=config, **kwargs)
             prompt_tokens, completion_tokens, total_tokens = _extract_token_usage(output)
-            await log_llm_usage(
+            enqueue_llm_usage(
                 user_id=user_id,
                 platform=platform,
                 conversation_id=conversation_id,
@@ -155,7 +155,7 @@ class TrackingChatOpenAI(ChatOpenAI):
             )
             return output
         except Exception as exc:
-            await log_llm_usage(
+            enqueue_llm_usage(
                 user_id=user_id,
                 platform=platform,
                 conversation_id=conversation_id,

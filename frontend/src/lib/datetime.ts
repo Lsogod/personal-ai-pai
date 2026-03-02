@@ -26,6 +26,7 @@ function getDatePartsInDisplayTimezone(dt: Date): {
   day: string;
   hour: string;
   minute: string;
+  second: string;
 } {
   const parts = new Intl.DateTimeFormat("zh-CN", {
     timeZone: DISPLAY_TIMEZONE,
@@ -34,6 +35,7 @@ function getDatePartsInDisplayTimezone(dt: Date): {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
     hour12: false,
   }).formatToParts(dt);
 
@@ -44,6 +46,7 @@ function getDatePartsInDisplayTimezone(dt: Date): {
     day: lookup("day"),
     hour: lookup("hour"),
     minute: lookup("minute"),
+    second: lookup("second"),
   };
 }
 
@@ -59,4 +62,11 @@ export function formatMdHmLocal(value: string): string {
   if (Number.isNaN(dt.getTime())) return "--:--";
   const { month, day, hour: hh, minute: mm } = getDatePartsInDisplayTimezone(dt);
   return `${month}-${day} ${hh}:${mm}`;
+}
+
+export function formatYmdHmLocal(value: string): string {
+  const dt = parseServerDate(value);
+  if (Number.isNaN(dt.getTime())) return "-";
+  const { year, month, day, hour: hh, minute: mm } = getDatePartsInDisplayTimezone(dt);
+  return `${year}-${month}-${day} ${hh}:${mm}`;
 }

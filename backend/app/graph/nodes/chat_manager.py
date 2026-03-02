@@ -4,10 +4,9 @@ from __future__ import annotations
 import json
 import re
 import time
-from datetime import datetime
 from typing import Any
+from typing import Literal
 from urllib.parse import quote
-from zoneinfo import ZoneInfo
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.prebuilt import create_react_agent
@@ -18,9 +17,9 @@ from app.db.session import AsyncSessionLocal
 from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
 from app.models.user import User
-from app.services.commands.chat import execute_chat_command, parse_chat_command
 from app.services.audit import log_event
 from app.services.llm import get_llm
+from app.services.memory import deactivate_identity_memories_for_user
 from app.services.runtime_context import get_session
 from app.services.skills import load_skills
 from app.services.langchain_tools import ToolInvocationContext
@@ -28,14 +27,18 @@ from app.services.toolsets import build_node_langchain_tools, invoke_node_tool
 from app.services.tool_registry import list_runtime_tool_metas
 from app.services.usage import log_tool_usage
 
-URL_PATTERN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 VALID_CHAT_KINDS = {"general", "time", "external", "weather", "tooling", "unknown"}
-IDENTITY_USER_PATTERN = re.compile(r"(我是谁|我叫什么|who\s+am\s+i)", re.IGNORECASE)
-IDENTITY_ASSISTANT_PATTERN = re.compile(r"(你是谁|你叫什么|who\s+are\s+you)", re.IGNORECASE)
 INVALID_TOOL_ERROR_PATTERN = re.compile(
     r"(not a valid tool|invalid tool|工具不存在|未知工具|no such tool)",
     re.IGNORECASE,
 )
+PROFILE_HINT_PATTERN = re.compile(
+    r"(叫我|我叫|称呼我|昵称|名字|我叫什么|你叫什么|你叫|AI名|ai名|assistant name|用户档案|个人档案|个人资料|profile)",
+    re.IGNORECASE,
+)
+LLM_NODE_CLASSIFIER = "chat_manager_classifier"
+LLM_NODE_TOOL_AGENT = "chat_manager_tool_agent"
+LLM_NODE_FINAL = "chat_manager_final"
 
 
 class ChatClassificationExtraction(BaseModel):
@@ -43,6 +46,24 @@ class ChatClassificationExtraction(BaseModel):
     tool_required: bool = Field(default=False)
     weather_location: str = Field(default="")
     confidence: float = Field(default=0.0)
+
+
+class ProfileIntentExtraction(BaseModel):
+    action: Literal[
+        "none",
+        "update_nickname",
+        "update_ai_name",
+        "update_ai_emoji",
+        "update_ai_profile",
+        "query_identity",
+        "query_profile",
+    ] = Field(default="none")
+    nickname: str | None = Field(default="")
+    ai_name: str | None = Field(default="")
+    ai_emoji: str | None = Field(default="")
+    ask_user_name: bool = Field(default=False)
+    ask_ai_name: bool = Field(default=False)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 def _shorten_text(value: str, limit: int = 500) -> str:
@@ -99,11 +120,6 @@ async def _audit_tool_call(
         return
 
 
-def _extract_first_url(text: str) -> str:
-    match = URL_PATTERN.search(text or "")
-    return match.group(0).strip() if match else ""
-
-
 def _coerce_bool(value: Any, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
@@ -118,17 +134,154 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
     return default
 
 
+def _render_identity_reply(*, user: User, ask_user_name: bool, ask_ai_name: bool) -> str:
+    lines: list[str] = []
+    if ask_user_name:
+        nickname = str(user.nickname or "").strip()
+        if nickname:
+            lines.append(f"你叫{nickname}。")
+        else:
+            lines.append("我这边还没有记录你的昵称，你可以说“以后叫我xxx”。")
+    if ask_ai_name:
+        ai_name = str(user.ai_name or "").strip() or "AI 助手"
+        ai_emoji = str(user.ai_emoji or "").strip()
+        suffix = f" {ai_emoji}" if ai_emoji else ""
+        lines.append(f"我是{ai_name}{suffix}。")
+    return "\n".join(lines).strip()
+
+
+def _render_profile_reply(*, user: User) -> str:
+    nickname = str(user.nickname or "").strip() or "未设置"
+    ai_name = str(user.ai_name or "").strip() or "AI 助手"
+    ai_emoji = str(user.ai_emoji or "").strip() or "🤖"
+    platform = str(user.platform or "").strip() or "unknown"
+    setup_stage = int(user.setup_stage or 0)
+    email = str(user.email or "").strip() or "未绑定"
+    return (
+        "你的用户档案如下：\n"
+        f"- 昵称：{nickname}\n"
+        f"- 助手名称：{ai_name}\n"
+        f"- 助手表情：{ai_emoji}\n"
+        f"- 平台：{platform}\n"
+        f"- 邮箱：{email}\n"
+        f"- 引导阶段：{setup_stage}"
+    )
+
+
+async def _try_handle_profile_intent(
+    *,
+    session: Any,
+    user: User,
+    content: str,
+    context_text: str,
+) -> str | None:
+    text = (content or "").strip()
+    if not text:
+        return None
+    # Fast gate for latency: only invoke LLM when text likely mentions profile/name ops.
+    if not PROFILE_HINT_PATTERN.search(text):
+        return None
+
+    llm = get_llm(node_name=LLM_NODE_CLASSIFIER)
+    runnable = llm.with_structured_output(ProfileIntentExtraction)
+    system = SystemMessage(
+        content=(
+            "你是用户档案意图识别器，只输出 JSON 结构化字段。"
+            "字段: action, nickname, ai_name, ai_emoji, ask_user_name, ask_ai_name, confidence。"
+            "action 仅可为: none, update_nickname, update_ai_name, update_ai_emoji, update_ai_profile, query_identity, query_profile。"
+            "规则："
+            "1) 用户表达“叫我/以后叫我/把我名字改成” => update_nickname，提取干净昵称。"
+            "2) 用户表达“你叫/以后你叫/把你名字改成” => update_ai_name 或 update_ai_profile。"
+            "3) 用户问“我叫什么/你叫什么” => query_identity，并设置 ask_user_name/ask_ai_name。"
+            "4) 用户请求“输出我的用户档案/个人资料/profile” => query_profile。"
+            "5) 不相关请求返回 action=none。"
+            "6) 提取值必须去掉动词前缀，如“叫我”“我叫”“你叫”。"
+            "不要输出解释文本。"
+        )
+    )
+    human = HumanMessage(
+        content=(
+            f"当前档案: nickname={user.nickname}, ai_name={user.ai_name}, ai_emoji={user.ai_emoji}\n\n"
+            f"会话上下文:\n{context_text}\n\n"
+            f"用户消息:\n{text}"
+        )
+    )
+    try:
+        parsed = await runnable.ainvoke([system, human])
+    except Exception:
+        return None
+
+    action = str(getattr(parsed, "action", "none") or "none").strip().lower()
+    nickname = str(getattr(parsed, "nickname", "") or "").strip()
+    ai_name = str(getattr(parsed, "ai_name", "") or "").strip()
+    ai_emoji = str(getattr(parsed, "ai_emoji", "") or "").strip()
+    ask_user_name = bool(getattr(parsed, "ask_user_name", False))
+    ask_ai_name = bool(getattr(parsed, "ask_ai_name", False))
+
+    if action == "query_identity":
+        reply = _render_identity_reply(user=user, ask_user_name=ask_user_name, ask_ai_name=ask_ai_name)
+        return reply or None
+
+    if action == "query_profile":
+        return _render_profile_reply(user=user)
+
+    if action == "update_nickname" and nickname:
+        if nickname != str(user.nickname or "").strip():
+            user.nickname = nickname
+            await deactivate_identity_memories_for_user(session, user_id=int(user.id or 0))
+            session.add(user)
+            await session.commit()
+        return f"好的，已把你的称呼更新为{nickname}。"
+
+    if action == "update_ai_name" and ai_name:
+        if ai_name != str(user.ai_name or "").strip():
+            user.ai_name = ai_name
+            await deactivate_identity_memories_for_user(session, user_id=int(user.id or 0))
+            session.add(user)
+            await session.commit()
+        emoji = str(user.ai_emoji or "").strip()
+        suffix = f" {emoji}" if emoji else ""
+        return f"好的，我的名字已更新为{ai_name}{suffix}。"
+
+    if action == "update_ai_emoji" and ai_emoji:
+        if ai_emoji != str(user.ai_emoji or "").strip():
+            user.ai_emoji = ai_emoji
+            await deactivate_identity_memories_for_user(session, user_id=int(user.id or 0))
+            session.add(user)
+            await session.commit()
+        return f"好的，我的表情已更新为{ai_emoji}。"
+
+    if action == "update_ai_profile" and (ai_name or ai_emoji):
+        changed = False
+        if ai_name and ai_name != str(user.ai_name or "").strip():
+            user.ai_name = ai_name
+            changed = True
+        if ai_emoji and ai_emoji != str(user.ai_emoji or "").strip():
+            user.ai_emoji = ai_emoji
+            changed = True
+        if changed:
+            await deactivate_identity_memories_for_user(session, user_id=int(user.id or 0))
+            session.add(user)
+            await session.commit()
+        final_name = str(user.ai_name or "").strip() or "AI 助手"
+        final_emoji = str(user.ai_emoji or "").strip()
+        suffix = f" {final_emoji}" if final_emoji else ""
+        return f"好的，我的档案已更新：{final_name}{suffix}。"
+
+    return None
+
+
 async def _classify_chat_request_with_llm(
     *,
     content: str,
     context_text: str,
     runtime_tools: str,
 ) -> dict[str, Any]:
-    llm = get_llm(node_name="chat_manager")
+    llm = get_llm(node_name=LLM_NODE_CLASSIFIER)
     runnable = llm.with_structured_output(ChatClassificationExtraction)
     system = SystemMessage(
         content=(
-            "你是 chat_manager 节点的请求分析器。请仅返回结构化字段。"
+            "你是 chat_manager 节点的请求分析器。请仅返回 JSON 结构化字段。"
             "字段: kind, tool_required, weather_location, confidence。"
             "kind 仅可为: general, time, external, weather, tooling, unknown。"
             "tool_required 必须是布尔值。"
@@ -138,7 +291,7 @@ async def _classify_chat_request_with_llm(
             "tooling 仅用于‘列出工具/如何调用工具/工具是否可用’等工具管理问题。"
             "weather_location 仅在 kind=weather 时填写城市名，否则留空字符串。"
             "confidence 范围 0~1。"
-            "不要输出额外解释。"
+            "不要输出额外解释，只输出 JSON。"
         )
     )
     human = HumanMessage(
@@ -174,17 +327,6 @@ async def _classify_chat_request_with_llm(
     }
 
 
-def _pick_timezone(content: str) -> str:
-    text = (content or "").strip().lower()
-    if any(tag in text for tag in ["london", "uk", "英国"]):
-        return "Europe/London"
-    if any(tag in text for tag in ["new york", "ny", "美国东部"]):
-        return "America/New_York"
-    if any(tag in text for tag in ["tokyo", "日本", "东京"]):
-        return "Asia/Tokyo"
-    return "Asia/Shanghai"
-
-
 def _parse_json_object(text: str) -> dict[str, Any]:
     payload = (text or "").strip()
     if payload.startswith("```"):
@@ -201,18 +343,19 @@ def _parse_json_object(text: str) -> dict[str, Any]:
 def _format_runtime_tool_catalog(tools: list[dict]) -> str:
     if not tools:
         return "无可用工具。"
-    lines: list[str] = []
+    names: list[str] = []
     for item in tools:
         name = str(item.get("name") or "").strip()
         source = str(item.get("source") or "").strip()
-        description = str(item.get("description") or "").strip()
         enabled = bool(item.get("enabled") is True)
         if not name:
             continue
-        lines.append(
-            f"- [{source or 'unknown'}] {name} | enabled={str(enabled).lower()} | {description}"
-        )
-    return "\n".join(lines) or "无可用工具。"
+        if not enabled:
+            continue
+        names.append(f"{source or 'unknown'}:{name}")
+    if not names:
+        return "无可用工具。"
+    return "可用工具: " + ", ".join(sorted(dict.fromkeys(names)))
 
 
 def _render_fetched_preview(source_url: str, fetched_markdown: str) -> str:
@@ -220,41 +363,6 @@ def _render_fetched_preview(source_url: str, fetched_markdown: str) -> str:
     if len(text) > 1200:
         text = text[:1200].rstrip() + "\n...(已截断)"
     return f"已抓取网页内容：{source_url}\n\n{text}"
-
-
-def _render_time_reply(content: str) -> str:
-    tz = _pick_timezone(content)
-    try:
-        now = datetime.now(ZoneInfo(tz))
-    except Exception:
-        now = datetime.utcnow()
-        tz = "UTC"
-    return f"当前时间（{tz}）：{now.strftime('%Y-%m-%d %H:%M:%S')}"
-
-
-def _detect_identity_query(content: str) -> tuple[bool, bool]:
-    text = (content or "").strip()
-    if not text:
-        return False, False
-    ask_user = bool(IDENTITY_USER_PATTERN.search(text))
-    ask_assistant = bool(IDENTITY_ASSISTANT_PATTERN.search(text))
-    return ask_user, ask_assistant
-
-
-def _render_identity_reply(*, user: User, ask_user: bool, ask_assistant: bool) -> str:
-    lines: list[str] = []
-    if ask_user:
-        nickname = str(user.nickname or "").strip()
-        if nickname:
-            lines.append(f"你叫{nickname}。")
-        else:
-            lines.append("我这边还没有记录你的昵称，你可以说“以后叫我xxx”。")
-    if ask_assistant:
-        ai_name = str(user.ai_name or "").strip() or "AI 助手"
-        ai_emoji = str(user.ai_emoji or "").strip()
-        suffix = f" {ai_emoji}" if ai_emoji else ""
-        lines.append(f"我是{ai_name}{suffix}。")
-    return "\n".join(lines).strip()
 
 
 async def _answer_with_fetched_content(
@@ -266,7 +374,7 @@ async def _answer_with_fetched_content(
     fetched_markdown: str,
     source_url: str,
 ) -> str:
-    llm = get_llm(node_name="chat_manager")
+    llm = get_llm(node_name=LLM_NODE_FINAL)
     system = SystemMessage(
         content=(
             f"你是{user.nickname}的私人助理{user.ai_name} {user.ai_emoji}。"
@@ -295,7 +403,7 @@ async def _answer_weather_with_time_context(
     weather_output: str,
     source_url: str,
 ) -> str:
-    llm = get_llm(node_name="chat_manager")
+    llm = get_llm(node_name=LLM_NODE_FINAL)
     system = SystemMessage(
         content=(
             f"你是{user.nickname}的私人助理{user.ai_name} {user.ai_emoji}。"
@@ -454,7 +562,7 @@ async def _ground_answer_with_tool_outputs(
     tool_outputs: list[str],
     draft_answer: str,
 ) -> str:
-    llm = get_llm(node_name="chat_manager")
+    llm = get_llm(node_name=LLM_NODE_FINAL)
     merged = "\n\n---\n\n".join(tool_outputs)
     if len(merged) > 16000:
         merged = merged[:16000] + "\n...(工具输出已截断)"
@@ -488,7 +596,7 @@ async def _run_tool_agent(
     runtime_tools: str,
 ) -> tuple[str, int]:
     agent = create_react_agent(
-        model=get_llm(node_name="chat_manager"),
+        model=get_llm(node_name=LLM_NODE_TOOL_AGENT),
         tools=_build_chat_tools(
             user_id=user.id,
             platform=platform,
@@ -499,7 +607,7 @@ async def _run_tool_agent(
     system_prompt = (
         f"你是{user.nickname}的私人助理{user.ai_name} {user.ai_emoji}。"
         "你必须结合会话上下文连续对话，不要声称自己无法回忆当前会话。\n"
-        "你具备 LangGraph 工具调用能力。原则：LLM 先判断是否需要工具，规则仅兜底。\n"
+        "你具备 LangGraph 工具调用能力。原则：由 LLM 自主判断是否需要工具并执行。\n"
         "技能文档是写作/回答参考，不是可调用工具；严禁把 writer/translator/skill 名称当作 tool 调用。\n"
         "只能调用“当前可用工具目录”里出现的工具名。\n"
         "当问题依赖实时/外部信息时：\n"
@@ -555,7 +663,9 @@ async def _weather_fallback_fetch_and_answer(
     skills: str,
     weather_location: str,
 ) -> str | None:
-    location = (weather_location or "").strip() or "Wuhan"
+    location = (weather_location or "").strip()
+    if not location:
+        return "请补充城市后我再查询天气，例如：武汉。"
     try:
         fetched = await _invoke_chat_tool(
             user_id=user.id,
@@ -594,14 +704,16 @@ async def chat_manager_node(state: GraphState) -> GraphState:
         return {**state, "responses": ["未找到用户信息。"]}
 
     content = (message.content or "").strip()
-    ask_user, ask_assistant = _detect_identity_query(content)
-    if ask_user or ask_assistant:
-        return {
-            **state,
-            "responses": [_render_identity_reply(user=user, ask_user=ask_user, ask_assistant=ask_assistant)],
-        }
-
     context_text = render_conversation_context(state)
+    profile_reply = await _try_handle_profile_intent(
+        session=session,
+        user=user,
+        content=content,
+        context_text=context_text,
+    )
+    if profile_reply:
+        return {**state, "responses": [profile_reply]}
+
     skills = await load_skills(
         session=session,
         user_id=user.id,
@@ -612,85 +724,6 @@ async def chat_manager_node(state: GraphState) -> GraphState:
         runtime_tools = _format_runtime_tool_catalog(runtime_tool_rows)
     except Exception:
         runtime_tools = "无可用工具。"
-
-    # Deterministic command fallback.
-    parsed_cmd = parse_chat_command(content)
-    if parsed_cmd is not None:
-        settings = get_settings()
-
-        async def _on_mcp_list() -> str:
-            try:
-                return await _invoke_chat_tool(
-                    user_id=user.id,
-                    platform=(message.platform or "unknown"),
-                    conversation_id=state.get("conversation_id"),
-                    tool_name="mcp_list_tools",
-                )
-            except Exception as exc:
-                return f"MCP 工具列表获取失败：{exc}"
-
-        async def _on_fetch() -> str:
-            url = _extract_first_url(content)
-            if not url:
-                return "请提供要抓取的网址，例如：`/fetch https://example.com`。"
-            try:
-                fetched = await _invoke_chat_tool(
-                    user_id=user.id,
-                    platform=(message.platform or "unknown"),
-                    conversation_id=state.get("conversation_id"),
-                    tool_name="fetch_url",
-                    args={"url": url},
-                )
-                return await _answer_with_fetched_content(
-                    user=user,
-                    content=content,
-                    context_text=context_text,
-                    skills=skills,
-                    fetched_markdown=fetched,
-                    source_url=url,
-                )
-            except Exception as exc:
-                return f"网页抓取失败：{exc}"
-
-        async def _on_weather(location_arg: str) -> str:
-            location = location_arg or "Wuhan"
-            try:
-                fetched = await _invoke_chat_tool(
-                    user_id=user.id,
-                    platform=(message.platform or "unknown"),
-                    conversation_id=state.get("conversation_id"),
-                    tool_name="maps_weather",
-                    args={"city": location},
-                )
-                if "not available" in fetched.lower() or "调用失败" in fetched:
-                    return f"天气抓取失败：{fetched}"
-                return await _answer_weather_with_time_context(
-                    user=user,
-                    content=content,
-                    context_text=context_text,
-                    skills=skills,
-                    now_time_text=await _invoke_chat_tool(
-                        user_id=user.id,
-                        platform=(message.platform or "unknown"),
-                        conversation_id=state.get("conversation_id"),
-                        tool_name="now_time",
-                        args={"timezone": get_settings().timezone},
-                    ),
-                    weather_output=fetched,
-                    source_url=f"mcp:maps_weather?city={quote(location)}",
-                )
-            except Exception as exc:
-                return f"天气抓取失败：{exc}"
-
-        cmd_text = await execute_chat_command(
-            command=parsed_cmd,
-            mcp_fetch_enabled=settings.mcp_fetch_enabled,
-            on_mcp_list=_on_mcp_list,
-            on_fetch=_on_fetch,
-            on_weather=_on_weather,
-        )
-        if cmd_text is not None:
-            return {**state, "responses": [cmd_text]}
 
     try:
         classification = await _classify_chat_request_with_llm(
@@ -755,10 +788,6 @@ async def chat_manager_node(state: GraphState) -> GraphState:
         except Exception:
             pass
 
-    # Rule fallback after LLM intent classification.
-    if kind == "time":
-        return {**state, "responses": [_render_time_reply(content)]}
-
     if tool_required and kind in {"external", "tooling"} and not tool_path_invalid_tool_error:
         return {
             **state,
@@ -769,7 +798,7 @@ async def chat_manager_node(state: GraphState) -> GraphState:
         }
 
     # Final plain-LLM fallback.
-    llm = get_llm(node_name="chat_manager")
+    llm = get_llm(node_name=LLM_NODE_FINAL)
     system = SystemMessage(
         content=(
             f"你是{user.nickname}的私人助理{user.ai_name} {user.ai_emoji}。"

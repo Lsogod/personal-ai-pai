@@ -4,7 +4,7 @@ import hashlib
 import json
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -30,10 +30,6 @@ MEMORY_CONSOLIDATE_SCAN_LIMIT = 160
 SEMANTIC_DUPLICATE_THRESHOLD = 0.82
 
 logger = logging.getLogger(__name__)
-
-
-class MemoryIdSelection(BaseModel):
-    ids: list[int] = Field(default_factory=list)
 
 
 class MemoryCandidateExtraction(BaseModel):
@@ -210,6 +206,53 @@ def _prepare_memory_candidates(candidates: list[dict[str, Any]]) -> list[dict[st
     return prepared
 
 
+def _build_compact_context_text(rows: list[dict[str, str]]) -> str:
+    settings = get_settings()
+    max_chars = max(2000, int(settings.long_term_memory_extract_context_max_chars or 24000))
+    per_message_max = max(60, int(settings.long_term_memory_extract_message_max_chars or 280))
+    if not rows:
+        return "（无）"
+
+    lines: list[str] = []
+    for row in rows:
+        role = str(row.get("role") or "user").strip().lower() or "user"
+        content = str(row.get("content") or "").strip()
+        if not content:
+            continue
+        if len(content) > per_message_max:
+            content = content[:per_message_max].rstrip() + "…"
+        lines.append(f"- {role}: {content}")
+
+    if not lines:
+        return "（无）"
+    full_text = "\n".join(lines)
+    if len(full_text) <= max_chars:
+        return full_text
+
+    # Keep both early-session and recent-session evidence when transcript is too long.
+    head: list[str] = []
+    tail: list[str] = []
+    head_budget = max_chars // 3
+    tail_budget = max_chars - head_budget - 64
+    head_used = 0
+    tail_used = 0
+    for line in lines:
+        cost = len(line) + 1
+        if head_used + cost > head_budget:
+            break
+        head.append(line)
+        head_used += cost
+    for line in reversed(lines):
+        cost = len(line) + 1
+        if tail_used + cost > tail_budget:
+            break
+        tail.append(line)
+        tail_used += cost
+    tail.reverse()
+    compact = head + ["- system: （会话中段已压缩省略）"] + tail
+    return "\n".join(compact)[:max_chars]
+
+
 def _serialize_existing_memories(rows: list[LongTermMemory]) -> list[dict[str, Any]]:
     serialized: list[dict[str, Any]] = []
     for row in rows:
@@ -262,78 +305,12 @@ def _memory_score(query: str, row: LongTermMemory) -> float:
     importance_score = max(1, min(5, int(row.importance))) / 5
     recency_days = 365.0
     if row.updated_at:
-        recency_days = max(0.0, (datetime.utcnow() - row.updated_at.replace(tzinfo=None)).days)
+        updated_at = row.updated_at
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=timezone.utc)
+        recency_days = max(0.0, (datetime.now(timezone.utc) - updated_at).days)
     recency_score = 1.0 / (1.0 + recency_days / 30.0)
     return overlap_score * 0.7 + importance_score * 0.2 + recency_score * 0.1
-
-
-async def _llm_select_relevant_memory_ids(
-    *,
-    query: str,
-    rows: list[LongTermMemory],
-    top_k: int,
-) -> list[int]:
-    if not rows or not (query or "").strip():
-        return []
-
-    runnable_schema = MemoryIdSelection
-    system = SystemMessage(
-        content=(
-            "你是记忆检索器。请仅返回 schema 定义的结构化字段（ids 数组）。"
-            "给定用户查询和候选记忆，选择最相关的记忆 id。"
-            "应基于语义匹配（可跨语言），而非仅关键词重叠。"
-            "优先稳定的用户偏好/事实/目标，弱化短期噪声。"
-            "最多返回 top_k 个 id，并按相关性排序。"
-        )
-    )
-    candidates: list[dict[str, Any]] = []
-    for row in rows[:120]:
-        if row.id is None:
-            continue
-        candidates.append(
-            {
-                "id": int(row.id),
-                "memory_type": str(row.memory_type or ""),
-                "content": str(row.content or ""),
-                "importance": int(row.importance or 3),
-                "confidence": float(row.confidence or 0.0),
-                "updated_at": row.updated_at.isoformat() if row.updated_at else "",
-            }
-        )
-    if not candidates:
-        return []
-
-    human = HumanMessage(
-        content=json.dumps(
-            {
-                "query": (query or "").strip(),
-                "top_k": int(max(1, top_k)),
-                "candidates": candidates,
-            },
-            ensure_ascii=False,
-        )
-    )
-    try:
-        parsed = await _invoke_structured(
-            schema=runnable_schema,
-            messages=[system, human],
-        )
-        raw_ids = list(getattr(parsed, "ids", []) or [])
-        valid_ids = {int(item["id"]) for item in candidates}
-        selected: list[int] = []
-        for rid in raw_ids:
-            try:
-                memory_id = int(rid)
-            except Exception:
-                continue
-            if memory_id not in valid_ids or memory_id in selected:
-                continue
-            selected.append(memory_id)
-            if len(selected) >= max(1, top_k):
-                break
-        return selected
-    except Exception:
-        return []
 
 
 async def extract_memory_candidates(
@@ -341,28 +318,57 @@ async def extract_memory_candidates(
     user_text: str,
     assistant_text: str,
     conversation_summary: str = "",
+    conversation_messages: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     content = (user_text or "").strip()
     reply = (assistant_text or "").strip()
     if not content:
         return []
 
+    context_rows: list[dict[str, str]] = []
+    if isinstance(conversation_messages, list):
+        for item in conversation_messages:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "").strip().lower()
+            msg = str(item.get("content") or "").strip()
+            if not msg:
+                continue
+            if role not in {"user", "assistant", "system"}:
+                role = "user"
+            context_rows.append({"role": role, "content": msg})
+    context_text = _build_compact_context_text(context_rows)
+    summary_text = (conversation_summary or "").strip()
+    if len(summary_text) > 1200:
+        summary_text = summary_text[:1200].rstrip() + "…"
+    if len(reply) > 1600:
+        reply = reply[:1600].rstrip() + "…"
+    if len(content) > 600:
+        content = content[:600].rstrip() + "…"
+
     system = SystemMessage(
         content=(
             "你是长期记忆提取器。请仅返回 schema 定义的结构化字段（memories 数组）。"
-            "只从用户输入提取候选记忆；助手回复仅作上下文，不是事实来源。"
+            "只输出一个 JSON 对象，不要输出解释文本。"
+            "从用户输入 + 完整会话上下文综合提取候选记忆，不要只看当前单句。"
+            "助手回复仅作上下文，不是事实来源。"
             "仅保留在 30 天后仍可能有价值的候选。"
             "尽量保持用户原始措辞与语言，不要随意翻译记忆内容。"
             "不要保存短期状态、一次性任务进度、天气快照、日/周汇总、运维/系统/工具内部信息。"
             "不要保存原始数据库日志；应抽象为可复用的用户语义信息。"
             "不要输出身份档案记忆（昵称/姓名/助手名/emoji）。"
+            "若用户明确表达“希望你记住/以后按此执行”，应优先提取对应长期规则或偏好，"
+            "并提高 importance/confidence。"
+            "若用户明确表达“忘记/不再记住某事项”，应输出 op=delete 的候选并直接执行，不需要确认。"
+            "若用户明确表达“更改/改成/以后按新规则”，应将其视为覆盖旧记忆，优先输出可覆盖旧值的 save 决策。"
             "每条字段：op(save|delete), memory_type(preference|fact|goal|project|constraint), "
             "key(可选), content, importance(1-5), confidence(0-1), ttl_days(可选整数)。"
         )
     )
     human = HumanMessage(
         content=(
-            f"会话摘要:\n{conversation_summary}\n\n"
+            f"会话摘要:\n{summary_text}\n\n"
+            f"完整会话:\n{context_text}\n\n"
             f"用户输入:\n{content}\n\n"
             f"助手回复（仅作参考，不是事实来源）:\n{reply}"
         )
@@ -393,11 +399,15 @@ async def _llm_refine_memory_candidates(
             "你是记忆整合器，负责决定长期记忆的最终写入动作。"
             "准入规则：仅保留 30 天后仍可能有用的记忆。"
             "拒绝短期状态、单轮上下文、短时报告、工具输出和系统内部信息。"
+            "若用户明确表达“请记住某规则/偏好”，在不与现有记忆冲突时应优先保留。"
+            "若用户明确表达“忘记某事项”，应优先产生 delete 决策并直接生效，不做确认。"
+            "若用户明确表达“更改某信息”，应优先产出覆盖旧值的 save（必要时设置 merge_target_id）。"
             "内容尽量保留用户原始语言，避免不必要翻译。"
             "仅基于语义判断。"
             "需与已有记忆去重：若语义等价，优先更新旧记忆而非新建。"
             "对语义相同但表述不同的候选，应归并为一个规范抽象表述。"
             "请仅返回 schema 定义的结构化字段（decisions 数组）。"
+            "只输出一个 JSON 对象，不要输出解释文本。"
             "每条 decision 字段：index(int), keep(bool), op(save|delete), merge_target_id(可选 int), "
             "memory_type(preference|fact|goal|project|constraint), key(可选), content, "
             "importance(1-5), confidence(0-1), ttl_days(可选 int)。"
@@ -468,7 +478,7 @@ async def upsert_long_term_memories(
     if not candidates:
         return 0
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     scan_limit = max(settings.long_term_memory_retrieve_scan_limit, MEMORY_CONSOLIDATE_SCAN_LIMIT)
     existing_stmt = (
         select(LongTermMemory)
@@ -492,16 +502,25 @@ async def upsert_long_term_memories(
         return 0
 
     processed = 0
+    dropped_empty = 0
+    dropped_identity = 0
+    dropped_low_confidence = 0
     for raw in vetted[: max(1, settings.long_term_memory_max_write_items)]:
         op = str(raw.get("op") or "save").strip().lower()
         memory_type = _normalize_memory_type(str(raw.get("memory_type") or "fact"))
         content = str(raw.get("content") or "").strip()
         if _is_reserved_identity_memory_type(memory_type):
+            dropped_identity += 1
             continue
-        try:
-            confidence = float(raw.get("confidence") or 0.0)
-        except Exception:
-            confidence = 0.0
+        confidence_raw = raw.get("confidence")
+        if confidence_raw is None or str(confidence_raw).strip() == "":
+            confidence = max(float(settings.long_term_memory_min_confidence), 0.8)
+        else:
+            try:
+                confidence = float(confidence_raw)
+            except Exception:
+                confidence = max(float(settings.long_term_memory_min_confidence), 0.8)
+        confidence = max(0.0, min(1.0, confidence))
         try:
             importance = int(raw.get("importance") or 3)
         except Exception:
@@ -523,6 +542,7 @@ async def upsert_long_term_memories(
             user_ai_name=user_ai_name,
             user_ai_emoji=user_ai_emoji,
         ):
+            dropped_identity += 1
             continue
 
         if op == "delete":
@@ -545,9 +565,11 @@ async def upsert_long_term_memories(
             continue
 
         if not content:
+            dropped_empty += 1
             continue
         content = content[:1000]
         if confidence < settings.long_term_memory_min_confidence:
+            dropped_low_confidence += 1
             continue
 
         ttl_days = _parse_ttl_days(raw.get("ttl_days"), fallback_days=settings.long_term_memory_default_ttl_days)
@@ -599,6 +621,16 @@ async def upsert_long_term_memories(
 
     if processed > 0:
         await session.commit()
+    logger.info(
+        "long-term memory upsert summary: user_id=%s conversation_id=%s input=%s processed=%s dropped_identity=%s dropped_empty=%s dropped_low_confidence=%s",
+        user_id,
+        conversation_id,
+        len(vetted),
+        processed,
+        dropped_identity,
+        dropped_empty,
+        dropped_low_confidence,
+    )
     return processed
 
 
@@ -608,7 +640,7 @@ async def consolidate_user_long_term_memories(
     user_id: int,
     max_scan: int = 200,
 ) -> dict[str, int]:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     stmt = (
         select(LongTermMemory)
         .where(
@@ -634,6 +666,7 @@ async def consolidate_user_long_term_memories(
     system = SystemMessage(
         content=(
             "你是长期记忆清理器。请仅返回 schema 定义的结构化字段（decisions 数组）。"
+            "只输出一个 JSON 对象，不要输出解释文本。"
             "你需要对每个记忆 id 判断是否保留。准入规则：仅保留 30 天后仍有价值的信息。"
             "清理短期状态、过时一次性事实、系统内部描述和重复项。"
             "如果存在重复记忆，保留一个规范记忆，其它项通过 merge_into_id 合并。"
@@ -752,7 +785,7 @@ async def deactivate_identity_memories_for_user(
         return 0
 
     changed = 0
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     for row in rows:
         if _is_identity_memory_candidate(
             memory_type=str(row.memory_type or ""),
@@ -774,7 +807,7 @@ async def list_long_term_memories(
     if not settings.long_term_memory_enabled:
         return []
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     stmt = (
         select(LongTermMemory)
         .where(
@@ -826,7 +859,7 @@ async def retrieve_relevant_long_term_memories(
 
     top_k = limit or settings.long_term_memory_retrieve_limit
     scan_limit = max(top_k, settings.long_term_memory_retrieve_scan_limit)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     stmt = (
         select(LongTermMemory)
         .where(

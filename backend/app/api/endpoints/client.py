@@ -3,16 +3,17 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import date, datetime, timedelta, timezone
-from typing import List
+from typing import Any, List
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session, AsyncSessionLocal
 from app.models.user import User, SetupStage
+from app.models.conversation import Conversation as ConversationModel
 from app.models.message import Message
 from app.models.ledger import Ledger
 from app.models.schedule import Schedule
@@ -68,7 +69,10 @@ from app.services.binding import (
     list_identities,
 )
 from app.services.platforms import miniapp as miniapp_platform
-from app.services.message_handler import handle_message
+from app.services.message_handler import (
+    handle_message,
+    schedule_conversation_memory_backfill,
+)
 from app.api.deps import get_or_create_user
 from app.services.mcp_fetch import MCPFetchError, get_mcp_fetch_client
 from app.services.conversations import (
@@ -565,6 +569,7 @@ async def conversations_create(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
+    previous_conversation_id = int(user.active_conversation_id or 0) or None
     created = await create_new_conversation(session, user, title=payload.title)
     await log_event(
         session,
@@ -573,6 +578,33 @@ async def conversations_create(
         user_id=user.id,
         detail={"conversation_id": created.id, "title": created.title, "via": "api"},
     )
+    if previous_conversation_id and previous_conversation_id != created.id:
+        previous_conversation = await session.get(ConversationModel, int(previous_conversation_id))
+        latest_user_message_id = 0
+        if previous_conversation is not None:
+            latest_user_message_id = int(
+                (
+                    await session.execute(
+                        select(func.max(Message.id)).where(
+                            Message.user_id == int(user.id),
+                            Message.conversation_id == int(previous_conversation_id),
+                            Message.role == "user",
+                        )
+                    )
+                ).scalar_one()
+                or 0
+            )
+        processed_id = int(getattr(previous_conversation, "memory_last_processed_message_id", 0) or 0)
+        if (
+            previous_conversation is not None
+            and int(previous_conversation.user_id or 0) == int(user.id)
+            and latest_user_message_id > 0
+            and processed_id < latest_user_message_id
+        ):
+            schedule_conversation_memory_backfill(
+                user_id=int(user.id),
+                conversation_id=int(previous_conversation_id),
+            )
     return _to_conversation_response(created, created.id)
 
 
@@ -622,7 +654,7 @@ async def conversations_delete(
     user: User = Depends(get_current_user),
 ):
     replacement, deleted_title = await delete_conversation(session, user, conversation_id)
-    if not replacement or not deleted_title:
+    if replacement is None or deleted_title is None:
         raise HTTPException(status_code=404, detail="conversation not found")
     await log_event(
         session,
@@ -679,9 +711,9 @@ async def _sse_stream_live(
 
     async def _runner() -> None:
         streamer_token = set_llm_streamer(_on_stream_chunk)
-        # Stream only final natural-language generation nodes; avoid leaking
-        # structured-classifier/planner JSON fragments.
-        stream_nodes_token = set_llm_stream_nodes({"chat_manager", "help_center"})
+        # Stream only terminal NL generation nodes; avoid leaking
+        # classifier/planner/tool-agent intermediate content.
+        stream_nodes_token = set_llm_stream_nodes({"chat_manager_final", "help_center", "complex_task_agent"})
         try:
             result_holder["result"] = await handle_message(source_platform, normalized, session)
         except Exception as exc:
@@ -717,19 +749,28 @@ async def _sse_stream_live(
         joined = "\n".join(responses)
         streamed_text = "".join(streamed_chunks)
         if joined and not streamed_text:
-            for chunk in _iter_text_chunks(joined, chunk_size=32):
-                payload = json.dumps({"chunk": chunk}, ensure_ascii=False)
-                yield f"data: {payload}\n\n"
+            # No astream chunk emitted for this run; send one final chunk only.
+            payload = json.dumps({"chunk": joined}, ensure_ascii=False)
+            yield f"data: {payload}\n\n"
         elif joined and streamed_text and joined.startswith(streamed_text):
             suffix = joined[len(streamed_text) :]
-            for chunk in _iter_text_chunks(suffix, chunk_size=32):
-                payload = json.dumps({"chunk": chunk}, ensure_ascii=False)
+            if suffix:
+                payload = json.dumps({"chunk": suffix}, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
 
-        yield f"data: {json.dumps({'done': True}, ensure_ascii=False)}\n\n"
+        done_payload: dict[str, Any] = {"done": True}
+        debug_payload = result.get("debug")
+        if isinstance(debug_payload, dict):
+            done_payload["debug"] = debug_payload
+        yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
     finally:
         if not task.done():
-            task.cancel()
+            # Do not hard-cancel handler on transient SSE disconnect, otherwise
+            # user turn may end up with message_received but no assistant reply.
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=0.1)
+            except Exception:
+                pass
 
 
 @router.post("/chat/send")
@@ -791,7 +832,11 @@ async def chat_send(
         raise HTTPException(status_code=400, detail=result.get("error", "failed"))
     responses = result.get("responses") or []
 
-    return ChatSendResponse(responses=responses)
+    debug_payload = result.get("debug")
+    return ChatSendResponse(
+        responses=responses,
+        debug=(debug_payload if isinstance(debug_payload, dict) else None),
+    )
 
 
 @router.websocket("/chat/ws")
@@ -831,7 +876,10 @@ async def chat_ws(websocket: WebSocket):
                 if not result.get("ok"):
                     await websocket.send_json({"ok": False, "error": result.get("error", "failed")})
                 else:
-                    await websocket.send_json({"ok": True, "responses": result.get("responses", [])})
+                    payload = {"ok": True, "responses": result.get("responses", [])}
+                    if isinstance(result.get("debug"), dict):
+                        payload["debug"] = result.get("debug")
+                    await websocket.send_json(payload)
     except WebSocketDisconnect:
         return
 

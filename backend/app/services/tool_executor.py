@@ -22,7 +22,7 @@ from app.services.tool_registry import (
     is_mcp_tool_allowed,
     list_runtime_tool_metas,
 )
-from app.services.usage import log_tool_usage
+from app.services.usage import enqueue_tool_usage
 from app.tools.finance import (
     delete_ledger,
     get_latest_ledger,
@@ -147,7 +147,7 @@ async def _log_tool_usage_safe(
     error: str = "",
 ) -> None:
     try:
-        await log_tool_usage(
+        enqueue_tool_usage(
             user_id=user_id,
             platform=platform,
             conversation_id=conversation_id,

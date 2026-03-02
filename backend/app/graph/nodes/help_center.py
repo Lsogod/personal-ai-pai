@@ -6,6 +6,7 @@ import re
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.graph.context import render_conversation_context
+from app.graph.nodes.chat_manager import _try_handle_profile_intent
 from app.graph.state import GraphState
 from app.models.user import User
 from app.services.llm import get_llm
@@ -95,11 +96,21 @@ async def help_center_node(state: GraphState) -> GraphState:
     message = state["message"]
     content = (message.content or "").strip()
     platform = (message.platform or "").strip().lower()
+    context_text = render_conversation_context(state)
 
     session = get_session()
     user = await session.get(User, state["user_id"])
     if not user:
         return {**state, "responses": ["未找到用户信息。"]}
+
+    profile_reply = await _try_handle_profile_intent(
+        session=session,
+        user=user,
+        content=content,
+        context_text=context_text,
+    )
+    if profile_reply:
+        return {**state, "responses": [profile_reply]}
 
     ask_user, ask_assistant = _detect_identity_query(content)
     if ask_user or ask_assistant:
@@ -112,7 +123,6 @@ async def help_center_node(state: GraphState) -> GraphState:
     skill_context = _build_skill_context(skills)
     tool_context = _build_tool_context(await list_runtime_tool_metas())
     help_doc = _load_help_doc()
-    context_text = render_conversation_context(state)
 
     llm = get_llm(node_name="help_center")
     system = SystemMessage(

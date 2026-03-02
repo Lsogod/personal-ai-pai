@@ -22,6 +22,9 @@ from app.models.app_setting import AppSetting
 
 async def init_db() -> None:
     async with engine.begin() as conn:
+        # Avoid startup hangs when another process holds table locks (e.g. memory worker queries).
+        await conn.execute(text("SET LOCAL lock_timeout = '3s'"))
+        await conn.execute(text("SET LOCAL statement_timeout = '30s'"))
         await conn.run_sync(SQLModel.metadata.create_all)
         try:
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR"))
@@ -36,6 +39,18 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_message_limit INTEGER DEFAULT 0"))
             await conn.execute(text("ALTER TABLE users ALTER COLUMN monthly_message_limit SET DEFAULT 0"))
             await conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS conversation_id INTEGER"))
+            await conn.execute(
+                text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS memory_extracted_at TIMESTAMPTZ")
+            )
+            await conn.execute(
+                text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS memory_last_processed_message_id INTEGER")
+            )
+            await conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_conversations_memory_last_processed_message_id "
+                    "ON conversations (memory_last_processed_message_id)"
+                )
+            )
             await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_conversation_id ON messages (conversation_id)"))
             await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_active_conversation_id ON users (active_conversation_id)"))
             await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_is_blocked ON users (is_blocked)"))

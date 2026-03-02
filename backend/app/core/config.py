@@ -65,12 +65,21 @@ class Settings(BaseSettings):
     mcp_allowed_tool_names: str = ""
     # Comma-separated MCP tool allowlist for maps_* tools. Empty means allow all.
     mcp_maps_allowed_tool_names: str = "maps_weather"
+    runtime_tool_cache_ttl_sec: int = 300
     # complex_task DAG executor controls
     complex_task_max_parallel: int = 4
     complex_task_dependency_wait_cycles: int = 1
     complex_task_dependency_wait_ms: int = 120
     complex_task_tool_call_limit: int = 8
     complex_task_tool_per_action_limit: int = 4
+    complex_task_agent_recursion_limit: int = 8
+    complex_task_plan_timeout_sec: int = 5
+    complex_task_followup_timeout_sec: int = 8
+
+    rebind_intent_timeout_sec: int = 2
+    router_intent_timeout_sec: int = 10
+    preload_runtime_tools_on_startup: bool = False
+    preload_graph_on_startup: bool = False
 
     long_term_memory_enabled: bool = True
     long_term_memory_min_confidence: float = 0.75
@@ -78,6 +87,17 @@ class Settings(BaseSettings):
     long_term_memory_retrieve_limit: int = 6
     long_term_memory_retrieve_scan_limit: int = 80
     long_term_memory_default_ttl_days: int = 180
+    long_term_memory_debounce_sec: int = 12
+    long_term_memory_extract_timeout_sec: int = 90
+    long_term_memory_upsert_timeout_sec: int = 90
+    long_term_memory_extract_context_max_chars: int = 8000
+    long_term_memory_extract_message_max_chars: int = 200
+    long_term_memory_scan_enabled: bool = True
+    long_term_memory_scan_run_in_api: bool = False
+    long_term_memory_scan_interval_sec: int = 120
+    long_term_memory_scan_max_conversations: int = 80
+    long_term_memory_scan_max_messages_per_conversation: int = 30
+    startup_preload_timeout_sec: int = 8
 
     admin_token: str = ""
     dedup_ttl_seconds: int = 86400

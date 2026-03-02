@@ -401,6 +401,7 @@ async def parse_skill_intent(
     system = SystemMessage(
         content=(
             "你是意图解析器。请将用户关于技能管理的消息解析为结构化字段。"
+            "只输出一个 JSON 对象，不要输出解释文本。"
             "action 仅可为: create, update, publish, disable, delete, list, show, help。"
             "返回字段: action, skill_name, skill_slug, target, request, delete_scope, confirmed, clarification_needed。"
             "delete_scope 仅可为 single/all/unknown。"
@@ -462,6 +463,7 @@ async def _parse_skill_followup_intent(*, text: str, conversation_context: str) 
     system = SystemMessage(
         content=(
             "你是技能跟进意图解析器，请仅返回结构化字段。"
+            "只输出一个 JSON 对象，不要输出解释文本。"
             "当用户在上一轮创建/展示技能后，用自然语言继续修改约束（如“标题改为...”“把正文限制到80字”），"
             "应识别为 action=update。"
             "从会话上下文中提取最近一个用户技能 slug 填入 target。"

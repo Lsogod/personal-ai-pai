@@ -79,6 +79,9 @@ export function ConversationSidebar({ token }: ConversationSidebarProps) {
         queryClient.invalidateQueries({ queryKey: ["history"] }),
       ]);
     },
+    onError: (error: Error) => {
+      window.alert(error.message || "删除会话失败，请稍后重试。");
+    },
   });
 
   function onRename(item: ConversationItem) {
@@ -88,6 +91,7 @@ export function ConversationSidebar({ token }: ConversationSidebarProps) {
   }
 
   function onDelete(item: ConversationItem) {
+    if (deleteMutation.isPending) return;
     const ok = window.confirm(`确认删除会话「${item.title}」吗？`);
     if (!ok) return;
     deleteMutation.mutate(item.id);
@@ -163,13 +167,14 @@ export function ConversationSidebar({ token }: ConversationSidebarProps) {
                       {formatTime(item.last_message_at)}
                     </p>
                   </div>
-                  <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                  <div className="flex gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         onRename(item);
                       }}
-                      className="p-1 rounded-md hover:bg-surface-active text-content-tertiary hover:text-content transition-colors"
+                      disabled={renameMutation.isPending || deleteMutation.isPending}
+                      className="p-1 rounded-md hover:bg-surface-active text-content-tertiary hover:text-content transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Pencil size={12} />
                     </button>
@@ -178,7 +183,8 @@ export function ConversationSidebar({ token }: ConversationSidebarProps) {
                         e.stopPropagation();
                         onDelete(item);
                       }}
-                      className="p-1 rounded-md hover:bg-danger/10 text-content-tertiary hover:text-danger transition-colors"
+                      disabled={deleteMutation.isPending}
+                      className="p-1 rounded-md hover:bg-danger/10 text-content-tertiary hover:text-danger transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Trash2 size={12} />
                     </button>

@@ -196,6 +196,7 @@ async def _plan_sql(message: str, conversation_context: str = "") -> dict[str, A
     system_prompt = (
         "You are a ledger Text-to-SQL planner for PostgreSQL.\n"
         "Operate only on table ledgers.\n"
+        "Return exactly one json object.\n"
         "Return structured fields only: matched, intent, sql, params, summary, confidence.\n"
         "intent must be one of select/insert/update/delete/unknown.\n"
         "If request is unrelated to ledgers, return matched=false and intent=unknown.\n"
@@ -239,6 +240,7 @@ async def _plan_write_preview_sql(
     system_prompt = (
         "You are a ledger write-preview SQL planner for PostgreSQL.\n"
         f"Current operation is: {operation} (only delete/update).\n"
+        "Return exactly one json object.\n"
         "Return structured fields only: matched, intent, sql, params, summary, confidence.\n"
         "intent must be select.\n"
         "Generate SELECT SQL for previewing candidate rows before commit.\n"
@@ -749,5 +751,4 @@ async def try_execute_ledger_text2sql(
             return None
 
     return None
-
 

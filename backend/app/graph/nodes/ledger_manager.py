@@ -200,18 +200,18 @@ class LedgerPendingSelectionExtraction(BaseModel):
 
 
 class LedgerIntentExtraction(BaseModel):
-    intent: str = Field(default="unknown")
-    ledger_id: int | None = Field(default=None)
-    target_ids: list[int] = Field(default_factory=list)
-    target_item: str = Field(default="")
-    amount: float | None = Field(default=None)
-    item: str = Field(default="")
-    category: str = Field(default="")
-    query_scope: str = Field(default="")
-    query_date: str = Field(default="")
-    reference_mode: str = Field(default="auto")
-    selection_mode: str = Field(default="auto")
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    intent: Any = Field(default="unknown")
+    ledger_id: Any = Field(default=None)
+    target_ids: Any = Field(default_factory=list)
+    target_item: Any = Field(default="")
+    amount: Any = Field(default=None)
+    item: Any = Field(default="")
+    category: Any = Field(default="")
+    query_scope: Any = Field(default="")
+    query_date: Any = Field(default="")
+    reference_mode: Any = Field(default="auto")
+    selection_mode: Any = Field(default="auto")
+    confidence: Any = Field(default=0.0)
 
 
 class LedgerUpdateRewriteExtraction(BaseModel):
@@ -234,6 +234,10 @@ class LedgerPreviewControlExtraction(BaseModel):
 class LedgerHandoffDecision(BaseModel):
     handoff: bool = Field(default=False)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class LedgerClarificationExtraction(BaseModel):
+    question: str = Field(default="")
 
 
 def _fmt_dt(dt: datetime | None) -> str:
@@ -704,12 +708,18 @@ async def _understand_ledger_message(
         conversation_context=enriched_context,
         pending_preview_hint=pending_preview_hint,
     )
-    parsed = await runnable.ainvoke(messages)
+    try:
+        parsed = await runnable.ainvoke(messages)
+    except Exception:
+        return LedgerIntentExtraction().model_dump()
     if isinstance(parsed, LedgerIntentExtraction):
         return parsed.model_dump()
     if isinstance(parsed, dict):
-        return parsed
-    return {}
+        try:
+            return LedgerIntentExtraction.model_validate(parsed).model_dump()
+        except Exception:
+            return LedgerIntentExtraction().model_dump()
+    return LedgerIntentExtraction().model_dump()
 
 
 async def _extract_update_rewrite_fields(content: str, conversation_context: str) -> dict[str, Any]:
@@ -718,6 +728,7 @@ async def _extract_update_rewrite_fields(content: str, conversation_context: str
     system = SystemMessage(
         content=(
             "Extract update rewrite intent for ledger operations. "
+            "Return one JSON object only. "
             "Return structured fields only: target_item, item, category, amount, amount_explicit, confidence. "
             "For expressions like '把A改成B/将A修改为B', target_item must be A and item must be B. "
             "For multi-source rewrites like '把A和B改成C', target_item must contain the full source set (A and B) "
@@ -754,6 +765,7 @@ async def _understand_preview_control_message(
     system = SystemMessage(
         content=(
             "Classify user message under an existing pending preview-commit task. "
+            "Return one JSON object only. "
             "Return structured fields only: action, indexes, comparator, threshold, confidence. "
             "action must be one of: confirm, cancel, pick_indexes, refine_amount, new_request, unknown. "
             "pick_indexes means the user selected subset rows by display index (1-based). "
@@ -791,7 +803,8 @@ async def _decide_handoff_to_chat_manager(
     runnable = llm.with_structured_output(LedgerHandoffDecision)
     system = SystemMessage(
         content=(
-            "You are a routing guard for ledger_manager. Return structured fields only: handoff, confidence. "
+            "You are a routing guard for ledger_manager. Return one JSON object only. "
+            "Return structured fields only: handoff, confidence. "
             "Set handoff=true only when user message is primarily meta/general conversation "
             "(assistant identity, product/project capabilities, usage guidance, chitchat) "
             "and not an actionable ledger task. "
@@ -1285,21 +1298,37 @@ async def _answer_ledger_with_llm(
     response = await llm.ainvoke([system, human])
     return _sanitize_llm_text(str(response.content or ""))
 
-def _render_ledger_fallback(rows: list[Ledger], label: str, category: str | None) -> str:
-    title = f"{label}账单" if label else "账单"
-    if category:
-        title += f"（{category}）"
-    lines = [f"{title}："]
-    if not rows:
-        lines.append("暂无匹配账单记录。")
-        return "\n".join(lines)
-    for row in rows[:12]:
-        lines.append(
-            f"#{row.id} | {_fmt_dt(row.transaction_date)} | {row.amount:.2f} {row.currency} | {row.category} | {row.item}"
+
+async def _generate_ledger_clarification(
+    *,
+    content: str,
+    conversation_context: str,
+    reason: str,
+) -> str:
+    llm = get_llm(node_name="ledger_manager")
+    runnable = llm.with_structured_output(LedgerClarificationExtraction)
+    system = SystemMessage(
+        content=(
+            "你是账单意图澄清助手。请仅返回结构化字段 question。\n"
+            "只输出一个 JSON 对象，不要输出解释文本。\n"
+            "要求：问题简洁、可执行、面向下一步操作。"
         )
-    if len(rows) > 12:
-        lines.append(f"... 其余 {len(rows) - 12} 条")
-    return "\n".join(lines)
+    )
+    human = HumanMessage(
+        content=(
+            f"用户消息:\n{content}\n\n"
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"原因:\n{reason}"
+        )
+    )
+    try:
+        parsed = await runnable.ainvoke([system, human])
+        question = _sanitize_llm_text(str(getattr(parsed, "question", "") or ""))
+        if question:
+            return question
+    except Exception:
+        pass
+    return "请确认你要执行哪类账单操作：记一笔、查询、修改，还是删除？"
 
 
 def _render_ledger_metric_answer(
@@ -1698,9 +1727,8 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
             confidence = float(parsed_single.get("confidence") or 0.0)
             amount = parsed_single.get("amount")
             candidate_values = list(parsed_single.get("candidate_values") or [])
-            threshold = float(parsed_single.get("threshold") or 1.0)
 
-            if amount is not None and float(amount) > 0 and confidence >= threshold:
+            if amount is not None and float(amount) > 0:
                 if conversation_id > 0:
                     await clear_pending_ledger(user_id=user_id, conversation_id=conversation_id)
                 ledger = await _insert_ledger_via_tool(
@@ -1786,23 +1814,24 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
     }
     if intent not in allowed_intents:
         intent = "unknown"
-    try:
-        handoff = await _decide_handoff_to_chat_manager(
-            content=content,
-            conversation_context=context_text,
-            pending_preview_hint="",
-        )
-    except Exception:
-        handoff = {}
-    handoff_conf = float(handoff.get("confidence") or 0.0)
-    if bool(handoff.get("handoff")):
-        extra = dict(state.get("extra") or {})
-        extra["ledger_handoff"] = {
-            "target": "chat_manager",
-            "confidence": handoff_conf,
-            "at": datetime.utcnow().isoformat(),
-        }
-        return {**state, "intent": "chat_manager", "extra": extra}
+    if intent == "unknown":
+        try:
+            handoff = await _decide_handoff_to_chat_manager(
+                content=content,
+                conversation_context=context_text,
+                pending_preview_hint="",
+            )
+        except Exception:
+            handoff = {}
+        handoff_conf = float(handoff.get("confidence") or 0.0)
+        if bool(handoff.get("handoff")):
+            extra = dict(state.get("extra") or {})
+            extra["ledger_handoff"] = {
+                "target": "chat_manager",
+                "confidence": handoff_conf,
+                "at": datetime.utcnow().isoformat(),
+            }
+            return {**state, "intent": "chat_manager", "extra": extra}
 
     async def _resolve_query_rows() -> tuple[list[Ledger], str, str, str | None]:
         scope = str(parsed.get("query_scope") or "").strip().lower()
@@ -1853,13 +1882,19 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
                 rows=rows,
             )
             if llm_text:
-                if rows and re.search(r"(无记录|暂无|没有.*记录|未找到)", llm_text):
-                    # Guard against occasional LLM false negatives when rows are present.
-                    return _render_ledger_fallback(rows, label, category_hint)
                 return llm_text
         except Exception:
             pass
-        return _render_ledger_fallback(rows, label, category_hint)
+        return await _render_fixed_reply_with_llm(
+            fallback="",
+            style="query_answer",
+            facts={
+                "label": label,
+                "category": category_hint or "",
+                "count": len(rows),
+                "rows": _build_ledger_payload(rows),
+            },
+        )
 
     ledger_id = parsed.get("ledger_id")
     try:
@@ -1900,20 +1935,22 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
             rewrite = await _extract_update_rewrite_fields(content, context_text)
         except Exception:
             rewrite = {}
-        rewrite_conf = float(rewrite.get("confidence") or 0.0)
-        if rewrite_conf >= 0.55:
-            rewrite_target = _clean_item(str(rewrite.get("target_item") or ""))
-            rewrite_item = _clean_item(str(rewrite.get("item") or ""))
+        rewrite_target = _clean_item(str(rewrite.get("target_item") or ""))
+        rewrite_item = _clean_item(str(rewrite.get("item") or ""))
+        rewrite_category = str(rewrite.get("category") or "").strip()
+        rewrite_amount_explicit = bool(rewrite.get("amount_explicit"))
+        has_rewrite_signal = bool(
+            rewrite_target or rewrite_item or rewrite_category or rewrite_amount_explicit
+        )
+        if has_rewrite_signal:
             if rewrite_target:
                 target_item = rewrite_target
             if rewrite_item:
                 item = rewrite_item
-            rewrite_category = str(rewrite.get("category") or "").strip()
             if rewrite_category:
                 normalized_rewrite_category = _normalize_category(rewrite_category)
                 if normalized_rewrite_category and normalized_rewrite_category != _normalize_category(""):
                     category = normalized_rewrite_category
-            rewrite_amount_explicit = bool(rewrite.get("amount_explicit"))
             if rewrite_amount_explicit:
                 rewrite_amount_raw = rewrite.get("amount")
                 try:
@@ -1927,11 +1964,7 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
             item = ""
 
     reference_mode = str(parsed.get("reference_mode") or "auto").strip().lower()
-    if reference_mode not in {"by_id", "by_name", "by_scope", "latest", "last_result_set", "auto"}:
-        reference_mode = "auto"
     selection_mode = str(parsed.get("selection_mode") or "auto").strip().lower()
-    if selection_mode not in {"all", "single", "subset", "auto"}:
-        selection_mode = "auto"
 
     has_named_target = bool(target_item) and not _is_generic_target_item(target_item)
     if intent == "correct_latest" and has_named_target:
@@ -1964,13 +1997,18 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
             )
             return {**state, "responses": [rendered_sql]}
 
+        clarify_question = await _generate_ledger_clarification(
+            content=content,
+            conversation_context=context_text,
+            reason="intent_unknown",
+        )
         return {
             **state,
             "responses": [
                 await _render_fixed_reply_with_llm(
-                    fallback="我没完全理解你的账单意图。可直接说：`记一笔 午饭30`、`删除账单#12`、`把账单#12改成28元`、`列出最近账单`。",
+                    fallback=clarify_question,
                     style="hint",
-                    facts={},
+                    facts={"reason": "intent_unknown"},
                 )
             ],
         }
@@ -2216,8 +2254,3 @@ async def ledger_manager_node(state: GraphState) -> GraphState:
         **state,
         "responses": [done_text],
     }
-
-
-
-
-
