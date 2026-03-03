@@ -1,4 +1,5 @@
 const { getToken, handleAuthExpired } = require("../../utils/auth");
+const config = require("../../config");
 const {
   fetchHistory,
   fetchConversations,
@@ -196,6 +197,7 @@ Page({
     this._scrollTimers = [];
     this._pendingReplyTimer = null;
     this._pendingNonce = 0;
+    this._subscribePromptAt = 0;
   },
 
   onShow() {
@@ -652,6 +654,47 @@ Page({
     this.scrollToBottom();
   },
 
+  requestReminderSubscribe() {
+    const tid = String(config.SUBSCRIBE_TEMPLATE_ID || "").trim();
+    if (!tid) {
+      wx.showToast({ title: "未配置订阅模板ID", icon: "none" });
+      return;
+    }
+    wx.requestSubscribeMessage({
+      tmplIds: [tid],
+      success: (res) => {
+        if (res && res[tid] === "accept") {
+          wx.showToast({ title: "提醒订阅授权成功", icon: "none" });
+          return;
+        }
+        wx.showToast({ title: "未同意订阅，离线提醒可能收不到", icon: "none" });
+      },
+      fail: (err) => {
+        wx.showToast({ title: (err && err.errMsg) || "订阅请求失败", icon: "none" });
+      },
+    });
+  },
+
+  promptSubscribeInvalid(payload) {
+    const now = Date.now();
+    if (now - this._subscribePromptAt < 5000) return;
+    this._subscribePromptAt = now;
+    const reason = String((payload && payload.reason) || "").trim();
+    const content = String((payload && payload.content) || "").trim() || "提醒订阅已失效，请重新授权。";
+    const text = reason ? `${content}\n原因：${reason}` : content;
+    wx.showModal({
+      title: "提醒订阅失效",
+      content: text,
+      confirmText: "去授权",
+      cancelText: "稍后",
+      success: (res) => {
+        if (res && res.confirm) {
+          this.requestReminderSubscribe();
+        }
+      },
+    });
+  },
+
   connectSocket() {
     if (!this.data.authed) return;
     if (this._wsTask) return;
@@ -736,6 +779,11 @@ Page({
         }
         this.setPendingState("");
         this.appendAssistantChunkStream(streamId, payload.chunk || "", payload.created_at || nowIso());
+        return;
+      }
+
+      if (payload.type === "subscribe_invalid") {
+        this.promptSubscribeInvalid(payload);
         return;
       }
 

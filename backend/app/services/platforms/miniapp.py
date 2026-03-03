@@ -127,5 +127,8 @@ async def send_subscribe_reminder(
     data = resp.json()
     errcode = int(data.get("errcode", -1))
     if errcode != 0:
+        errmsg = str(data.get("errmsg") or "").strip()
+        if errmsg:
+            return False, f"wx_err_{errcode}:{errmsg}"
         return False, f"wx_err_{errcode}"
     return True, ""

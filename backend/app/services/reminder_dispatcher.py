@@ -45,6 +45,13 @@ class DeliveryTarget:
     platform_id: str
 
 
+def _is_miniapp_subscribe_invalid_error(err: str) -> bool:
+    raw = str(err or "").lower()
+    if not raw:
+        return False
+    return ("wx_err_43101" in raw) or ("wx_err_47003" in raw)
+
+
 def _dedupe_targets(raw_targets: list[DeliveryTarget]) -> list[DeliveryTarget]:
     seen: set[tuple[str, str]] = set()
     out: list[DeliveryTarget] = []
@@ -170,6 +177,7 @@ async def dispatch_reminder(
 
     success_count = 0
     total_count = len(targets)
+    miniapp_subscribe_invalid_notified = False
 
     for target in targets:
         row = await _upsert_delivery_row(session, schedule=schedule, target=target)
@@ -190,6 +198,26 @@ async def dispatch_reminder(
         else:
             row.status = "FAILED"
             row.last_error = (err or "delivery failed")[:500]
+            if (
+                target.platform == "miniapp"
+                and not miniapp_subscribe_invalid_notified
+                and _is_miniapp_subscribe_invalid_error(err or "")
+            ):
+                miniapp_subscribe_invalid_notified = True
+                try:
+                    await get_notification_hub().send_to_user(
+                        user.id,
+                        {
+                            "type": "subscribe_invalid",
+                            "platform": "miniapp",
+                            "schedule_id": schedule.id,
+                            "reason": str(err or "")[:200],
+                            "content": "提醒订阅已失效，请重新授权，否则可能收不到离线提醒。",
+                            "created_at": _to_client_tz_iso(datetime.utcnow()),
+                        },
+                    )
+                except Exception:
+                    pass
         row.updated_at = datetime.utcnow()
         session.add(row)
         await session.commit()
