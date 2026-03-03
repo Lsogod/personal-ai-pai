@@ -71,9 +71,7 @@
             </view>
             <view class="income-metric">
               <text class="income-metric-label">富余</text>
-              <text class="income-metric-value {{monthlySurplus>=0?'surplus-pos':'surplus-neg'}}">
-                ¥{{monthlySurplus}}
-              </text>
+              <text class="income-metric-value {{monthlySurplus>=0?'surplus-pos':'surplus-neg'}}">¥{{monthlySurplus}}</text>
             </view>
           </view>
         </block>

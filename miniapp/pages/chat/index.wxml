@@ -120,7 +120,7 @@
   <view class="log-list" wx:if="{{!guideVisible}}">
     <view
       wx:for="{{messages}}"
-      wx:key="created_at"
+      wx:key="index"
       id="msg-{{index}}"
       class="log-entry"
     >

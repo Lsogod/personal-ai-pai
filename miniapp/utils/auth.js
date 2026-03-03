@@ -56,7 +56,18 @@ function handleAuthExpired(message = "登录已失效，请重新登录") {
     showCancel: false,
     confirmText: "去登录",
     success() {
-      wx.navigateTo({ url: `/pages/login/index?redirect=${redirect}` });
+      const url = `/pages/login/index?redirect=${redirect}`;
+      wx.reLaunch({
+        url,
+        fail() {
+          wx.redirectTo({
+            url,
+            fail() {
+              wx.navigateTo({ url });
+            },
+          });
+        },
+      });
     },
     complete() {
       setTimeout(() => {
