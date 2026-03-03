@@ -15,8 +15,14 @@
 }
 
 .guest-icon {
-  font-size: 56rpx;
-  margin-bottom: 20rpx;
+  width: 56rpx;
+  height: 56rpx;
+  margin: 0 auto 20rpx;
+}
+
+.guest-icon-img {
+  width: 100%;
+  height: 100%;
 }
 
 .guest-title {
@@ -603,8 +609,9 @@
   gap: 12rpx;
 }
 
-.empty-icon {
-  font-size: 48rpx;
+.empty-icon-img {
+  width: 48rpx;
+  height: 48rpx;
 }
 
 .empty-text {

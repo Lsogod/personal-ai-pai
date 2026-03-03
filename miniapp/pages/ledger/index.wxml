@@ -1,6 +1,8 @@
 <view class="ledger-page safe-bottom">
   <view class="guest-card card" wx:if="{{!authed}}">
-    <view class="guest-icon">💸</view>
+    <view class="guest-icon">
+      <image class="guest-icon-img" src="/assets/icons/ic-wallet.svg" mode="aspectFit" />
+    </view>
     <view class="guest-title">登录查看账单</view>
     <view class="guest-desc">登录后查看账单明细、分类统计与趋势分析。</view>
     <button class="btn-primary guest-btn" bindtap="onGoLogin">微信登录</button>
@@ -173,7 +175,7 @@
 
       <scroll-view class="bill-list" scroll-y="true" show-scrollbar="false" lower-threshold="120" bindscroll="onListScroll" bindscrolltolower="onListScrollToLower">
         <view class="empty-state" wx:if="{{filteredCount===0}}">
-          <text class="empty-icon">🧾</text>
+          <image class="empty-icon-img" src="/assets/icons/ic-receipt.svg" mode="aspectFit" />
           <text class="empty-text">暂无符合条件的账单</text>
           <view class="empty-action" bindtap="onResetFilters">清空筛选</view>
         </view>

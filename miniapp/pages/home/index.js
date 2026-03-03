@@ -39,6 +39,10 @@ Page({
     wx.switchTab({ url: "/pages/me/index" });
   },
 
+  onOpenCapabilitiesDetail() {
+    wx.navigateTo({ url: "/pages/home/capabilities/index" });
+  },
+
   onShow() {
     const app = getApp();
     const token = getToken() || "";

@@ -36,8 +36,13 @@
   <view class="notify-stack" wx:if="{{notifyCards.length > 0 && !guideVisible}}">
     <view class="notify-card" wx:for="{{notifyCards}}" wx:key="id">
       <view class="notify-head">
-        <text class="notify-title">⏰ 日程提醒</text>
-        <text class="notify-close" data-id="{{item.id}}" bindtap="onDismissNotify">✕</text>
+        <view class="notify-title">
+          <image class="notify-title-icon" src="/assets/icons/ic-clock-white.svg" mode="aspectFit" />
+          <text>日程提醒</text>
+        </view>
+        <view class="notify-close" data-id="{{item.id}}" bindtap="onDismissNotify">
+          <image class="notify-close-icon" src="/assets/icons/ic-close.svg" mode="aspectFit" />
+        </view>
       </view>
       <view class="notify-body">{{item.content}}</view>
       <view class="notify-time">{{item.timeText}}</view>
@@ -53,7 +58,10 @@
       </view>
       <view class="header-right">
         <view class="history-btn" bindtap="onToggleSidebar">
-          <text class="history-btn-text">📋 记录</text>
+          <view class="history-btn-text">
+            <image class="history-btn-icon" src="/assets/icons/ic-history.svg" mode="aspectFit" />
+            <text>记录</text>
+          </view>
         </view>
       </view>
     </view>

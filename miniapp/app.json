@@ -5,6 +5,7 @@
     "pages/calendar/index",
     "pages/me/index",
     "pages/chat/index",
+    "pages/home/capabilities/index",
     "pages/me/skills/index",
     "pages/me/binding/index",
     "pages/me/feedback/index",

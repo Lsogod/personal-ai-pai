@@ -77,6 +77,11 @@ function compactText(value, maxLen = 80) {
   return `${src.slice(0, maxLen)}...`;
 }
 
+function isTimeoutError(err) {
+  const text = String((err && err.message) || err || "").toLowerCase();
+  return text.includes("timeout") || text.includes("timed out") || text.includes("超时");
+}
+
 function normalizeMessage(item) {
   const role = item.role === "assistant" ? "assistant" : "user";
   const content = item.content || "";
@@ -119,12 +124,10 @@ function buildOnboardingView(profile) {
       guideVisible: true,
       onboardingTitle: "账号绑定引导",
       onboardingHint: "请先确认你在其他客户端是否已有账号，也可以直接输入绑定命令。",
-      onboardingPlaceholder: "输入 有 / 没有 / 继续 / /bind ...",
+      onboardingPlaceholder: "输入 有 / 没有",
       onboardingSuggestions: [
         { label: "有", text: "有" },
         { label: "没有", text: "没有" },
-        { label: "继续", text: "继续" },
-        { label: "生成绑定码", text: "/bind new" },
       ],
     };
   }
@@ -135,6 +138,9 @@ function buildOnboardingView(profile) {
       onboardingTitle: "设置你的称呼",
       onboardingHint: "完成这个步骤后，我会按你设定的名字来称呼你。",
       onboardingPlaceholder: "输入你的称呼",
+      onboardingSuggestions: [
+        { label: "主人", text: "主人" },
+      ],
     };
   }
 
@@ -142,10 +148,10 @@ function buildOnboardingView(profile) {
     guideVisible: true,
     onboardingTitle: "给助手起名",
     onboardingHint: "再完成一步后将打开完整输入框，你可以开始正常使用指令面板。",
-    onboardingPlaceholder: "例如：贾维斯 🤖",
+    onboardingPlaceholder: "例如：贾维斯",
     onboardingSuggestions: [
-      { label: "贾维斯 🤖", text: "贾维斯 🤖" },
-      { label: "PAI 🤖", text: "PAI 🤖" },
+      { label: "贾维斯", text: "贾维斯" },
+      { label: "PAI", text: "PAI" },
     ],
   };
 }
@@ -833,13 +839,19 @@ Page({
       this.refreshStats();
       this.refreshProfileState();
     } catch (err) {
-      this.setPendingState("");
-      // Rollback input on failure to prevent user text loss.
-      this.setData({
-        inputText: text,
-        selectedImages: selectedImagesSnapshot
-      });
-      wx.showToast({ title: err.message || "发送失败", icon: "none" });
+      if (isTimeoutError(err) && this.data.wsOpen) {
+        // Request timeout does not mean server dropped the turn; if websocket is
+        // connected we continue waiting for async push to avoid false "failure".
+        this.setPendingState("thinking");
+      } else {
+        this.setPendingState("");
+        // Rollback input on failure to prevent user text loss.
+        this.setData({
+          inputText: text,
+          selectedImages: selectedImagesSnapshot
+        });
+        wx.showToast({ title: err.message || "发送失败", icon: "none" });
+      }
     } finally {
       this._sendingLock = false;
       this.setData({ sending: false });

@@ -22,7 +22,8 @@
 
 /* Guest */
 .guest-card { padding: 40rpx 32rpx; text-align: center; }
-.guest-icon { font-size: 56rpx; margin-bottom: 20rpx; }
+.guest-icon { width: 56rpx; height: 56rpx; margin: 0 auto 20rpx; }
+.guest-icon-img { width: 100%; height: 100%; }
 .guest-title { font-size: 34rpx; font-weight: 700; color: var(--c-text); }
 .guest-desc { margin-top: 10rpx; font-size: 25rpx; color: var(--c-text-3); line-height: 1.6; }
 .guest-btn { margin-top: 28rpx; height: 92rpx; font-size: 30rpx; }
@@ -103,11 +104,12 @@
   width: 40rpx; height: 40rpx; border-radius: 50%;
   border: 3rpx solid var(--c-border-light); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  font-size: 22rpx; color: transparent; transition: all 0.2s;
+  transition: all 0.2s;
 }
 .detail-check.checked {
-  background: #10B981; border-color: #10B981; color: #fff;
+  background: #10B981; border-color: #10B981;
 }
+.detail-check-icon { width: 20rpx; height: 20rpx; }
 .detail-main { flex: 1; min-width: 0; }
 .detail-content { font-size: 26rpx; font-weight: 600; color: var(--c-text); line-height: 1.4; display: block; }
 .detail-content.done-text { text-decoration: line-through; color: var(--c-text-3); }

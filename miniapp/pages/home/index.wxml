@@ -22,17 +22,17 @@
     </view>
     <view class="entry-grid">
       <view class="entry-card card" bindtap="onQuickAddLedger">
-        <text class="entry-icon">🧾</text>
+        <image class="entry-icon-img" src="/assets/icons/ic-receipt.svg" mode="aspectFit" />
         <text class="entry-name">记一笔</text>
         <text class="entry-desc">跳到账单新增</text>
       </view>
       <view class="entry-card card" bindtap="onQuickAddSchedule">
-        <text class="entry-icon">📅</text>
+        <image class="entry-icon-img" src="/assets/icons/ic-calendar.svg" mode="aspectFit" />
         <text class="entry-name">新增日程</text>
         <text class="entry-desc">跳转日程新增</text>
       </view>
       <view class="entry-card card" bindtap="onOpenMe">
-        <text class="entry-icon">👤</text>
+        <image class="entry-icon-img" src="/assets/icons/ic-user.svg" mode="aspectFit" />
         <text class="entry-name">我的</text>
         <text class="entry-desc">账号与设置</text>
       </view>
@@ -42,25 +42,34 @@
   <view class="section">
     <view class="section-head">
       <text class="section-title">核心能力</text>
+      <view class="section-more" bindtap="onOpenCapabilitiesDetail">查看详情</view>
     </view>
     <view class="cap-grid">
-      <view class="cap-card card">
-        <view class="cap-icon cap-icon-blue">🧾</view>
+      <view class="cap-card card" bindtap="onOpenCapabilitiesDetail">
+        <view class="cap-icon cap-icon-blue">
+          <image class="cap-icon-img" src="/assets/icons/ic-receipt.svg" mode="aspectFit" />
+        </view>
         <text class="cap-name">账单管理</text>
         <text class="cap-desc">支持分类、筛选、统计和趋势查看。</text>
       </view>
-      <view class="cap-card card">
-        <view class="cap-icon cap-icon-pink">⏰</view>
+      <view class="cap-card card" bindtap="onOpenCapabilitiesDetail">
+        <view class="cap-icon cap-icon-pink">
+          <image class="cap-icon-img" src="/assets/icons/ic-clock.svg" mode="aspectFit" />
+        </view>
         <text class="cap-name">日程提醒</text>
         <text class="cap-desc">快速创建提醒并可跟踪执行状态。</text>
       </view>
-      <view class="cap-card card">
-        <view class="cap-icon cap-icon-green">🔄</view>
+      <view class="cap-card card" bindtap="onOpenCapabilitiesDetail">
+        <view class="cap-icon cap-icon-green">
+          <image class="cap-icon-img" src="/assets/icons/ic-sync.svg" mode="aspectFit" />
+        </view>
         <text class="cap-name">多端同步</text>
         <text class="cap-desc">小程序与 Web 账号支持绑定互通。</text>
       </view>
-      <view class="cap-card card">
-        <view class="cap-icon cap-icon-amber">🛠</view>
+      <view class="cap-card card" bindtap="onOpenCapabilitiesDetail">
+        <view class="cap-icon cap-icon-amber">
+          <image class="cap-icon-img" src="/assets/icons/ic-tools.svg" mode="aspectFit" />
+        </view>
         <text class="cap-name">问题反馈</text>
         <text class="cap-desc">可在个人中心提交建议与版本反馈。</text>
       </view>

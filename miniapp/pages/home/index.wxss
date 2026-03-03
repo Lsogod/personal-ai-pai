@@ -98,8 +98,8 @@
 
 .section-head {
   display: flex;
-  align-items: baseline;
-  gap: 12rpx;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 20rpx;
   padding: 0 4rpx;
 }
@@ -108,6 +108,14 @@
   font-size: 32rpx;
   font-weight: 700;
   color: var(--c-text);
+}
+
+.section-more {
+  font-size: 22rpx;
+  color: var(--c-primary);
+  padding: 6rpx 12rpx;
+  border-radius: var(--r-full);
+  background: var(--c-primary-light);
 }
 
 .entry-grid {
@@ -128,8 +136,9 @@
   transform: scale(0.98);
 }
 
-.entry-icon {
-  font-size: 34rpx;
+.entry-icon-img {
+  width: 36rpx;
+  height: 36rpx;
 }
 
 .entry-name {
@@ -167,7 +176,11 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 30rpx;
+}
+
+.cap-icon-img {
+  width: 34rpx;
+  height: 34rpx;
 }
 
 .cap-icon-blue {

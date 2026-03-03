@@ -1,0 +1,65 @@
+<view class="cap-page safe-bottom">
+  <view class="cap-hero card">
+    <view class="cap-hero-title">PAI 核心能力</view>
+    <view class="cap-hero-desc">覆盖记账、日程、多端同步和反馈闭环，支持在小程序中快速完成高频效率任务。</view>
+    <button class="btn-primary cap-hero-btn" bindtap="onOpenCommand">打开指令面板</button>
+  </view>
+
+  <view class="cap-list">
+    <view class="cap-item card">
+      <view class="cap-item-head">
+        <view class="cap-item-icon cap-blue">
+          <image class="cap-item-icon-img" src="/assets/icons/ic-receipt.svg" mode="aspectFit" />
+        </view>
+        <view class="cap-item-meta">
+          <view class="cap-item-title">账单管理</view>
+          <view class="cap-item-sub">分类记录、趋势图、多维筛选</view>
+        </view>
+      </view>
+      <view class="cap-item-detail">支持按分类、金额、时间范围筛选账单，并展示月度概览、分类占比和趋势变化。</view>
+      <button class="btn-secondary cap-item-btn" bindtap="onOpenLedger">去账单页</button>
+    </view>
+
+    <view class="cap-item card">
+      <view class="cap-item-head">
+        <view class="cap-item-icon cap-pink">
+          <image class="cap-item-icon-img" src="/assets/icons/ic-clock.svg" mode="aspectFit" />
+        </view>
+        <view class="cap-item-meta">
+          <view class="cap-item-title">日程提醒</view>
+          <view class="cap-item-sub">新增、编辑、执行状态跟踪</view>
+        </view>
+      </view>
+      <view class="cap-item-detail">可直接创建提醒，支持标记完成状态与按日期查看，方便统一管理每日待办。</view>
+      <button class="btn-secondary cap-item-btn" bindtap="onOpenCalendar">去日程页</button>
+    </view>
+
+    <view class="cap-item card">
+      <view class="cap-item-head">
+        <view class="cap-item-icon cap-green">
+          <image class="cap-item-icon-img" src="/assets/icons/ic-sync.svg" mode="aspectFit" />
+        </view>
+        <view class="cap-item-meta">
+          <view class="cap-item-title">多端同步</view>
+          <view class="cap-item-sub">Web 与小程序账号打通</view>
+        </view>
+      </view>
+      <view class="cap-item-detail">通过账号绑定功能实现跨端数据同步，确保在不同入口使用时状态一致。</view>
+      <button class="btn-secondary cap-item-btn" bindtap="onOpenBinding">去账号绑定</button>
+    </view>
+
+    <view class="cap-item card">
+      <view class="cap-item-head">
+        <view class="cap-item-icon cap-amber">
+          <image class="cap-item-icon-img" src="/assets/icons/ic-feedback.svg" mode="aspectFit" />
+        </view>
+        <view class="cap-item-meta">
+          <view class="cap-item-title">问题反馈</view>
+          <view class="cap-item-sub">版本信息 + 建议一键提交</view>
+        </view>
+      </view>
+      <view class="cap-item-detail">可在个人中心提交建议与问题描述，反馈会携带版本与账号信息，便于快速定位。</view>
+      <button class="btn-secondary cap-item-btn" bindtap="onOpenFeedback">去反馈页</button>
+    </view>
+  </view>
+</view>

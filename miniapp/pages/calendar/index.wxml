@@ -8,7 +8,9 @@
 
   <!-- Guest -->
   <view class="guest-card card" wx:if="{{!authed}}">
-    <view class="guest-icon">📅</view>
+    <view class="guest-icon">
+      <image class="guest-icon-img" src="/assets/icons/ic-calendar.svg" mode="aspectFit" />
+    </view>
     <view class="guest-title">登录查看日程</view>
     <view class="guest-desc">登录后查看提醒、执行状态与触发时间。</view>
     <button class="btn-primary guest-btn" bindtap="onGoLogin">微信登录查看日程</button>
@@ -95,7 +97,7 @@
         <view wx:if="{{activeDay.schedules.length===0}}" class="detail-empty">当天无日程</view>
         <view wx:for="{{activeDay.schedules}}" wx:key="id" class="detail-row">
           <view class="detail-check {{item.status==='EXECUTED'?'checked':''}}" data-item="{{item}}" bindtap="onToggleScheduleStatus">
-            <text wx:if="{{item.status==='EXECUTED'}}">✓</text>
+            <image wx:if="{{item.status==='EXECUTED'}}" class="detail-check-icon" src="/assets/icons/ic-check.svg" mode="aspectFit" />
           </view>
           <view class="detail-main">
             <text class="detail-content {{item.status==='EXECUTED'?'done-text':''}}">{{item.content}}</text>

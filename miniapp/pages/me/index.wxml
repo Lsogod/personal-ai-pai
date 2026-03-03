@@ -1,14 +1,16 @@
 <view class="me-page safe-bottom">
   <view class="profile-hero" wx:if="{{authed && profile}}">
     <view class="avatar-ring">
-      <text class="avatar-emoji">🧑</text>
+      <image class="avatar-icon" src="/assets/icons/ic-user.svg" mode="aspectFit" />
     </view>
     <view class="profile-name">{{profile.nickname || '用户'}}</view>
     <view class="profile-sub">{{profile.platform || 'miniapp'}} · 阶段 {{profile.setup_stage}}</view>
   </view>
 
   <view class="guest-card card" wx:if="{{!authed}}">
-    <view class="guest-icon">👤</view>
+    <view class="guest-icon">
+      <image class="guest-icon-img" src="/assets/icons/ic-user.svg" mode="aspectFit" />
+    </view>
     <view class="guest-title">我的</view>
     <view class="guest-desc">登录后可查看技能、绑定账号、订阅提醒和问题反馈。</view>
     <button class="btn-primary action-btn" bindtap="onGoLogin">微信登录</button>
@@ -16,28 +18,36 @@
 
   <view class="card menu-card">
     <view class="menu-row" bindtap="onOpenSkills">
-      <view class="menu-icon-wrap menu-icon-purple">🧠</view>
+      <view class="menu-icon-wrap menu-icon-purple">
+        <image class="menu-icon" src="/assets/icons/ic-skill.svg" mode="aspectFit" />
+      </view>
       <text class="menu-label">技能管理</text>
       <text class="menu-chevron">›</text>
     </view>
     <view class="menu-line"></view>
 
     <view class="menu-row" bindtap="onOpenBinding">
-      <view class="menu-icon-wrap menu-icon-blue">🔗</view>
+      <view class="menu-icon-wrap menu-icon-blue">
+        <image class="menu-icon" src="/assets/icons/ic-link.svg" mode="aspectFit" />
+      </view>
       <text class="menu-label">账号绑定</text>
       <text class="menu-chevron">›</text>
     </view>
     <view class="menu-line"></view>
 
     <view class="menu-row" bindtap="onEnableReminderSubscribe">
-      <view class="menu-icon-wrap menu-icon-orange">🔔</view>
+      <view class="menu-icon-wrap menu-icon-orange">
+        <image class="menu-icon" src="/assets/icons/ic-bell.svg" mode="aspectFit" />
+      </view>
       <text class="menu-label">提醒订阅</text>
       <text class="menu-chevron">›</text>
     </view>
     <view class="menu-line"></view>
 
     <view class="menu-row" bindtap="onOpenFeedback">
-      <view class="menu-icon-wrap menu-icon-green">💬</view>
+      <view class="menu-icon-wrap menu-icon-green">
+        <image class="menu-icon" src="/assets/icons/ic-feedback.svg" mode="aspectFit" />
+      </view>
       <text class="menu-label">问题反馈</text>
       <text class="menu-chevron">›</text>
     </view>

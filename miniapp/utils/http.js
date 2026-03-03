@@ -98,6 +98,7 @@ function deleteConversation(conversationId) {
 function sendChat(content, imageUrls) {
   return request("/api/chat/send", {
     method: "POST",
+    timeout: 70000,
     data: {
       content,
       image_urls: imageUrls || [],
