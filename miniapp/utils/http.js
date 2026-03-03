@@ -1,5 +1,5 @@
 const config = require("../config");
-const { getToken } = require("./auth");
+const { getToken, handleAuthExpired } = require("./auth");
 
 function toMessage(payload, statusCode) {
   if (typeof payload === "string" && payload) {
@@ -16,10 +16,35 @@ function toMessage(payload, statusCode) {
       }).join("; ");
     }
   }
+  const detailText =
+    payload && typeof payload === "object" && typeof payload.detail === "string"
+      ? payload.detail.toLowerCase()
+      : "";
+  if (
+    detailText.includes("invalid token") ||
+    detailText.includes("token has expired") ||
+    detailText.includes("signature has expired")
+  ) {
+    return "登录已失效，请重新登录";
+  }
   if (statusCode >= 500) return "服务器暂时不可用";
   if (statusCode === 401) return "登录已失效，请重新登录";
+  if (statusCode === 408) return "请求超时，请稍后重试";
   if (statusCode === 400) return "请求参数错误";
   return `请求失败(${statusCode})`;
+}
+
+function isAuthExpired(statusCode, payload) {
+  if (statusCode === 401) return true;
+  const detailText =
+    payload && typeof payload === "object" && typeof payload.detail === "string"
+      ? payload.detail.toLowerCase()
+      : "";
+  return (
+    detailText.includes("invalid token") ||
+    detailText.includes("token has expired") ||
+    detailText.includes("signature has expired")
+  );
 }
 
 function request(path, options = {}) {
@@ -40,9 +65,17 @@ function request(path, options = {}) {
           resolve(res.data);
           return;
         }
+        if (isAuthExpired(res.statusCode, res.data)) {
+          handleAuthExpired("登录已失效，请重新登录");
+        }
         reject(new Error(toMessage(res.data, res.statusCode)));
       },
       fail(err) {
+        const errMsg = String(err.errMsg || "");
+        if (errMsg.toLowerCase().includes("timeout")) {
+          reject(new Error("网络超时，请检查网络后重试"));
+          return;
+        }
         reject(new Error(err.errMsg || "网络异常"));
       }
     });

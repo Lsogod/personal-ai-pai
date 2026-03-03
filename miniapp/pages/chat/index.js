@@ -1,4 +1,4 @@
-const { getToken } = require("../../utils/auth");
+const { getToken, handleAuthExpired } = require("../../utils/auth");
 const {
   fetchHistory,
   fetchConversations,
@@ -187,6 +187,7 @@ Page({
     this._pingTimer = null;
     this._seenKeys = new Set();
     this._seenReminderKeys = new Set();
+    this._wsChunkStreams = new Map();
     this._sendingLock = false;
     this._pendingUserEcho = [];
     this._streamQueue = [];
@@ -238,6 +239,7 @@ Page({
   onHide() {
     this.closeSocket();
     this.stopStream();
+    this.clearWsChunkStreams();
     this.clearScrollRetry();
     this.clearPendingReplyTimer();
   },
@@ -245,6 +247,7 @@ Page({
   onUnload() {
     this.closeSocket();
     this.stopStream();
+    this.clearWsChunkStreams();
     this.clearScrollRetry();
     this.clearPendingReplyTimer();
   },
@@ -307,6 +310,7 @@ Page({
       const messages = (history || []).map(normalizeMessage);
       this._seenKeys.clear();
       messages.forEach((m) => this._seenKeys.add(this.messageKey(m)));
+      this.clearWsChunkStreams();
       this.applyProfile(profile, {
         stats: stats || { total: 0, count: 0 },
         messages,
@@ -468,6 +472,49 @@ Page({
     this.setData(patch, () => this.scrollToBottom());
   },
 
+  clearWsChunkStreams() {
+    this._wsChunkStreams = new Map();
+  },
+
+  appendAssistantChunkStream(streamId, chunk, createdAt) {
+    const sid = String(streamId || "").trim();
+    if (!sid) return;
+    const text = String(chunk || "");
+    const at = String(createdAt || nowIso());
+    let index = this._wsChunkStreams.get(sid);
+    const messages = [...this.data.messages];
+    if (!Number.isFinite(index) || !messages[index]) {
+      const seed = normalizeMessage({ role: "assistant", content: "", created_at: at });
+      messages.push(seed);
+      index = messages.length - 1;
+      this._wsChunkStreams.set(sid, index);
+    }
+    if (text) {
+      const current = messages[index];
+      const nextContent = `${current.content || ""}${text}`;
+      messages[index] = {
+        ...current,
+        content: nextContent,
+        display_content: nextContent,
+        content_nodes: markdownToRichNodes(nextContent),
+      };
+    }
+    this.setData({ messages }, () => this.scrollToBottom());
+  },
+
+  finishAssistantChunkStream(streamId) {
+    const sid = String(streamId || "").trim();
+    if (!sid) return;
+    const index = this._wsChunkStreams.get(sid);
+    this._wsChunkStreams.delete(sid);
+    if (!Number.isFinite(index)) return;
+    const msg = this.data.messages[index];
+    if (msg && msg.content) {
+      this._seenKeys.add(this.messageKey(msg));
+    }
+    this.clearPendingByAssistantSignal();
+  },
+
   clearPendingByAssistantSignal() {
     if (!this.data.pendingState) return;
     this._pendingNonce += 1;
@@ -627,13 +674,18 @@ Page({
       }, 20000);
     });
 
-    task.onClose(() => {
+    task.onClose((evt) => {
       this.setData({ wsOpen: false });
       if (this._pingTimer) {
         clearInterval(this._pingTimer);
         this._pingTimer = null;
       }
       this._wsTask = null;
+      if (evt && Number(evt.code) === 4401) {
+        this.setData({ authed: false });
+        handleAuthExpired("登录已失效，请重新登录");
+        return;
+      }
       // 自动重连（3秒后），避免网络波动导致断连
       if (this.data.authed && !this._wsReconnectTimer) {
         this._wsReconnectTimer = setTimeout(() => {
@@ -643,9 +695,14 @@ Page({
       }
     });
 
-    task.onError(() => {
+    task.onError((evt) => {
       this.setData({ wsOpen: false });
       this._wsTask = null;
+      const msg = String((evt && evt.errMsg) || "").toLowerCase();
+      if (msg.includes("4401") || msg.includes("invalid token")) {
+        this.setData({ authed: false });
+        handleAuthExpired("登录已失效，请重新登录");
+      }
     });
 
     task.onMessage((evt) => {
@@ -666,6 +723,19 @@ Page({
         this.pushNotify({ content, createdAt });
         wx.vibrateShort({ type: "light" });
         this.refreshStats();
+        return;
+      }
+
+      if (payload.type === "message_chunk") {
+        const streamId = String(payload.stream_id || "").trim();
+        if (!streamId) return;
+        if (payload.done === true) {
+          this.finishAssistantChunkStream(streamId);
+          this.refreshStats();
+          return;
+        }
+        this.setPendingState("");
+        this.appendAssistantChunkStream(streamId, payload.chunk || "", payload.created_at || nowIso());
         return;
       }
 

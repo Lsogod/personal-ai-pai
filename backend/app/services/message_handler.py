@@ -48,6 +48,10 @@ from app.services.runtime_context import (
     reset_tool_platform,
     set_tool_conversation_id,
     reset_tool_conversation_id,
+    set_llm_streamer,
+    reset_llm_streamer,
+    set_llm_stream_nodes,
+    reset_llm_stream_nodes,
 )
 
 
@@ -940,6 +944,31 @@ async def handle_message(
         )
 
     debug_payload: dict[str, Any] | None = None
+    miniapp_stream_enabled = platform == "miniapp"
+    miniapp_stream_used = False
+    miniapp_stream_chunks: list[str] = []
+    miniapp_stream_id = f"miniapp:{conversation.id}:{int(user_message_row.id or 0)}"
+    miniapp_stream_created_at = _to_client_tz_iso(datetime.now(timezone.utc))
+
+    async def _emit_miniapp_stream_chunk(chunk: str) -> None:
+        nonlocal miniapp_stream_used
+        text = str(chunk or "")
+        if not text:
+            return
+        miniapp_stream_chunks.append(text)
+        miniapp_stream_used = True
+        await get_notification_hub().send_to_user(
+            user_id,
+            {
+                "type": "message_chunk",
+                "stream_id": miniapp_stream_id,
+                "chunk": text,
+                "done": False,
+                "platform": platform,
+                "conversation_id": conversation.id,
+                "created_at": miniapp_stream_created_at,
+            },
+        )
 
     if await _is_rebind_natural_intent(message.content):
         responses = [UNSUPPORTED_REBIND_TEXT]
@@ -1004,6 +1033,14 @@ async def handle_message(
                 tool_user_token = set_tool_user_id(user_id)
                 tool_platform_token = set_tool_platform(platform)
                 tool_conv_token = set_tool_conversation_id(conversation.id)
+                stream_token = None
+                stream_nodes_token = None
+                if miniapp_stream_enabled:
+                    stream_token = set_llm_streamer(_emit_miniapp_stream_chunk)
+                    # Stream only terminal NL generation nodes.
+                    stream_nodes_token = set_llm_stream_nodes(
+                        {"chat_manager_final", "help_center", "complex_task_agent"}
+                    )
                 try:
                     try:
                         result = await graph.ainvoke(
@@ -1025,11 +1062,41 @@ async def handle_message(
                         responses = [error_text]
                         debug_payload = {"route_intent": "unknown", "error": error_code}
                 finally:
+                    if stream_nodes_token is not None:
+                        reset_llm_stream_nodes(stream_nodes_token)
+                    if stream_token is not None:
+                        reset_llm_streamer(stream_token)
                     reset_tool_conversation_id(tool_conv_token)
                     reset_tool_platform(tool_platform_token)
                     reset_tool_user_id(tool_user_token)
                     reset_scheduler(scheduler_token)
                     reset_session(session_token)
+
+    if miniapp_stream_enabled and responses:
+        joined = "\n".join(responses)
+        streamed_text = "".join(miniapp_stream_chunks)
+        if joined and not streamed_text:
+            await _emit_miniapp_stream_chunk(joined)
+        elif joined and streamed_text and joined.startswith(streamed_text):
+            suffix = joined[len(streamed_text) :]
+            if suffix:
+                await _emit_miniapp_stream_chunk(suffix)
+        if joined:
+            miniapp_stream_used = True
+        if miniapp_stream_used:
+            await get_notification_hub().send_to_user(
+                user_id,
+                {
+                    "type": "message_chunk",
+                    "stream_id": miniapp_stream_id,
+                    "chunk": "",
+                    "done": True,
+                    "platform": platform,
+                    "conversation_id": conversation.id,
+                    "created_at": miniapp_stream_created_at,
+                },
+            )
+
     assistant_outputs: list[str] = []
     for text in responses:
         await _sender.send_text(reply_platform, reply_platform_id, text)
@@ -1056,7 +1123,7 @@ async def handle_message(
         )
         await session.commit()
         assistant_outputs.append(text)
-        if platform != "web":
+        if platform != "web" and not (platform == "miniapp" and miniapp_stream_used):
             await get_notification_hub().send_to_user(
                 user_id,
                 {
