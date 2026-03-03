@@ -6,6 +6,7 @@ from pydantic import BaseModel, EmailStr
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
+    confirm_password: str
 
 
 class LoginRequest(BaseModel):
@@ -28,6 +29,7 @@ class SendEmailCodeResponse(BaseModel):
 class RegisterWithCodeRequest(BaseModel):
     email: EmailStr
     password: str
+    confirm_password: str
     code: str
 
 
@@ -40,6 +42,7 @@ class ResetPasswordRequest(BaseModel):
     email: EmailStr
     code: str
     new_password: str
+    confirm_password: str
 
 
 class ActionResponse(BaseModel):

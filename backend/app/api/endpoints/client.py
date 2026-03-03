@@ -247,6 +247,11 @@ def _validate_password_strength(password: str) -> str:
     return text
 
 
+def _validate_password_confirmation(password: str, confirm_password: str) -> None:
+    if str(password or "") != str(confirm_password or ""):
+        raise HTTPException(status_code=400, detail="password confirmation mismatch")
+
+
 @router.post("/auth/email/send-code", response_model=SendEmailCodeResponse)
 async def send_auth_email_code(payload: SendEmailCodeRequest, session: AsyncSession = Depends(get_session)):
     email = normalize_email(str(payload.email or ""))
@@ -293,6 +298,7 @@ async def send_auth_email_code(payload: SendEmailCodeRequest, session: AsyncSess
 async def register_with_code(payload: RegisterWithCodeRequest, session: AsyncSession = Depends(get_session)):
     email = normalize_email(str(payload.email or ""))
     password = _validate_password_strength(payload.password)
+    _validate_password_confirmation(payload.password, payload.confirm_password)
 
     existing = await session.execute(select(User).where(User.email == email).limit(1))
     if existing.scalar_one_or_none():
@@ -334,7 +340,7 @@ async def login_with_code(payload: LoginWithCodeRequest, session: AsyncSession =
     result = await session.execute(select(User).where(User.email == email).order_by(User.id.desc()).limit(1))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=401, detail="invalid credentials")
+        raise HTTPException(status_code=400, detail="email not registered")
     token = create_access_token(user.id, source_platform="web")
     return TokenResponse(access_token=token)
 
@@ -343,6 +349,7 @@ async def login_with_code(payload: LoginWithCodeRequest, session: AsyncSession =
 async def reset_password(payload: ResetPasswordRequest, session: AsyncSession = Depends(get_session)):
     email = normalize_email(str(payload.email or ""))
     new_password = _validate_password_strength(payload.new_password)
+    _validate_password_confirmation(payload.new_password, payload.confirm_password)
     try:
         await verify_email_code(email=email, purpose=PURPOSE_RESET_PASSWORD, code=payload.code)
     except EmailCodeInvalidError as exc:
@@ -366,6 +373,7 @@ async def reset_password(payload: ResetPasswordRequest, session: AsyncSession = 
 async def register(payload: RegisterRequest, session: AsyncSession = Depends(get_session)):
     email = normalize_email(str(payload.email or ""))
     password = _validate_password_strength(payload.password)
+    _validate_password_confirmation(payload.password, payload.confirm_password)
     result = await session.execute(select(User).where(User.email == email).limit(1))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="email already exists")
@@ -391,7 +399,9 @@ async def login(payload: LoginRequest, session: AsyncSession = Depends(get_sessi
     email = normalize_email(str(payload.email or ""))
     result = await session.execute(select(User).where(User.email == email).order_by(User.id.desc()).limit(1))
     user = result.scalar_one_or_none()
-    if not user or not user.hashed_password:
+    if not user:
+        raise HTTPException(status_code=400, detail="email not registered")
+    if not user.hashed_password:
         raise HTTPException(status_code=401, detail="invalid credentials")
     if not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="invalid credentials")

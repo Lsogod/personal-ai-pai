@@ -23,6 +23,7 @@ function translateDetailMessage(raw: string) {
   if (text.includes("email not registered")) return "该邮箱尚未注册。";
   if (text.includes("invalid credentials")) return "邮箱或密码错误。";
   if (text.includes("password too short")) return "密码至少 6 位。";
+  if (text.includes("password confirmation mismatch")) return "两次输入的密码不一致。";
   if (text.includes("verification code incorrect")) return "验证码错误，请重新输入。";
   if (text.includes("verification code expired")) return "验证码已过期，请重新获取。";
   if (text.includes("verification code send too frequently")) return "验证码发送过于频繁，请稍后再试。";

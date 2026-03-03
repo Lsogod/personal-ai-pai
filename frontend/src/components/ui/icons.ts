@@ -26,4 +26,6 @@ export {
   LayoutGrid,
   Copy,
   Check,
+  Eye,
+  EyeOff,
 } from "lucide-react";
