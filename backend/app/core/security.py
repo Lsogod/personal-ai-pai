@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 import jwt
 from passlib.context import CryptContext
@@ -22,17 +22,30 @@ def verify_password(password: str, hashed_password: str) -> bool:
     return pwd_context.verify(password, hashed_password)
 
 
-def create_access_token(user_id: int) -> str:
+def create_access_token(user_id: int, source_platform: str | None = None) -> str:
     settings = get_settings()
     expire = datetime.utcnow() + timedelta(minutes=settings.jwt_exp_minutes)
-    payload = {"sub": str(user_id), "exp": expire}
+    payload: dict[str, Any] = {"sub": str(user_id), "exp": expire}
+    platform = str(source_platform or "").strip().lower()
+    if platform:
+        payload["src"] = platform
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def decode_token(token: str) -> int:
+def decode_token_claims(token: str) -> dict[str, Any]:
     settings = get_settings()
     try:
         payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+        if not isinstance(payload, dict):
+            raise ValueError("invalid jwt payload")
+        return payload
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="invalid token") from exc
+
+
+def decode_token(token: str) -> int:
+    payload = decode_token_claims(token)
+    try:
         return int(payload.get("sub"))
     except Exception as exc:
         raise HTTPException(status_code=401, detail="invalid token") from exc

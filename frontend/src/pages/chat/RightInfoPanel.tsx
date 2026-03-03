@@ -19,8 +19,8 @@ const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "ledger", label: "账单", icon: Wallet },
   { key: "calendar", label: "日程", icon: Calendar },
   { key: "skills", label: "技能", icon: Zap },
-  { key: "execution", label: "执行", icon: Bot },
   { key: "binding", label: "绑定", icon: Link2 },
+  { key: "execution", label: "执行", icon: Bot },
 ];
 
 export function RightInfoPanel({

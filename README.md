@@ -221,7 +221,11 @@ pai/
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/api/auth/register` | 注册新用户 |
+| POST | `/api/auth/register/code` | 邮箱验证码注册 |
 | POST | `/api/auth/login` | 登录获取 JWT |
+| POST | `/api/auth/login/code` | 邮箱验证码登录 |
+| POST | `/api/auth/email/send-code` | 发送邮箱验证码（注册/登录/重置密码） |
+| POST | `/api/auth/password/reset` | 邮箱验证码重置密码 |
 | POST | `/api/miniapp/auth/login` | 小程序登录（code 换取 JWT） |
 
 ### 对话
@@ -417,6 +421,17 @@ cp miniapp/config.local.example.js miniapp/config.local.js
 | `MCP_FETCH_URL` | 条件必填 | - | MCP Fetch 服务地址（`MCP_FETCH_ENABLED=true` 时必填） |
 | `MCP_FETCH_TIMEOUT_SEC` | - | `30` | MCP 请求超时秒数 |
 | `MCP_FETCH_DEFAULT_MAX_LENGTH` | - | `5000` | 默认抓取字符上限 |
+| `SMTP_HOST` | - | - | SMTP 服务器地址（如 `smtp.qq.com`） |
+| `SMTP_PORT` | - | `465` | SMTP 端口 |
+| `SMTP_USER` | - | - | SMTP 用户名（QQ 邮箱一般为完整邮箱） |
+| `SMTP_PASSWORD` | - | - | SMTP 授权码 |
+| `SMTP_FROM_EMAIL` | - | - | 发件邮箱（默认同 `SMTP_USER`） |
+| `SMTP_FROM_NAME` | - | `PAI` | 发件人昵称 |
+| `SMTP_USE_SSL` | - | `true` | 是否使用 SSL SMTP |
+| `SMTP_USE_STARTTLS` | - | `false` | 非 SSL 时是否启用 STARTTLS |
+| `AUTH_EMAIL_CODE_TTL_SEC` | - | `600` | 邮箱验证码有效期（秒） |
+| `AUTH_EMAIL_CODE_COOLDOWN_SEC` | - | `60` | 邮箱验证码发送冷却时间（秒） |
+| `AUTH_EMAIL_CODE_MAX_VERIFY_ATTEMPTS` | - | `8` | 单次验证码最大校验失败次数 |
 | `LONG_TERM_MEMORY_ENABLED` | - | `true` | 是否启用长期记忆 |
 | `LONG_TERM_MEMORY_MIN_CONFIDENCE` | - | `0.75` | 写入长期记忆的最小置信度 |
 | `LONG_TERM_MEMORY_MAX_WRITE_ITEMS` | - | `6` | 单轮最多写入记忆条数 |

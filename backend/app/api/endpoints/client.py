@@ -3,10 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, List
+from typing import Any, List, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +21,17 @@ from app.models.identity import UserIdentity
 from app.models.feedback import UserFeedback
 from app.models.reminder_delivery import ReminderDelivery
 from app.models.app_setting import AppSetting
-from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse
+from app.schemas.auth import (
+    ActionResponse,
+    LoginRequest,
+    LoginWithCodeRequest,
+    RegisterRequest,
+    RegisterWithCodeRequest,
+    ResetPasswordRequest,
+    SendEmailCodeRequest,
+    SendEmailCodeResponse,
+    TokenResponse,
+)
 from app.schemas.auth import MiniappLoginRequest, MiniappTokenResponse
 from app.schemas.binding import (
     BindCodeConsumeRequest,
@@ -56,6 +66,7 @@ from app.schemas.skill import (
 from app.core.config import get_settings
 from app.core.security import (
     create_access_token,
+    decode_token_claims,
     decode_token,
     get_current_user,
     hash_password,
@@ -103,6 +114,18 @@ from app.tools.finance import (
 from app.services.realtime import get_notification_hub
 from app.services.scheduler import get_scheduler
 from app.services.scheduler_tasks import send_reminder_job
+from app.services.email_auth import (
+    PURPOSE_LOGIN,
+    PURPOSE_REGISTER,
+    PURPOSE_RESET_PASSWORD,
+    EmailCodeCooldownError,
+    EmailCodeExpiredError,
+    EmailCodeInvalidError,
+    EmailServiceNotConfiguredError,
+    normalize_email,
+    send_email_code,
+    verify_email_code,
+)
 from app.services.runtime_context import (
     set_llm_streamer,
     reset_llm_streamer,
@@ -217,41 +240,162 @@ def _parse_ledger_transaction_utc_naive(value: str) -> datetime:
     return _local_naive_to_utc_naive(dt)
 
 
+def _validate_password_strength(password: str) -> str:
+    text = str(password or "")
+    if len(text) < 6:
+        raise HTTPException(status_code=400, detail="password too short")
+    return text
+
+
+@router.post("/auth/email/send-code", response_model=SendEmailCodeResponse)
+async def send_auth_email_code(payload: SendEmailCodeRequest, session: AsyncSession = Depends(get_session)):
+    email = normalize_email(str(payload.email or ""))
+    purpose = str(payload.purpose or "").strip().lower()
+
+    if purpose == PURPOSE_REGISTER:
+        existing = await session.execute(select(User).where(User.email == email).limit(1))
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="email already exists")
+
+    should_send = True
+    if purpose in {PURPOSE_LOGIN, PURPOSE_RESET_PASSWORD}:
+        existing = await session.execute(select(User).where(User.email == email).limit(1))
+        if existing.scalar_one_or_none() is None:
+            raise HTTPException(status_code=400, detail="email not registered")
+
+    expire_seconds = max(60, int(get_settings().auth_email_code_ttl_sec or 600))
+    cooldown_seconds = max(10, int(get_settings().auth_email_code_cooldown_sec or 60))
+
+    if should_send:
+        try:
+            meta = await send_email_code(email=email, purpose=purpose)
+            expire_seconds = int(meta.get("expire_seconds", expire_seconds))
+            cooldown_seconds = int(meta.get("cooldown_seconds", cooldown_seconds))
+        except EmailCodeCooldownError as exc:
+            raise HTTPException(
+                status_code=429,
+                detail=f"verification code send too frequently, retry after {exc.retry_after}s",
+            ) from exc
+        except EmailServiceNotConfiguredError as exc:
+            raise HTTPException(status_code=503, detail="email service not configured") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="send verification code failed") from exc
+
+    return SendEmailCodeResponse(
+        ok=True,
+        message="验证码已发送，请注意查收。",
+        expire_seconds=expire_seconds,
+        cooldown_seconds=cooldown_seconds,
+    )
+
+
+@router.post("/auth/register/code", response_model=TokenResponse)
+async def register_with_code(payload: RegisterWithCodeRequest, session: AsyncSession = Depends(get_session)):
+    email = normalize_email(str(payload.email or ""))
+    password = _validate_password_strength(payload.password)
+
+    existing = await session.execute(select(User).where(User.email == email).limit(1))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="email already exists")
+
+    try:
+        await verify_email_code(email=email, purpose=PURPOSE_REGISTER, code=payload.code)
+    except EmailCodeInvalidError as exc:
+        raise HTTPException(status_code=400, detail="verification code incorrect") from exc
+    except EmailCodeExpiredError as exc:
+        raise HTTPException(status_code=400, detail="verification code expired") from exc
+
+    user = User(
+        platform="web",
+        platform_id=email,
+        email=email,
+        hashed_password=hash_password(password),
+    )
+    session.add(user)
+    await session.flush()
+    await ensure_identity(session, user.id, "web", email)
+    await session.commit()
+    await session.refresh(user)
+
+    token = create_access_token(user.id, source_platform="web")
+    return TokenResponse(access_token=token)
+
+
+@router.post("/auth/login/code", response_model=TokenResponse)
+async def login_with_code(payload: LoginWithCodeRequest, session: AsyncSession = Depends(get_session)):
+    email = normalize_email(str(payload.email or ""))
+    try:
+        await verify_email_code(email=email, purpose=PURPOSE_LOGIN, code=payload.code)
+    except EmailCodeInvalidError as exc:
+        raise HTTPException(status_code=400, detail="verification code incorrect") from exc
+    except EmailCodeExpiredError as exc:
+        raise HTTPException(status_code=400, detail="verification code expired") from exc
+
+    result = await session.execute(select(User).where(User.email == email).order_by(User.id.desc()).limit(1))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    token = create_access_token(user.id, source_platform="web")
+    return TokenResponse(access_token=token)
+
+
+@router.post("/auth/password/reset", response_model=ActionResponse)
+async def reset_password(payload: ResetPasswordRequest, session: AsyncSession = Depends(get_session)):
+    email = normalize_email(str(payload.email or ""))
+    new_password = _validate_password_strength(payload.new_password)
+    try:
+        await verify_email_code(email=email, purpose=PURPOSE_RESET_PASSWORD, code=payload.code)
+    except EmailCodeInvalidError as exc:
+        raise HTTPException(status_code=400, detail="verification code incorrect") from exc
+    except EmailCodeExpiredError as exc:
+        raise HTTPException(status_code=400, detail="verification code expired") from exc
+
+    result = await session.execute(select(User).where(User.email == email).order_by(User.id.desc()).limit(1))
+    user = result.scalar_one_or_none()
+    if not user:
+        # Keep response generic for privacy and cross-client consistency.
+        return ActionResponse(ok=True, message="密码已重置，请使用新密码登录。")
+
+    user.hashed_password = hash_password(new_password)
+    session.add(user)
+    await session.commit()
+    return ActionResponse(ok=True, message="密码已重置，请使用新密码登录。")
+
+
 @router.post("/auth/register", response_model=TokenResponse)
 async def register(payload: RegisterRequest, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(
-        select(User).where(User.email == payload.email).limit(1)
-    )
+    email = normalize_email(str(payload.email or ""))
+    password = _validate_password_strength(payload.password)
+    result = await session.execute(select(User).where(User.email == email).limit(1))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="email already exists")
 
     user = User(
         platform="web",
-        platform_id=payload.email,
-        email=payload.email,
-        hashed_password=hash_password(payload.password),
+        platform_id=email,
+        email=email,
+        hashed_password=hash_password(password),
     )
     session.add(user)
     await session.flush()
-    await ensure_identity(session, user.id, "web", payload.email)
+    await ensure_identity(session, user.id, "web", email)
     await session.commit()
     await session.refresh(user)
 
-    token = create_access_token(user.id)
+    token = create_access_token(user.id, source_platform="web")
     return TokenResponse(access_token=token)
 
 
 @router.post("/auth/login", response_model=TokenResponse)
 async def login(payload: LoginRequest, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(
-        select(User).where(User.email == payload.email).order_by(User.id.desc()).limit(1)
-    )
+    email = normalize_email(str(payload.email or ""))
+    result = await session.execute(select(User).where(User.email == email).order_by(User.id.desc()).limit(1))
     user = result.scalar_one_or_none()
     if not user or not user.hashed_password:
         raise HTTPException(status_code=401, detail="invalid credentials")
     if not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="invalid credentials")
-    token = create_access_token(user.id)
+    token = create_access_token(user.id, source_platform="web")
     return TokenResponse(access_token=token)
 
 
@@ -272,7 +416,7 @@ async def miniapp_login(payload: MiniappLoginRequest, session: AsyncSession = De
         user.nickname = nickname
         session.add(user)
         await session.commit()
-    token = create_access_token(user.id)
+    token = create_access_token(user.id, source_platform="miniapp")
     return MiniappTokenResponse(access_token=token, openid=openid)
 
 
@@ -328,13 +472,25 @@ async def mcp_fetch(
 async def profile(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
+    authorization: Optional[str] = Header(default=None),
 ):
+    current_platform = str(user.platform or "").strip().lower()
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
+        try:
+            claims = decode_token_claims(token)
+            src = str(claims.get("src") or "").strip().lower()
+            if src:
+                current_platform = src
+        except HTTPException:
+            pass
+
     return ProfileResponse(
         uuid=user.uuid,
         nickname=user.nickname,
         ai_name=user.ai_name,
         ai_emoji=user.ai_emoji,
-        platform=user.platform,
+        platform=current_platform,
         email=user.email,
         setup_stage=user.setup_stage,
         binding_stage=int(user.binding_stage or 0),

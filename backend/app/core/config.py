@@ -105,6 +105,19 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_exp_minutes: int = 60 * 24 * 7
 
+    smtp_host: str = ""
+    smtp_port: int = 465
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
+    smtp_from_name: str = "PAI"
+    smtp_use_ssl: bool = True
+    smtp_use_starttls: bool = False
+
+    auth_email_code_ttl_sec: int = 600
+    auth_email_code_cooldown_sec: int = 60
+    auth_email_code_max_verify_attempts: int = 8
+
 
 @lru_cache
 def get_settings() -> Settings:
