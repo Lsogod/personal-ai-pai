@@ -71,12 +71,12 @@
     <text x="756" y="128" fill="#64748B" font-size="9">setup_stage &lt; 3 → 跳过(由③处理)</text>
     <text x="756" y="140" fill="#64748B" font-size="9">空消息且无图 → chat_manager</text>
     <text x="746" y="156" fill="#B45309" font-size="9.5" font-weight="700">② LLM 意图分类</text>
-    <text x="756" y="168" fill="#64748B" font-size="9">_classify_intent_with_llm()</text>
+    <text x="756" y="168" fill="#64748B" font-size="9">_route_intent_with_llm()</text>
     <text x="756" y="180" fill="#64748B" font-size="9">+context · +image · +pending</text>
-    <text x="756" y="192" fill="#64748B" font-size="9">unknown → image/pending→ledger_mgr</text>
-    <text x="746" y="208" fill="#B45309" font-size="9.5" font-weight="700">③ 命令兜底 (route_intent)</text>
+    <text x="756" y="192" fill="#64748B" font-size="9">输出允许意图 / unknown</text>
+    <text x="746" y="208" fill="#B45309" font-size="9.5" font-weight="700">③ 最终收敛 (route_intent)</text>
     <text x="756" y="220" fill="#64748B" font-size="9">setup&lt;3→onboarding</text>
-    <text x="756" y="232" fill="#64748B" font-size="9">/help /skill /ledger ...</text>
+    <text x="756" y="232" fill="#64748B" font-size="9">known直达 / unknown→complex_task</text>
   </g>
 
   <line x1="680" y1="168" x2="736" y2="168" class="flow-line" stroke="#86EFAC" stroke-width="2" marker-end="url(#arrow-green)"/>
@@ -155,7 +155,7 @@
       <line x1="470" y1="358" x2="590" y2="358" stroke="#F9A8D4" stroke-width="1"/>
       <text x="474" y="374" fill="#9D174D" font-size="8">翻译/润色/写作/问答</text>
       <text x="474" y="388" fill="#9D174D" font-size="8">天气查询 · 技能注入</text>
-      <text x="474" y="402" fill="#9D174D" font-size="8">unknown → 兜底</text>
+      <text x="474" y="402" fill="#9D174D" font-size="8">通用问答 · 信息查询</text>
       <line x1="470" y1="412" x2="590" y2="412" stroke="#F9A8D4" stroke-width="1"/>
       <text x="474" y="426" fill="#DB2777" font-size="8" font-weight="700">↓ create_react_agent()</text>
       <text x="474" y="440" fill="#EC4899" font-size="8" font-style="italic">tool_registry 动态发现</text>
@@ -198,7 +198,7 @@
       <text x="842" y="478" text-anchor="middle" fill="#A16207" font-size="12" font-weight="800">🧠 Complex Task</text>
       <text x="842" y="492" text-anchor="middle" fill="#CA8A04" font-size="9" font-weight="600">complex_task_node()</text>
       <line x1="760" y1="498" x2="924" y2="498" stroke="#FDE047" stroke-width="1"/>
-      <text x="764" y="512" fill="#A16207" font-size="8">JSON 计划 (Schema) + 依赖调度</text>
+      <text x="764" y="512" fill="#A16207" font-size="8">单次结构化决策 + ReAct 执行</text>
       <text x="764" y="526" fill="#CA8A04" font-size="8" font-style="italic">跨节点编排后统一汇总回复</text>
     </g>
   </g>

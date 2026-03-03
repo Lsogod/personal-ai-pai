@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Bot, Calendar, Link2, Wallet, Zap } from "../../components/ui/icons";
 import { BindingCard } from "../../components/chat/BindingCard";
 import { CalendarPanel } from "../../components/chat/CalendarPanel";
@@ -10,6 +10,7 @@ interface RightInfoPanelProps {
   token: string | null;
   stats: any;
   executionDebug?: Record<string, unknown> | null;
+  showExecutionPanel?: boolean;
 }
 
 type TabKey = "ledger" | "calendar" | "skills" | "binding" | "execution";
@@ -22,17 +23,32 @@ const TABS: { key: TabKey; label: string; icon: React.ElementType }[] = [
   { key: "binding", label: "绑定", icon: Link2 },
 ];
 
-export function RightInfoPanel({ token, stats, executionDebug }: RightInfoPanelProps) {
+export function RightInfoPanel({
+  token,
+  stats,
+  executionDebug,
+  showExecutionPanel = true,
+}: RightInfoPanelProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("ledger");
+  const visibleTabs = useMemo(
+    () => (showExecutionPanel ? TABS : TABS.filter((tab) => tab.key !== "execution")),
+    [showExecutionPanel]
+  );
   const routeIntent =
     executionDebug && typeof executionDebug.route_intent === "string"
       ? executionDebug.route_intent
       : "";
 
+  useEffect(() => {
+    if (!showExecutionPanel && activeTab === "execution") {
+      setActiveTab("ledger");
+    }
+  }, [activeTab, showExecutionPanel]);
+
   return (
     <div className="flex h-full flex-col border-l border-border bg-surface-card">
       <div className="no-scrollbar flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border p-2">
-        {TABS.map((tab) => {
+        {visibleTabs.map((tab) => {
           const isActive = activeTab === tab.key;
           const Icon = tab.icon;
           return (
@@ -67,7 +83,7 @@ export function RightInfoPanel({ token, stats, executionDebug }: RightInfoPanelP
             <BindingCard token={token} />
           </div>
         )}
-        {activeTab === "execution" && (
+        {showExecutionPanel && activeTab === "execution" && (
           <div className="space-y-4">
             {!executionDebug ? (
               <div className="rounded-xl border border-border bg-surface p-4 text-sm text-content-secondary">

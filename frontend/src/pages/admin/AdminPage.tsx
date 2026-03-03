@@ -53,6 +53,7 @@ import {
 import { Button } from "../../components/ui/button";
 import { Card, CardContent, CardHeader } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
+import { getAdminShowExecutionPanel, setAdminShowExecutionPanel } from "../../lib/adminPrefs";
 import { formatYmdHmLocal, parseServerDate } from "../../lib/datetime";
 
 const ADMIN_TOKEN_KEY = "pai_admin_token";
@@ -219,6 +220,7 @@ export function AdminPage() {
   const [popupDraft, setPopupDraft] = useState<AdminMiniappHomePopupConfig | null>(null);
   const [popupSaveMessage, setPopupSaveMessage] = useState("");
   const [memoryCleanMessage, setMemoryCleanMessage] = useState("");
+  const [showExecutionPanel, setShowExecutionPanel] = useState<boolean>(() => getAdminShowExecutionPanel());
 
   const dashboard = useQuery({
     queryKey: ["admin", "dashboard", token, days],
@@ -575,6 +577,27 @@ export function AdminPage() {
         <div className="space-y-4">
           {activeSection === "dashboard" ? (
             <>
+              <Card>
+                <CardHeader className="text-lg font-semibold">Web 聊天显示设置</CardHeader>
+                <CardContent className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={showExecutionPanel}
+                      onChange={(e) => {
+                        const next = e.target.checked;
+                        setShowExecutionPanel(next);
+                        setAdminShowExecutionPanel(next);
+                      }}
+                    />
+                    显示聊天页右侧“执行”标签
+                  </label>
+                  <div className="text-xs text-content-secondary">
+                    此开关仅控制前端展示，不依赖后端返回开关。关闭后聊天页不再显示执行摘要标签。
+                  </div>
+                </CardContent>
+              </Card>
+
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <Card><CardContent className="py-4"><div className="text-xs text-content-secondary">用户总数</div><div className="text-2xl font-semibold">{fmtNum(cards?.total_users)}</div></CardContent></Card>
                 <Card><CardContent className="py-4"><div className="text-xs text-content-secondary">今日新增</div><div className="text-2xl font-semibold">{fmtNum(cards?.new_users_today)}</div></CardContent></Card>
@@ -910,8 +933,9 @@ export function AdminPage() {
                           <table className="w-full text-xs">
                             <thead>
                               <tr className="text-left text-content-secondary border-b border-border">
+                                <th className="py-2 pr-2">归属键</th>
                                 <th className="py-2 pr-2">类型</th>
-                                <th className="py-2 pr-2">内容</th>
+                                <th className="py-2 pr-2">值</th>
                                 <th className="py-2 pr-2">重要性</th>
                                 <th className="py-2 pr-2">置信度</th>
                                 <th className="py-2 pr-2">更新时间</th>
@@ -920,6 +944,7 @@ export function AdminPage() {
                             <tbody>
                               {(userDetail.data.memories || []).map((memory) => (
                                 <tr key={memory.id} className="border-b border-border/60 align-top">
+                                  <td className="py-2 pr-2 font-mono text-[11px]">{memory.memory_key || "-"}</td>
                                   <td className="py-2 pr-2">{memory.memory_type}</td>
                                   <td className="py-2 pr-2 whitespace-pre-wrap break-words">{memory.content}</td>
                                   <td className="py-2 pr-2">{memory.importance}</td>
@@ -929,7 +954,7 @@ export function AdminPage() {
                               ))}
                               {(!userDetail.data.memories || userDetail.data.memories.length === 0) ? (
                                 <tr>
-                                  <td colSpan={5} className="py-3 text-content-secondary">暂无长期记忆</td>
+                                  <td colSpan={6} className="py-3 text-content-secondary">暂无长期记忆</td>
                                 </tr>
                               ) : null}
                             </tbody>
@@ -1469,4 +1494,3 @@ export function AdminPage() {
     </div>
   );
 }
-

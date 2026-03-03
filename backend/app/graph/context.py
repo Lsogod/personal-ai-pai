@@ -51,10 +51,11 @@ def render_conversation_context(
 
     normalized_memories: list[str] = []
     if include_long_term_memories and isinstance(raw_memories, list):
-        for item in raw_memories[:8]:
+        for item in raw_memories:
             if not isinstance(item, dict):
                 continue
             memory_type = str(item.get("memory_type") or "fact").strip().lower()
+            memory_key = str(item.get("memory_key") or "").strip()
             importance = item.get("importance")
             prefix = f"[{memory_type}]"
             if isinstance(importance, int):
@@ -62,7 +63,10 @@ def render_conversation_context(
             content = _normalize_text(item.get("content") or "", 180)
             if not content:
                 continue
-            normalized_memories.append(f"- {prefix} {content}")
+            if memory_key:
+                normalized_memories.append(f"- {prefix} {memory_key}: {content}")
+            else:
+                normalized_memories.append(f"- {prefix} {content}")
 
     if normalized_memories:
         lines.append("长期记忆:")

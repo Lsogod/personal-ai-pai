@@ -28,6 +28,7 @@ IDENTITY_MEMORY_KEYS = {
 }
 MEMORY_CONSOLIDATE_SCAN_LIMIT = 160
 SEMANTIC_DUPLICATE_THRESHOLD = 0.82
+SEMANTIC_MERGE_STRICT_THRESHOLD = 0.9
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,10 @@ class MemoryConsolidationResult(BaseModel):
     decisions: list[MemoryConsolidationDecision] = Field(default_factory=list)
 
 
+class MemoryKeyNormalizationResult(BaseModel):
+    key: str = Field(default="")
+
+
 async def _invoke_structured(
     *,
     schema: type[BaseModel],
@@ -91,6 +96,49 @@ async def _invoke_structured(
     if isinstance(result, dict):
         return schema.model_validate(result)
     return schema()
+
+
+async def _infer_memory_key_via_llm(
+    *,
+    memory_type: str,
+    content: str,
+    existing_rows: list[LongTermMemory],
+) -> str:
+    text = (content or "").strip()
+    if not text:
+        return ""
+    existing_keys: list[str] = []
+    for row in existing_rows:
+        key = str(getattr(row, "memory_key", "") or "").strip()
+        if key and key not in existing_keys:
+            existing_keys.append(key)
+    system = SystemMessage(
+        content=(
+            "你是记忆槽位命名器。请仅返回 schema 定义字段 key。"
+            "输出稳定、可复用的属性键，不要包含用户私有文本。"
+            "格式要求：小写、点分路径或下划线，例如 profile.birthday、profile.residence_city、preference.sport。"
+            "如果与已有键语义相同，必须复用已有键。"
+            "不要输出解释文本。"
+        )
+    )
+    human = HumanMessage(
+        content=json.dumps(
+            {
+                "memory_type": str(memory_type or "fact"),
+                "content": text,
+                "existing_keys": existing_keys[:120],
+            },
+            ensure_ascii=False,
+        )
+    )
+    try:
+        parsed = await _invoke_structured(
+            schema=MemoryKeyNormalizationResult,
+            messages=[system, human],
+        )
+        return _normalize_key(str(getattr(parsed, "key", "") or ""))
+    except Exception:
+        return ""
 
 
 def _is_reserved_identity_memory_type(memory_type: str) -> bool:
@@ -173,7 +221,14 @@ def _semantic_similarity(a: str, b: str) -> float:
     if inter <= 0:
         return 0.0
     union = len(ta | tb)
-    return inter / max(1, union)
+    jaccard = inter / max(1, union)
+    # Containment helps merge near-duplicate paraphrases like:
+    # "住在武汉" vs "我住在武汉" where one token set is a superset of the other.
+    containment = max(
+        inter / max(1, len(ta)),
+        inter / max(1, len(tb)),
+    )
+    return max(jaccard, containment * 0.92)
 
 
 def _parse_ttl_days(value: Any, *, fallback_days: int) -> int:
@@ -259,6 +314,7 @@ def _serialize_existing_memories(rows: list[LongTermMemory]) -> list[dict[str, A
         serialized.append(
             {
                 "id": row.id,
+                "memory_key": row.memory_key,
                 "memory_type": row.memory_type,
                 "content": row.content,
                 "importance": int(row.importance or 3),
@@ -276,10 +332,13 @@ def _find_semantic_duplicate(
     content: str,
     rows: list[LongTermMemory],
     threshold: float = SEMANTIC_DUPLICATE_THRESHOLD,
+    exclude_id: int | None = None,
 ) -> LongTermMemory | None:
     best_row: LongTermMemory | None = None
     best_score = 0.0
     for row in rows:
+        if exclude_id is not None and row.id is not None and int(row.id) == int(exclude_id):
+            continue
         if str(row.memory_type or "").strip().lower() != memory_type:
             continue
         score = _semantic_similarity(content, str(row.content or ""))
@@ -291,13 +350,36 @@ def _find_semantic_duplicate(
     return best_row
 
 
+def _collect_semantic_duplicates(
+    *,
+    memory_type: str,
+    content: str,
+    rows: list[LongTermMemory],
+    keep_id: int | None,
+    threshold: float = SEMANTIC_MERGE_STRICT_THRESHOLD,
+) -> list[LongTermMemory]:
+    duplicates: list[LongTermMemory] = []
+    for row in rows:
+        if keep_id is not None and row.id is not None and int(row.id) == int(keep_id):
+            continue
+        if str(row.memory_type or "").strip().lower() != memory_type:
+            continue
+        score = _semantic_similarity(content, str(row.content or ""))
+        if score >= threshold:
+            duplicates.append(row)
+    return duplicates
+
+
 def _memory_score(query: str, row: LongTermMemory) -> float:
     q_tokens = _tokenize(query)
     if not q_tokens:
         recency = row.updated_at.timestamp() if row.updated_at else 0
         return float(row.importance) * 10 + recency / 1_000_000_000
 
-    content_tokens = _tokenize(row.content)
+    key_text = str(getattr(row, "memory_key", "") or "")
+    memory_type = str(getattr(row, "memory_type", "") or "")
+    key_text = key_text.replace(".", " ").replace("-", " ").replace("_", " ").replace(":", " ")
+    content_tokens = _tokenize(f"{str(row.content or '')} {key_text} {memory_type}")
     overlap = len(q_tokens & content_tokens)
     if overlap <= 0:
         return 0.0
@@ -362,7 +444,9 @@ async def extract_memory_candidates(
             "若用户明确表达“忘记/不再记住某事项”，应输出 op=delete 的候选并直接执行，不需要确认。"
             "若用户明确表达“更改/改成/以后按新规则”，应将其视为覆盖旧记忆，优先输出可覆盖旧值的 save 决策。"
             "每条字段：op(save|delete), memory_type(preference|fact|goal|project|constraint), "
-            "key(可选), content, importance(1-5), confidence(0-1), ttl_days(可选整数)。"
+            "key(必须是稳定槽位键，例如 profile.birthday / profile.residence_city / preference.sport), "
+            "content(仅填写值，不要整句复述，例如 1999-02-07 / 武汉), "
+            "importance(1-5), confidence(0-1), ttl_days(可选整数)。"
         )
     )
     human = HumanMessage(
@@ -406,6 +490,8 @@ async def _llm_refine_memory_candidates(
             "仅基于语义判断。"
             "需与已有记忆去重：若语义等价，优先更新旧记忆而非新建。"
             "对语义相同但表述不同的候选，应归并为一个规范抽象表述。"
+            "key 必须稳定且可复用；若已有键语义可复用，优先复用已有键。"
+            "content 仅保留值，不要带多余主语或礼貌语。"
             "请仅返回 schema 定义的结构化字段（decisions 数组）。"
             "只输出一个 JSON 对象，不要输出解释文本。"
             "每条 decision 字段：index(int), keep(bool), op(save|delete), merge_target_id(可选 int), "
@@ -505,6 +591,7 @@ async def upsert_long_term_memories(
     dropped_empty = 0
     dropped_identity = 0
     dropped_low_confidence = 0
+    key_cache: dict[tuple[str, str], str] = {}
     for raw in vetted[: max(1, settings.long_term_memory_max_write_items)]:
         op = str(raw.get("op") or "save").strip().lower()
         memory_type = _normalize_memory_type(str(raw.get("memory_type") or "fact"))
@@ -527,7 +614,20 @@ async def upsert_long_term_memories(
             importance = 3
         importance = max(1, min(5, importance))
         raw_key = str(raw.get("key") or "").strip()
-        memory_key = _normalize_key(raw_key) or _build_memory_key(memory_type, content)
+        memory_key = _normalize_key(raw_key)
+        if not memory_key:
+            cache_key = (memory_type, content)
+            inferred = key_cache.get(cache_key, "")
+            if not inferred:
+                inferred = await _infer_memory_key_via_llm(
+                    memory_type=memory_type,
+                    content=content,
+                    existing_rows=existing_rows,
+                )
+                key_cache[cache_key] = inferred
+            memory_key = _normalize_key(inferred)
+        if not memory_key:
+            memory_key = _build_memory_key(memory_type, content)
         merge_target_id: int | None = None
         try:
             if raw.get("merge_target_id") is not None:
@@ -601,6 +701,26 @@ async def upsert_long_term_memories(
                 existing_by_id[int(existing.id)] = existing
             if existing not in working_rows:
                 working_rows.append(existing)
+
+            # Strong merge after update: clear semantic-equivalent duplicates even if keys differ.
+            duplicate_rows = _collect_semantic_duplicates(
+                memory_type=memory_type,
+                content=content,
+                rows=working_rows,
+                keep_id=(int(existing.id) if existing.id is not None else None),
+            )
+            for dup in duplicate_rows:
+                if dup in working_rows:
+                    working_rows.remove(dup)
+                if dup.id is not None:
+                    existing_by_id.pop(int(dup.id), None)
+                    await session.delete(dup)
+                else:
+                    # Pending in-session row (no PK yet): drop it before flush.
+                    try:
+                        session.expunge(dup)
+                    except Exception:
+                        pass
             processed += 1
             continue
 
@@ -801,7 +921,7 @@ async def list_long_term_memories(
     session: AsyncSession,
     *,
     user_id: int,
-    limit: int = 120,
+    limit: int | None = 120,
 ) -> list[dict[str, Any]]:
     settings = get_settings()
     if not settings.long_term_memory_enabled:
@@ -815,8 +935,9 @@ async def list_long_term_memories(
             or_(LongTermMemory.expires_at.is_(None), LongTermMemory.expires_at > now),
         )
         .order_by(LongTermMemory.updated_at.desc(), LongTermMemory.id.desc())
-        .limit(max(1, int(limit)))
     )
+    if limit is not None:
+        stmt = stmt.limit(max(1, int(limit)))
     rows = list((await session.execute(stmt)).scalars().all())
     if not rows:
         return []
@@ -834,6 +955,7 @@ async def list_long_term_memories(
         result.append(
             {
                 "id": row.id,
+                "memory_key": str(row.memory_key or ""),
                 "memory_type": row.memory_type,
                 "content": row.content,
                 "importance": int(row.importance or 3),
@@ -874,19 +996,21 @@ async def retrieve_relevant_long_term_memories(
         return []
 
     scored: list[tuple[LongTermMemory, float]] = [(row, _memory_score(query, row)) for row in rows]
+    scored_sorted = sorted(scored, key=lambda pair: pair[1], reverse=True)
     query_tokens = _tokenize(query)
     ranked: list[LongTermMemory] = []
     if query_tokens:
-        lexical = [item for item in scored if item[1] >= 0.12]
-        if lexical:
-            ranked = [item[0] for item in sorted(lexical, key=lambda pair: pair[1], reverse=True)[:top_k]]
-        else:
-            # Fallback: if user has only a few memories, prefer returning them over empty recall.
-            # This avoids "memory exists but cannot recall" cases when wording/language differs.
-            if len(rows) <= 3:
-                ranked = rows[:top_k]
+        lexical = [item for item in scored_sorted if item[1] >= 0.12]
+        ranked = [item[0] for item in lexical[:top_k]]
+        if len(ranked) < top_k:
+            for row, _score in scored_sorted:
+                if row in ranked:
+                    continue
+                ranked.append(row)
+                if len(ranked) >= top_k:
+                    break
     else:
-        ranked = [item[0] for item in sorted(scored, key=lambda pair: pair[1], reverse=True)[:top_k]]
+        ranked = [item[0] for item in scored_sorted[:top_k]]
     result: list[dict[str, Any]] = []
     for row in ranked:
         if _is_identity_memory_candidate(
@@ -900,6 +1024,7 @@ async def retrieve_relevant_long_term_memories(
         result.append(
             {
                 "id": row.id,
+                "memory_key": str(row.memory_key or ""),
                 "memory_type": row.memory_type,
                 "content": row.content,
                 "importance": row.importance,

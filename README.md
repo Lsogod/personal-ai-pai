@@ -42,13 +42,13 @@
   <img src="docs/agent-workflow.svg" alt="PAI 智能体决策调度流程图" width="100%"/>
 </p>
 
-- **🔀 Router** — 意图分类器，自动识别消息类型，支持 `tool_catalog` 上下文
+- **🔀 Router** — 单次 LLM 路由分类（含 pending ledger / pending complex 上下文）
 - **💰 Ledger Manager** — 记账、消费统计、小票 OCR 识别
 - **📅 Schedule Manager** — 日程管理、定时提醒（APScheduler 持久化 · 多端广播投递）
 - **✨️ Chat Manager** — 翻译、润色、写作、通用问答、MCP 工具调用、天气查询
 - **🎯 Skill Manager** — 用户自定义技能的创建/更新/发布
 - **📖 Help Center** — 使用指南、命令帮助、工具能力概览（加载 knowledge/AGENT_GUIDE.md）
-- **🧠 Complex Task** — 跨节点任务规划与执行（JSON Plan + Executor）
+- **🧠 Complex Task** — 复杂任务编排（单次结构化决策 + ReAct Subagent 执行）
 - **🚀 Onboarding** — 新用户三步引导流程
 
 <details>
@@ -77,7 +77,7 @@ flowchart TB
     SCH --> PUSH["send_reminder_job\n消息推送"]
     N5 --> DOC["AGENT_GUIDE + 技能/工具目录"]
     N6 --> AG["LangGraph ReAct Agent"]
-    N7 --> ORCH["JSON Plan + Executor"]
+    N7 --> ORCH["LLM 决策 + ReAct Subagent"]
 
     AG --> T1["now_time"]
     AG --> T2["fetch_url"]
@@ -104,9 +104,11 @@ flowchart TB
 - **JWT 认证** — Web 端安全登录/注册
 - **WebSocket 实时推送** — 跨平台消息同步 & 定时提醒通知
 - **系统级 MCP（Fetch）** — 统一网页抓取工具，可在对话中自然语言触发或命令触发
-- **分层记忆系统** — 会话短期上下文 + 用户级长期记忆（检索注入，非全量喂模型）
-- **管理 API** — 后台查看用户、账单、日程、审计日志
-- **Docker Compose 一键部署** — 含 PostgreSQL 15、Redis 7、GeWeChat、NapCat、Nginx 代理及前后端
+- **真流式输出（LangChain `astream`）** — 仅流式推送终态自然语言节点，执行细节写入后端日志
+- **分层记忆系统** — 会话短期上下文 + 用户级长期记忆（当前主链路注入全部有效长期记忆，排除身份档案项）
+- **长期记忆双通道写入** — 对话后异步抽取 + `memory_worker` 定时补扫未处理消息（支持已处理游标）
+- **管理后台（`/admin`）** — 用户/会话回放/工具开关/长期记忆清洗/首页弹窗配置
+- **Docker Compose 一键部署** — 含 PostgreSQL 15、Redis 7、GeWeChat、NapCat、memory_worker 及前后端
 
 ---
 
@@ -164,15 +166,17 @@ pai/
 │   │   ├── services/           # 业务逻辑层
 │   │   │   ├── platforms/      # 各平台发送适配器
 │   │   │   ├── realtime.py     # WebSocket 实时通知推送
-│   │   │   ├── memory.py       # 分层记忆系统 (提取/存储/检索)
+│   │   │   ├── memory.py       # 分层记忆系统 (提取/存储/清洗/注入)
 │   │   │   ├── mcp_fetch.py    # MCP Fetch 网页抓取客户端
 │   │   │   ├── tool_registry.py # 工具注册中心 (builtin + MCP)
 │   │   │   ├── toolsets.py     # 节点工具可见集配置（common/node/mcp）
 │   │   │   ├── langchain_tools.py # LangChain @tool 封装与调用入口
 │   │   │   ├── ledger_pending.py # Redis 待确认账单管理
 │   │   │   ├── scheduler.py    # APScheduler 定时任务
+│   │   │   ├── runtime_context.py # 运行时上下文 (stream/tool/session 注入)
 │   │   │   └── llm.py          # LLM 客户端封装
 │   │   └── tools/              # LangChain 工具 (记账/OCR)
+│   ├── memory_worker.py        # 长期记忆后台扫描进程
 │   ├── knowledge/              # 知识库文档 (AGENT_GUIDE.md)
 │   └── skills/                 # 内置技能定义 (Markdown)
 ├── frontend/                   # React 前端
@@ -181,7 +185,7 @@ pai/
 │       │   ├── chat/           # 对话、会话、账单、日历、绑定
 │       │   ├── skills/         # 技能管理面板
 │       │   └── ui/             # 基础 UI 组件 (Button/Card/Input)
-│       ├── pages/              # 页面 (Chat / Login)
+│       ├── pages/              # 页面 (Chat / Login / Admin)
 │       ├── store/              # Zustand 状态管理 (auth/theme)
 │       └── lib/                # API 客户端 & 工具函数
 ├── miniapp/                    # 微信小程序客户端
@@ -199,9 +203,9 @@ pai/
 │   │   ├── http.js             # 请求封装
 │   │   ├── image.js            # 图片工具
 │   │   └── markdown.js         # Markdown 渲染
-│   ├── assets/icons/           # TabBar 图标 (PNG 81×81)
+│   ├── assets/icons/           # TabBar 与业务图标 (SVG)
 │   └── config.js               # 后端域名与模板ID配置
-├── docker-compose.yml          # 服务编排 (backend/frontend/db/redis/gewechat/napcat)
+├── docker-compose.yml          # 服务编排 (backend/memory_worker/frontend/db/redis/gewechat/napcat)
 └── docs/
     ├── architecture.svg        # 系统架构图
     ├── agent-workflow.svg      # 智能体决策流程图
@@ -230,7 +234,7 @@ pai/
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/mcp/tools` | 获取系统级 MCP 工具列表 |
-| POST | `/api/mcp/call` | 调用 MCP 工具 |
+| POST | `/api/mcp/fetch` | 通过后端代理调用 MCP Fetch |
 
 ### 会话管理
 | 方法 | 路径 | 说明 |
@@ -238,16 +242,16 @@ pai/
 | GET | `/api/conversations` | 获取会话列表 |
 | GET | `/api/conversations/current` | 获取当前活跃会话 |
 | POST | `/api/conversations` | 创建新会话 |
-| POST | `/api/conversations/:id/switch` | 切换活跃会话 |
-| PATCH | `/api/conversations/:id` | 重命名会话 |
-| DELETE | `/api/conversations/:id` | 删除会话 |
+| POST | `/api/conversations/{conversation_id}/switch` | 切换活跃会话 |
+| PATCH | `/api/conversations/{conversation_id}` | 重命名会话 |
+| DELETE | `/api/conversations/{conversation_id}` | 删除会话 |
 
 ### 账单
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/ledgers?limit=20` | 获取账单列表 |
-| PATCH | `/api/ledgers/:id` | 修改账单 |
-| DELETE | `/api/ledgers/:id` | 删除账单 |
+| PATCH | `/api/ledgers/{ledger_id}` | 修改账单 |
+| DELETE | `/api/ledgers/{ledger_id}` | 删除账单 |
 | GET | `/api/stats/ledger` | 账单统计概览 |
 
 ### 日历
@@ -259,16 +263,17 @@ pai/
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/skills` | 获取技能列表 |
-| GET | `/api/skills/:slug?source=` | 获取技能详情 |
+| GET | `/api/skills/{slug}?source=` | 获取技能详情 |
 | POST | `/api/skills/draft` | 创建技能草稿 |
-| POST | `/api/skills/:slug/publish` | 发布技能 |
-| POST | `/api/skills/:slug/disable` | 停用技能 |
+| POST | `/api/skills/{slug}/publish` | 发布技能 |
+| POST | `/api/skills/{slug}/disable` | 停用技能 |
 
 ### 跨平台绑定
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/user/profile` | 获取用户资料 |
 | GET | `/api/user/identities` | 获取已绑定身份 |
+| POST | `/api/user/feedback` | 提交问题反馈 |
 | POST | `/api/user/bind-code` | 生成绑定码 |
 | POST | `/api/user/bind-consume` | 使用绑定码绑定 |
 
@@ -294,10 +299,19 @@ pai/
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/users` | 用户列表 |
-| GET | `/api/ledgers` | 全部账单 |
-| GET | `/api/schedules` | 全部日程 |
-| GET | `/api/audit` | 审计日志 |
+| GET | `/api/admin/v1/dashboard` | 运营看板 |
+| GET | `/api/admin/v1/users` | 用户列表 |
+| GET | `/api/admin/v1/users/{user_id}` | 用户详情（含长期记忆） |
+| POST | `/api/admin/v1/users/{user_id}/memories/consolidate` | 清洗单用户长期记忆 |
+| POST | `/api/admin/v1/memories/consolidate` | 批量清洗长期记忆 |
+| DELETE | `/api/admin/v1/users/{user_id}/memories` | 清空单用户长期记忆 |
+| GET | `/api/admin/v1/conversations` | 会话列表 |
+| GET | `/api/admin/v1/conversations/{conversation_id}/messages` | 会话回放 |
+| GET | `/api/admin/v1/tools` | 工具调用统计与开关状态 |
+| PATCH | `/api/admin/v1/tools/{tool_source}/{tool_name}` | 工具启停 |
+| GET | `/api/admin/v1/audit` | 审计日志 |
+| GET | `/api/admin/v1/feedbacks` | 用户反馈 |
+| GET/PUT | `/api/admin/v1/miniapp/home-popup` | 小程序首页弹窗配置 |
 
 ---
 
@@ -340,7 +354,7 @@ MCP_FETCH_DEFAULT_MAX_LENGTH=5000
 对话中可直接使用：
 - 自然语言：`帮我抓取并总结这个网页 https://example.com`
 - 自然语言：`现在武汉天气`
-- 命令兜底：`/tool list`、`/tool call fetch_url url=https://example.com`、`/tool call maps_weather location=武汉`
+- 若需显式调用，可使用接口：`GET /api/mcp/tools`、`POST /api/mcp/fetch`
 
 ---
 
@@ -406,9 +420,14 @@ cp miniapp/config.local.example.js miniapp/config.local.js
 | `LONG_TERM_MEMORY_ENABLED` | - | `true` | 是否启用长期记忆 |
 | `LONG_TERM_MEMORY_MIN_CONFIDENCE` | - | `0.75` | 写入长期记忆的最小置信度 |
 | `LONG_TERM_MEMORY_MAX_WRITE_ITEMS` | - | `6` | 单轮最多写入记忆条数 |
-| `LONG_TERM_MEMORY_RETRIEVE_LIMIT` | - | `6` | 单轮注入模型的记忆条数 |
+| `LONG_TERM_MEMORY_RETRIEVE_LIMIT` | - | `6` | 记忆检索条数上限（当前主链路全量注入时仅作保留配置） |
 | `LONG_TERM_MEMORY_RETRIEVE_SCAN_LIMIT` | - | `80` | 检索候选扫描上限 |
 | `LONG_TERM_MEMORY_DEFAULT_TTL_DAYS` | - | `180` | 默认记忆过期天数 |
+| `LONG_TERM_MEMORY_SCAN_ENABLED` | - | `true` | 是否启用长期记忆后台扫描 |
+| `LONG_TERM_MEMORY_SCAN_RUN_IN_API` | - | `false` | 是否在 API 进程内挂载扫描任务 |
+| `LONG_TERM_MEMORY_SCAN_INTERVAL_SEC` | - | `120` | 后台扫描间隔秒数 |
+| `LONG_TERM_MEMORY_SCAN_MAX_CONVERSATIONS` | - | `80` | 每轮扫描最大会话数 |
+| `LONG_TERM_MEMORY_SCAN_MAX_MESSAGES_PER_CONVERSATION` | - | `30` | 每会话每轮扫描最大消息数 |
 | `ADMIN_TOKEN` | - | - | 管理 API 令牌 |
 | `REDIS_URL` | - | `redis://redis:6379/0` | Redis 连接 |
 | `TIMEZONE` | - | `Asia/Shanghai` | 时区 |

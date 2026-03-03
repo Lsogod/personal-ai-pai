@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiRequest, streamSsePost } from "../../lib/api";
+import {
+  ADMIN_PREF_SHOW_EXECUTION_PANEL_KEY,
+  getAdminShowExecutionPanel,
+} from "../../lib/adminPrefs";
 import { useAuthStore } from "../../store/auth";
 import { useThemeStore } from "../../store/theme";
 import { ChatWindow, type ChatMessage } from "../../components/chat/ChatWindow";
@@ -44,6 +48,7 @@ export function ChatPage() {
   const queryClient = useQueryClient();
   const [streamingReply, setStreamingReply] = useState("");
   const [lastRunDebug, setLastRunDebug] = useState<ChatDebugPayload | null>(null);
+  const [showExecutionPanel, setShowExecutionPanel] = useState<boolean>(() => getAdminShowExecutionPanel());
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -140,6 +145,27 @@ export function ChatPage() {
       queryClient.refetchQueries({ queryKey: ["conversations"], type: "active" }),
     ]);
   }
+
+  useEffect(() => {
+    const syncExecutionPref = () => setShowExecutionPanel(getAdminShowExecutionPanel());
+    const onStorage = (event: StorageEvent) => {
+      if (event.key && event.key !== ADMIN_PREF_SHOW_EXECUTION_PANEL_KEY) return;
+      syncExecutionPref();
+    };
+    const onPrefChange = () => syncExecutionPref();
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("pai-admin-pref-changed", onPrefChange);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("pai-admin-pref-changed", onPrefChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!showExecutionPanel) {
+      setLastRunDebug(null);
+    }
+  }, [showExecutionPanel]);
 
   useEffect(() => {
     if (!token) return;
@@ -291,7 +317,13 @@ export function ChatPage() {
           }
         },
         (done) => {
-          if (done && done.debug && typeof done.debug === "object" && !Array.isArray(done.debug)) {
+          if (
+            showExecutionPanel &&
+            done &&
+            done.debug &&
+            typeof done.debug === "object" &&
+            !Array.isArray(done.debug)
+          ) {
             setLastRunDebug(done.debug as ChatDebugPayload);
           }
         },
@@ -449,7 +481,12 @@ export function ChatPage() {
         `}
       >
         <div className="w-[360px] h-full overflow-hidden">
-           <RightInfoPanel token={token} stats={stats} executionDebug={lastRunDebug} />
+           <RightInfoPanel
+             token={token}
+             stats={stats}
+             executionDebug={lastRunDebug}
+             showExecutionPanel={showExecutionPanel}
+           />
         </div>
       </aside>
     </div>

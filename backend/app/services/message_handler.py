@@ -20,7 +20,6 @@ from app.services.llm import get_llm
 from app.services.memory import (
     extract_memory_candidates,
     list_long_term_memories,
-    retrieve_relevant_long_term_memories,
     upsert_long_term_memories,
 )
 from app.services.sender import UnifiedSender
@@ -240,6 +239,7 @@ def _render_long_term_memory_list_reply(memories: list[dict[str, Any]]) -> str:
     lines: list[str] = [f"当前长期记忆共 {len(memories)} 条："]
     show_limit = 40
     for index, item in enumerate(memories[:show_limit], start=1):
+        memory_key = str(item.get("memory_key") or "").strip()
         memory_type = str(item.get("memory_type") or "fact").strip().lower() or "fact"
         try:
             importance = int(item.get("importance") or 3)
@@ -248,7 +248,10 @@ def _render_long_term_memory_list_reply(memories: list[dict[str, Any]]) -> str:
         content = str(item.get("content") or "").strip()
         if not content:
             continue
-        lines.append(f"{index}. [{memory_type}|P{max(1, min(5, importance))}] {content}")
+        if memory_key:
+            lines.append(f"{index}. [{memory_type}|P{max(1, min(5, importance))}] {memory_key}: {content}")
+        else:
+            lines.append(f"{index}. [{memory_type}|P{max(1, min(5, importance))}] {content}")
     if len(memories) > show_limit:
         lines.append(f"... 其余 {len(memories) - show_limit} 条可在 admin 端查看。")
     return "\n".join(lines)
@@ -965,11 +968,12 @@ async def handle_message(
                 )
                 responses = [_render_long_term_memory_list_reply(long_term_memories)]
             else:
-                long_term_memories = await retrieve_relevant_long_term_memories(
+                # Inject all active long-term memories into graph context.
+                # No relevance scoring/filtering is applied for this path.
+                long_term_memories = await list_long_term_memories(
                     session=session,
                     user_id=user_id,
-                    query=message.content or "",
-                    limit=settings.long_term_memory_retrieve_limit,
+                    limit=None,
                 )
                 state["extra"] = {
                     "conversation_summary": (conversation.summary or "").strip(),
