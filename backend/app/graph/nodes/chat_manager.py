@@ -1,18 +1,14 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import json
-import re
 import time
 from typing import Any
 from typing import Literal
-from urllib.parse import quote
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
 
-from app.core.config import get_settings
 from app.db.session import AsyncSessionLocal
 from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
@@ -23,19 +19,11 @@ from app.services.memory import deactivate_identity_memories_for_user
 from app.services.runtime_context import get_session
 from app.services.skills import load_skills
 from app.services.langchain_tools import ToolInvocationContext
-from app.services.toolsets import build_node_langchain_tools, invoke_node_tool
+from app.services.toolsets import build_node_langchain_tools
 from app.services.tool_registry import list_runtime_tool_metas
 from app.services.usage import log_tool_usage
 
 VALID_CHAT_KINDS = {"general", "time", "external", "weather", "tooling", "unknown"}
-INVALID_TOOL_ERROR_PATTERN = re.compile(
-    r"(not a valid tool|invalid tool|工具不存在|未知工具|no such tool)",
-    re.IGNORECASE,
-)
-PROFILE_HINT_PATTERN = re.compile(
-    r"(叫我|我叫|称呼我|昵称|名字|我叫什么|你叫什么|你叫|AI名|ai名|assistant name|用户档案|个人档案|个人资料|profile)",
-    re.IGNORECASE,
-)
 LLM_NODE_CLASSIFIER = "chat_manager_classifier"
 LLM_NODE_TOOL_AGENT = "chat_manager_tool_agent"
 LLM_NODE_FINAL = "chat_manager_final"
@@ -178,9 +166,6 @@ async def _try_handle_profile_intent(
     text = (content or "").strip()
     if not text:
         return None
-    # Fast gate for latency: only invoke LLM when text likely mentions profile/name ops.
-    if not PROFILE_HINT_PATTERN.search(text):
-        return None
 
     llm = get_llm(node_name=LLM_NODE_CLASSIFIER)
     runnable = llm.with_structured_output(ProfileIntentExtraction)
@@ -286,6 +271,7 @@ async def _classify_chat_request_with_llm(
             "kind 仅可为: general, time, external, weather, tooling, unknown。"
             "tool_required 必须是布尔值。"
             "当问题依赖实时信息、网页抓取、外部事实验证、MCP工具调用时，tool_required=true。"
+            "当用户查询会话列表/当前会话（session）时，kind=tooling 且 tool_required=true。"
             "当用户仅请求一般写作/润色/翻译/闲聊时，tool_required=false。"
             "当用户要求“使用某个技能/按某种风格写文案、写诗、翻译、改写”时，kind=general 且 tool_required=false。"
             "tooling 仅用于‘列出工具/如何调用工具/工具是否可用’等工具管理问题。"
@@ -325,19 +311,6 @@ async def _classify_chat_request_with_llm(
         "weather_location": weather_location,
         "confidence": confidence,
     }
-
-
-def _parse_json_object(text: str) -> dict[str, Any]:
-    payload = (text or "").strip()
-    if payload.startswith("```"):
-        lines = payload.splitlines()
-        if len(lines) >= 3:
-            payload = "\n".join(lines[1:-1]).strip()
-    try:
-        result = json.loads(payload)
-        return result if isinstance(result, dict) else {}
-    except Exception:
-        return {}
 
 
 def _format_runtime_tool_catalog(tools: list[dict]) -> str:
@@ -393,46 +366,6 @@ async def _answer_with_fetched_content(
     return text or _render_fetched_preview(source_url, fetched_markdown)
 
 
-async def _answer_weather_with_time_context(
-    *,
-    user: User,
-    content: str,
-    context_text: str,
-    skills: str,
-    now_time_text: str,
-    weather_output: str,
-    source_url: str,
-) -> str:
-    llm = get_llm(node_name=LLM_NODE_FINAL)
-    system = SystemMessage(
-        content=(
-            f"你是{user.nickname}的私人助理{user.ai_name} {user.ai_emoji}。"
-            "你必须结合会话上下文连续对话，不要声称自己无法回忆当前会话。\n"
-            "你将基于两份工具证据回答天气问题：now_time 与 maps_weather。\n"
-            "请以 now_time 作为“今天”的时间基准，对天气日期进行相对判断（今天/明天/后天）。\n"
-            "只允许依据提供的工具结果回答，禁止补充工具结果中不存在的事实。\n"
-            "禁止输出“模拟/测试数据”“未来日期异常”“系统此前限制”等主观推断。\n"
-            "如果某字段缺失，明确说“工具未返回该字段”。\n"
-            "输出简洁中文，可给出 2~4 天预报要点。\n"
-            f"会话上下文:\n{context_text}\n\n"
-            f"技能文档:\n{skills}\n\n"
-            f"now_time 结果:\n{now_time_text}\n\n"
-            f"maps_weather 来源:\n{source_url}\n"
-            f"maps_weather 原始结果:\n{weather_output}"
-        )
-    )
-    human = HumanMessage(content=content or "")
-    response = await llm.ainvoke([system, human])
-    text = str(response.content or "").strip()
-    if text:
-        return text
-    return (
-        f"时间基准：{now_time_text}\n"
-        f"天气来源：{source_url}\n"
-        f"天气原始结果：\n{_shorten_text(weather_output, 2400)}"
-    )
-
-
 def _build_chat_tools(
     *,
     user_id: int | None,
@@ -447,27 +380,6 @@ def _build_chat_tools(
             audit_hook=_audit_tool_call_bridge(user_id, platform, conversation_id),
         ),
         node_name="chat_manager",
-    )
-
-
-async def _invoke_chat_tool(
-    *,
-    user_id: int | None,
-    platform: str,
-    conversation_id: int | None,
-    tool_name: str,
-    args: dict[str, Any] | None = None,
-) -> str:
-    return await invoke_node_tool(
-        context=ToolInvocationContext(
-            user_id=user_id,
-            platform=platform,
-            conversation_id=conversation_id,
-            audit_hook=_audit_tool_call_bridge(user_id, platform, conversation_id),
-        ),
-        node_name="chat_manager",
-        tool_name=tool_name,
-        args=dict(args or {}),
     )
 
 
@@ -549,10 +461,6 @@ def _extract_tool_outputs(messages: list[Any]) -> list[str]:
     return rows
 
 
-def _looks_like_invalid_tool_error(text: str) -> bool:
-    return bool(INVALID_TOOL_ERROR_PATTERN.search((text or "").strip()))
-
-
 async def _ground_answer_with_tool_outputs(
     *,
     user: User,
@@ -610,6 +518,7 @@ async def _run_tool_agent(
         "你具备 LangGraph 工具调用能力。原则：由 LLM 自主判断是否需要工具并执行。\n"
         "技能文档是写作/回答参考，不是可调用工具；严禁把 writer/translator/skill 名称当作 tool 调用。\n"
         "只能调用“当前可用工具目录”里出现的工具名。\n"
+        "必须严格遵循用户请求的时间范围/数量范围，不要擅自扩展。\n"
         "当问题依赖实时/外部信息时：\n"
         "1) 优先调用 mcp_list_tools 查看可用工具；\n"
         "2) 选择最匹配工具执行；\n"
@@ -618,6 +527,10 @@ async def _run_tool_agent(
         "最多调用 3 次工具；若连续失败，直接输出失败原因与下一步建议，不要盲目尝试无关站点。\n"
         "若用户要抓取网页但未给 URL：你可自行选择可公开抓取来源并调用 fetch_url。\n"
         "天气查询优先使用 MCP 天气工具（如 maps_weather）；时间查询优先调用 now_time。\n"
+        "若用户上一轮已给出时间限定（例如“今天/明天/本周”）而本轮只补充城市（例如“武汉”），必须继承上一轮时间限定。\n"
+        "若时间限定是“今天”，默认只回答今天天气；除非用户明确要求未来几天。\n"
+        "天气回答默认先给“今天”，除非用户明确指定其他日期范围。\n"
+        "当用户询问“历史会话/当前会话/session 列表”时，优先调用 conversation_list 或 conversation_current。\n"
         "对天气类查询，不要用 fetch_url 代替 MCP 天气工具。\n"
         "若站点禁止抓取，请明确告知并给替代来源或让用户提供 URL。\n"
         "不要暴露内部链路与调试信息。\n"
@@ -653,49 +566,6 @@ async def _run_tool_agent(
     return "", 0
 
 
-async def _weather_fallback_fetch_and_answer(
-    *,
-    user: User,
-    platform: str,
-    conversation_id: int | None,
-    content: str,
-    context_text: str,
-    skills: str,
-    weather_location: str,
-) -> str | None:
-    location = (weather_location or "").strip()
-    if not location:
-        return "请补充城市后我再查询天气，例如：武汉。"
-    try:
-        fetched = await _invoke_chat_tool(
-            user_id=user.id,
-            platform=platform,
-            conversation_id=conversation_id,
-            tool_name="maps_weather",
-            args={"city": location},
-        )
-        if "not available" in fetched.lower() or "调用失败" in fetched:
-            return None
-        now_time_text = await _invoke_chat_tool(
-            user_id=user.id,
-            platform=platform,
-            conversation_id=conversation_id,
-            tool_name="now_time",
-            args={"timezone": get_settings().timezone},
-        )
-        return await _answer_weather_with_time_context(
-            user=user,
-            content=content,
-            context_text=context_text,
-            skills=skills,
-            now_time_text=now_time_text,
-            weather_output=fetched,
-            source_url=f"mcp:maps_weather?city={quote(location)}",
-        )
-    except Exception:
-        return None
-
-
 async def chat_manager_node(state: GraphState) -> GraphState:
     message = state["message"]
     session = get_session()
@@ -704,6 +574,8 @@ async def chat_manager_node(state: GraphState) -> GraphState:
         return {**state, "responses": ["未找到用户信息。"]}
 
     content = (message.content or "").strip()
+    platform = (message.platform or "unknown")
+    conversation_id = state.get("conversation_id")
     context_text = render_conversation_context(state)
     profile_reply = await _try_handle_profile_intent(
         session=session,
@@ -740,37 +612,12 @@ async def chat_manager_node(state: GraphState) -> GraphState:
         }
     kind = str(classification.get("kind") or "unknown")
     tool_required = bool(classification.get("tool_required"))
-    weather_location = str(classification.get("weather_location") or "").strip()
     should_try_tools = tool_required or (kind in {"time", "external", "weather", "tooling"})
-    tool_path_invalid_tool_error = False
-
-    # Weather should be deterministic: call MCP weather first, avoid web-fetch fallback drift.
-    platform = (message.platform or "unknown")
-    conversation_id = state.get("conversation_id")
-    if kind == "weather":
-        weather_text = await _weather_fallback_fetch_and_answer(
-            user=user,
-            platform=platform,
-            conversation_id=conversation_id,
-            content=content,
-            context_text=context_text,
-            skills=skills,
-            weather_location=weather_location,
-        )
-        if weather_text:
-            return {**state, "responses": [weather_text]}
-        return {
-            **state,
-            "responses": [
-                "天气 MCP 工具当前不可用（超时或服务异常），本轮未改用网页抓取。"
-                "请稍后重试，或检查 MCP 服务 URL/网络连通性。"
-            ],
-        }
 
     # LangGraph tool-call path.
     if should_try_tools:
         try:
-            tool_answer, tool_count = await _run_tool_agent(
+            tool_answer, _tool_count = await _run_tool_agent(
                 user=user,
                 platform=platform,
                 conversation_id=conversation_id,
@@ -779,23 +626,10 @@ async def chat_manager_node(state: GraphState) -> GraphState:
                 skills=skills,
                 runtime_tools=runtime_tools,
             )
-            if _looks_like_invalid_tool_error(tool_answer):
-                tool_path_invalid_tool_error = True
-                tool_answer = ""
-                tool_count = 0
-            if tool_answer and (tool_count > 0 or not tool_required):
+            if tool_answer:
                 return {**state, "responses": [tool_answer]}
         except Exception:
             pass
-
-    if tool_required and kind in {"external", "tooling"} and not tool_path_invalid_tool_error:
-        return {
-            **state,
-            "responses": [
-                "这个问题需要工具抓取实时/外部数据后才能可靠回答。"
-                "请提供可抓取 URL，或允许我换一个公开来源继续。"
-            ],
-        }
 
     # Final plain-LLM fallback.
     llm = get_llm(node_name=LLM_NODE_FINAL)

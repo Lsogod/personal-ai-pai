@@ -13,7 +13,9 @@ from app.core.config import get_settings
 from app.models.ledger import Ledger
 from app.models.reminder_delivery import ReminderDelivery
 from app.models.schedule import Schedule
+from app.models.user import User
 from app.services.admin_tools import is_tool_enabled
+from app.services.conversations import ensure_active_conversation, list_conversations
 from app.services.mcp_fetch import get_mcp_client_for_tool, get_mcp_fetch_client
 from app.services.runtime_context import get_scheduler, get_session
 from app.services.scheduler_tasks import send_reminder_job
@@ -132,6 +134,21 @@ def _schedule_to_payload(row: Schedule) -> dict[str, Any]:
         "content": str(row.content or ""),
         "status": str(row.status or ""),
         "trigger_time": row.trigger_time.isoformat(sep=" ", timespec="seconds") if row.trigger_time else "",
+    }
+
+
+def _conversation_to_payload(row: Any, active_id: int | None) -> dict[str, Any]:
+    row_id = int(getattr(row, "id", 0) or 0)
+    return {
+        "id": row_id,
+        "title": str(getattr(row, "title", "") or ""),
+        "summary": str(getattr(row, "summary", "") or ""),
+        "last_message_at": (
+            getattr(row, "last_message_at").isoformat(sep=" ", timespec="seconds")
+            if getattr(row, "last_message_at", None) is not None
+            else ""
+        ),
+        "active": bool(active_id and row_id == int(active_id)),
     }
 
 
@@ -500,6 +517,41 @@ async def execute_capability(
                 result = await session.execute(stmt)
                 rows = list(result.scalars().all())
                 payload = [_ledger_to_payload(item) for item in rows]
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
+
+            if tool_l == "conversation_current":
+                uid = _resolve_user_id(params.get("user_id", user_id))
+                if uid <= 0:
+                    return _result(False, error="missing required arg: user_id")
+                session = get_session()
+                user_row = await session.get(User, uid)
+                if user_row is None:
+                    return _result(False, error="user not found")
+                current = await ensure_active_conversation(session, user_row)
+                payload = _conversation_to_payload(current, int(current.id or 0))
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
+
+            if tool_l == "conversation_list":
+                uid = _resolve_user_id(params.get("user_id", user_id))
+                if uid <= 0:
+                    return _result(False, error="missing required arg: user_id")
+                limit = max(1, min(100, int(params.get("limit") or 20)))
+                session = get_session()
+                user_row = await session.get(User, uid)
+                if user_row is None:
+                    return _result(False, error="user not found")
+                await ensure_active_conversation(session, user_row)
+                rows = await list_conversations(session, user_row, limit=limit)
+                active_id = int(user_row.active_conversation_id or 0) or None
+                payload = [_conversation_to_payload(item, active_id) for item in rows]
                 return _result(
                     True,
                     output=json.dumps(payload, ensure_ascii=False),

@@ -136,6 +136,18 @@ def list_builtin_tool_metas() -> list[ToolMeta]:
             "enabled": True,
         },
         {
+            "name": "conversation_current",
+            "source": "builtin",
+            "description": "Get current active conversation.",
+            "enabled": True,
+        },
+        {
+            "name": "conversation_list",
+            "source": "builtin",
+            "description": "List conversation rows with active marker.",
+            "enabled": True,
+        },
+        {
             "name": "schedule_insert",
             "source": "builtin",
             "description": "Create one schedule/reminder row and schedule trigger job.",

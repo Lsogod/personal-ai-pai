@@ -306,6 +306,32 @@ def build_langchain_tools(
 
         tools.append(ledger_list_tool)
 
+    if _enabled("conversation_current"):
+        @tool("conversation_current")
+        async def conversation_current_tool() -> str:
+            """Return current active conversation as JSON object."""
+            return await _run_tool(
+                context=context,
+                source="builtin",
+                name="conversation_current",
+                args={},
+            )
+
+        tools.append(conversation_current_tool)
+
+    if _enabled("conversation_list"):
+        @tool("conversation_list")
+        async def conversation_list_tool(limit: int = 20) -> str:
+            """List conversation rows as JSON array with active marker."""
+            return await _run_tool(
+                context=context,
+                source="builtin",
+                name="conversation_list",
+                args={"limit": limit},
+            )
+
+        tools.append(conversation_list_tool)
+
     if _enabled("schedule_insert"):
         @tool("schedule_insert")
         async def schedule_insert_tool(
