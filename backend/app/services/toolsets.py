@@ -24,6 +24,7 @@ MCP_TOOL_NAMES: set[str] = {
 CONVERSATION_TOOL_NAMES: set[str] = {
     "conversation_current",
     "conversation_list",
+    "memory_list",
 }
 
 LEDGER_TOOL_NAMES: set[str] = {

@@ -16,6 +16,7 @@ from app.models.schedule import Schedule
 from app.models.user import User
 from app.services.admin_tools import is_tool_enabled
 from app.services.conversations import ensure_active_conversation, list_conversations
+from app.services.memory import list_long_term_memories
 from app.services.mcp_fetch import get_mcp_client_for_tool, get_mcp_fetch_client
 from app.services.runtime_context import get_scheduler, get_session
 from app.services.scheduler_tasks import send_reminder_job
@@ -556,6 +557,23 @@ async def execute_capability(
                     True,
                     output=json.dumps(payload, ensure_ascii=False),
                     output_data=payload,
+                )
+
+            if tool_l == "memory_list":
+                uid = _resolve_user_id(params.get("user_id", user_id))
+                if uid <= 0:
+                    return _result(False, error="missing required arg: user_id")
+                limit = max(1, min(500, int(params.get("limit") or 120)))
+                session = get_session()
+                payload = await list_long_term_memories(
+                    session=session,
+                    user_id=uid,
+                    limit=limit,
+                )
+                return _result(
+                    True,
+                    output=json.dumps(payload or [], ensure_ascii=False),
+                    output_data=payload or [],
                 )
 
             if tool_l == "schedule_insert":

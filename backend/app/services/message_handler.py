@@ -64,14 +64,6 @@ _memory_tasks: set[asyncio.Task[Any]] = set()
 _memory_debounce_tasks: dict[tuple[int, int], asyncio.Task[Any]] = {}
 _memory_debounce_payloads: dict[tuple[int, int], dict[str, Any]] = {}
 REBIND_HINT_PATTERN = re.compile(r"(换绑|改绑|解绑|重新绑定|rebind|unbind|re-bind|un-bind)", re.IGNORECASE)
-MEMORY_LIST_QUERY_PATTERN = re.compile(
-    r"("
-    r"(?:\u957f\u671f\u8bb0\u5fc6|\u8bb0\u5fc6).*(?:\u6709\u54ea\u4e9b|\u5217\u51fa|\u67e5\u770b|\u67e5\u8be2|\u5168\u90e8|\u6240\u6709)"
-    r"|(?:\u67e5\u770b|\u67e5\u8be2).*(?:\u957f\u671f\u8bb0\u5fc6|\u8bb0\u5fc6)"
-    r"|(?:what|show|list).*(?:long\\s*term\\s*memor(?:y|ies)|memory)"
-    r")",
-    re.IGNORECASE,
-)
 
 
 def _today_start_utc_naive() -> datetime:
@@ -217,48 +209,6 @@ async def _mark_conversation_memory_processed(
             conversation_id,
             user_message_id,
         )
-
-
-def _is_long_term_memory_list_query(text: str) -> bool:
-    content = (text or "").strip()
-    if not content:
-        return False
-    return bool(MEMORY_LIST_QUERY_PATTERN.search(content))
-
-
-async def _wait_memory_pipeline_settle(timeout_sec: float = 2.5) -> None:
-    pending = [task for task in list(_memory_tasks) if not task.done()]
-    if not pending:
-        return
-    try:
-        await asyncio.wait(pending, timeout=max(0.1, float(timeout_sec)))
-    except Exception:
-        return
-
-
-def _render_long_term_memory_list_reply(memories: list[dict[str, Any]]) -> str:
-    if not memories:
-        return "当前还没有可用的长期记忆。"
-
-    lines: list[str] = [f"当前长期记忆共 {len(memories)} 条："]
-    show_limit = 40
-    for index, item in enumerate(memories[:show_limit], start=1):
-        memory_key = str(item.get("memory_key") or "").strip()
-        memory_type = str(item.get("memory_type") or "fact").strip().lower() or "fact"
-        try:
-            importance = int(item.get("importance") or 3)
-        except Exception:
-            importance = 3
-        content = str(item.get("content") or "").strip()
-        if not content:
-            continue
-        if memory_key:
-            lines.append(f"{index}. [{memory_type}|P{max(1, min(5, importance))}] {memory_key}: {content}")
-        else:
-            lines.append(f"{index}. [{memory_type}|P{max(1, min(5, importance))}] {content}")
-    if len(memories) > show_limit:
-        lines.append(f"... 其余 {len(memories) - show_limit} 条可在 admin 端查看。")
-    return "\n".join(lines)
 
 
 def _build_chat_debug_payload(graph_result: Any) -> dict[str, Any] | None:
@@ -987,90 +937,80 @@ async def handle_message(
             skip_summary_update = True
         else:
             skip_summary_update = False
-            if _is_long_term_memory_list_query(message.content or ""):
-                await _wait_memory_pipeline_settle(timeout_sec=2.5)
-                memory_limit = max(40, settings.long_term_memory_retrieve_scan_limit)
-                long_term_memories = await list_long_term_memories(
+            # Inject all active long-term memories into graph context.
+            # No relevance scoring/filtering is applied for this path.
+            long_term_memories = await list_long_term_memories(
+                session=session,
+                user_id=user_id,
+                limit=None,
+            )
+            state["extra"] = {
+                "conversation_summary": (conversation.summary or "").strip(),
+                "context_messages": await _load_context_messages(
                     session=session,
                     user_id=user_id,
-                    limit=memory_limit,
+                    conversation_id=conversation.id,
+                    limit=20,
+                ),
+                "long_term_memories": long_term_memories,
+            }
+            graph = await get_graph()
+            graph_config = {"configurable": {"thread_id": f"{user_uuid}:{conversation.id}"}}
+            # Preserve node-produced conversation-scoped context (e.g. last query result ids)
+            # across turns, while always refreshing runtime context fields for this turn.
+            try:
+                state_snapshot = await graph.aget_state(graph_config)
+                prev_values = getattr(state_snapshot, "values", {}) or {}
+                prev_extra = prev_values.get("extra")
+                if isinstance(prev_extra, dict) and isinstance(state.get("extra"), dict):
+                    merged_extra = dict(prev_extra)
+                    merged_extra.update(dict(state.get("extra") or {}))
+                    state["extra"] = merged_extra
+            except Exception:
+                pass
+            session_token = set_session(session)
+            scheduler_token = set_scheduler(_scheduler)
+            tool_user_token = set_tool_user_id(user_id)
+            tool_platform_token = set_tool_platform(platform)
+            tool_conv_token = set_tool_conversation_id(conversation.id)
+            stream_token = None
+            stream_nodes_token = None
+            if miniapp_stream_enabled:
+                stream_token = set_llm_streamer(_emit_miniapp_stream_chunk)
+                # Stream only terminal NL generation nodes.
+                stream_nodes_token = set_llm_stream_nodes(
+                    {"chat_manager_final", "help_center", "complex_task_agent"}
                 )
-                responses = [_render_long_term_memory_list_reply(long_term_memories)]
-            else:
-                # Inject all active long-term memories into graph context.
-                # No relevance scoring/filtering is applied for this path.
-                long_term_memories = await list_long_term_memories(
-                    session=session,
-                    user_id=user_id,
-                    limit=None,
-                )
-                state["extra"] = {
-                    "conversation_summary": (conversation.summary or "").strip(),
-                    "context_messages": await _load_context_messages(
-                        session=session,
-                        user_id=user_id,
-                        conversation_id=conversation.id,
-                        limit=20,
-                    ),
-                    "long_term_memories": long_term_memories,
-                }
-                graph = await get_graph()
-                graph_config = {"configurable": {"thread_id": f"{user_uuid}:{conversation.id}"}}
-                # Preserve node-produced conversation-scoped context (e.g. last query result ids)
-                # across turns, while always refreshing runtime context fields for this turn.
+            try:
                 try:
-                    state_snapshot = await graph.aget_state(graph_config)
-                    prev_values = getattr(state_snapshot, "values", {}) or {}
-                    prev_extra = prev_values.get("extra")
-                    if isinstance(prev_extra, dict) and isinstance(state.get("extra"), dict):
-                        merged_extra = dict(prev_extra)
-                        merged_extra.update(dict(state.get("extra") or {}))
-                        state["extra"] = merged_extra
-                except Exception:
-                    pass
-                session_token = set_session(session)
-                scheduler_token = set_scheduler(_scheduler)
-                tool_user_token = set_tool_user_id(user_id)
-                tool_platform_token = set_tool_platform(platform)
-                tool_conv_token = set_tool_conversation_id(conversation.id)
-                stream_token = None
-                stream_nodes_token = None
-                if miniapp_stream_enabled:
-                    stream_token = set_llm_streamer(_emit_miniapp_stream_chunk)
-                    # Stream only terminal NL generation nodes.
-                    stream_nodes_token = set_llm_stream_nodes(
-                        {"chat_manager_final", "help_center", "complex_task_agent"}
+                    result = await graph.ainvoke(
+                        state,
+                        config=graph_config,
                     )
-                try:
-                    try:
-                        result = await graph.ainvoke(
-                            state,
-                            config=graph_config,
-                        )
-                        responses = result.get("responses") or []
-                        debug_payload = _build_chat_debug_payload(result)
-                        if debug_payload is None:
-                            try:
-                                state_snapshot = await graph.aget_state(graph_config)
-                                final_values = getattr(state_snapshot, "values", {}) or {}
-                                debug_payload = _build_chat_debug_payload(final_values)
-                            except Exception:
-                                debug_payload = None
-                    except Exception as exc:
-                        logger.exception("graph invoke failed: platform=%s user_id=%s", platform, user_id)
-                        error_text, error_code = _friendly_graph_error_message(exc)
-                        responses = [error_text]
-                        debug_payload = {"route_intent": "unknown", "error": error_code}
-                finally:
-                    if stream_nodes_token is not None:
-                        reset_llm_stream_nodes(stream_nodes_token)
-                    if stream_token is not None:
-                        reset_llm_streamer(stream_token)
-                    reset_tool_conversation_id(tool_conv_token)
-                    reset_tool_platform(tool_platform_token)
-                    reset_tool_user_id(tool_user_token)
-                    reset_scheduler(scheduler_token)
-                    reset_session(session_token)
+                    responses = result.get("responses") or []
+                    debug_payload = _build_chat_debug_payload(result)
+                    if debug_payload is None:
+                        try:
+                            state_snapshot = await graph.aget_state(graph_config)
+                            final_values = getattr(state_snapshot, "values", {}) or {}
+                            debug_payload = _build_chat_debug_payload(final_values)
+                        except Exception:
+                            debug_payload = None
+                except Exception as exc:
+                    logger.exception("graph invoke failed: platform=%s user_id=%s", platform, user_id)
+                    error_text, error_code = _friendly_graph_error_message(exc)
+                    responses = [error_text]
+                    debug_payload = {"route_intent": "unknown", "error": error_code}
+            finally:
+                if stream_nodes_token is not None:
+                    reset_llm_stream_nodes(stream_nodes_token)
+                if stream_token is not None:
+                    reset_llm_streamer(stream_token)
+                reset_tool_conversation_id(tool_conv_token)
+                reset_tool_platform(tool_platform_token)
+                reset_tool_user_id(tool_user_token)
+                reset_scheduler(scheduler_token)
+                reset_session(session_token)
 
     if miniapp_stream_enabled and responses:
         joined = "\n".join(responses)

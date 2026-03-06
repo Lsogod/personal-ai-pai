@@ -332,6 +332,19 @@ def build_langchain_tools(
 
         tools.append(conversation_list_tool)
 
+    if _enabled("memory_list"):
+        @tool("memory_list")
+        async def memory_list_tool(limit: int = 120) -> str:
+            """List long-term memories as JSON array."""
+            return await _run_tool(
+                context=context,
+                source="builtin",
+                name="memory_list",
+                args={"limit": limit},
+            )
+
+        tools.append(memory_list_tool)
+
     if _enabled("schedule_insert"):
         @tool("schedule_insert")
         async def schedule_insert_tool(
