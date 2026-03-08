@@ -66,7 +66,7 @@ def build_langchain_tools(
     if _enabled("now_time"):
         @tool("now_time")
         async def now_time_tool(timezone: str = "Asia/Shanghai") -> str:
-            """Return current local time by timezone name, for example: Asia/Shanghai."""
+            """按时区名称返回当前本地时间，例如：Asia/Shanghai。"""
             return await _run_tool(
                 context=context,
                 source="builtin",
@@ -84,7 +84,7 @@ def build_langchain_tools(
             start_index: int = 0,
             raw: bool = False,
         ) -> str:
-            """Fetch webpage or JSON content."""
+            """抓取网页或 JSON 内容。"""
             return await _run_tool(
                 context=context,
                 source="builtin",
@@ -102,7 +102,7 @@ def build_langchain_tools(
     if _enabled("mcp_list_tools"):
         @tool("mcp_list_tools")
         async def mcp_list_tools_tool() -> str:
-            """List available external tools."""
+            """列出当前可用的外部工具。"""
             return await _run_tool(
                 context=context,
                 source="builtin",
@@ -115,7 +115,7 @@ def build_langchain_tools(
     if _enabled("mcp_call_tool"):
         @tool("mcp_call_tool")
         async def mcp_call_tool_tool(tool_name: str, arguments_json: str = "{}") -> str:
-            """Call an external tool by name with JSON arguments."""
+            """按名称调用外部工具，并传入 JSON 参数。"""
             name = (tool_name or "").strip()
             args: dict[str, Any] = {}
             try:
@@ -136,7 +136,7 @@ def build_langchain_tools(
     if _enabled("maps_weather"):
         @tool("maps_weather")
         async def maps_weather_tool(city: str = "", adcode: str = "") -> str:
-            """Query weather by city name or adcode."""
+            """按城市名或 adcode 查询天气。"""
             payload: dict[str, Any] = {}
             if city.strip():
                 payload["city"] = city.strip()
@@ -156,7 +156,7 @@ def build_langchain_tools(
     if _enabled("analyze_receipt"):
         @tool("analyze_receipt")
         async def analyze_receipt_tool(image_ref: str) -> str:
-            """Analyze a receipt/payment image and return structured extraction JSON."""
+            """分析小票或支付图片，并返回结构化提取 JSON。"""
             return await _run_tool(
                 context=context,
                 source="builtin",
@@ -169,7 +169,7 @@ def build_langchain_tools(
     if _enabled("ledger_text2sql"):
         @tool("ledger_text2sql")
         async def ledger_text2sql_tool(message: str, conversation_context: str = "") -> str:
-            """Execute natural-language ledger CRUD/query via safe text2sql pipeline."""
+            """通过安全的 text2sql 流程执行自然语言账单增删改查。"""
             return await _run_tool(
                 context=context,
                 source="builtin",
@@ -191,7 +191,7 @@ def build_langchain_tools(
             transaction_date: str = "",
             image_url: str = "",
         ) -> str:
-            """Insert one ledger record and return JSON row."""
+            """插入一条账单记录，并返回 JSON 行数据。"""
             return await _run_tool(
                 context=context,
                 source="builtin",
@@ -216,7 +216,7 @@ def build_langchain_tools(
             item: str = "",
             transaction_date: str = "",
         ) -> str:
-            """Update one ledger record and return JSON row."""
+            """更新一条账单记录，并返回 JSON 行数据。"""
             return await _run_tool(
                 context=context,
                 source="builtin",
@@ -235,7 +235,7 @@ def build_langchain_tools(
     if _enabled("ledger_delete"):
         @tool("ledger_delete")
         async def ledger_delete_tool(ledger_id: int) -> str:
-            """Delete one ledger record and return deleted JSON row."""
+            """删除一条账单记录，并返回被删除的 JSON 行数据。"""
             return await _run_tool(
                 context=context,
                 source="builtin",
@@ -248,7 +248,7 @@ def build_langchain_tools(
     if _enabled("ledger_get_latest"):
         @tool("ledger_get_latest")
         async def ledger_get_latest_tool() -> str:
-            """Return latest ledger row as JSON; empty JSON if none."""
+            """返回最新一条账单的 JSON；如果没有则返回空 JSON。"""
             return await _run_tool(
                 context=context,
                 source="builtin",
@@ -261,7 +261,7 @@ def build_langchain_tools(
     if _enabled("ledger_list_recent"):
         @tool("ledger_list_recent")
         async def ledger_list_recent_tool(limit: int = 10) -> str:
-            """Return recent ledger rows as JSON list."""
+            """返回最近账单记录的 JSON 列表。"""
             return await _run_tool(
                 context=context,
                 source="builtin",
@@ -282,7 +282,7 @@ def build_langchain_tools(
             order: str = "desc",
             ledger_ids: list[int] | None = None,
         ) -> str:
-            """List ledger rows by optional id/date/category/item filters as JSON list."""
+            """按可选的 id、日期、分类、摘要条件列出账单，并返回 JSON 列表。"""
             safe_ids: list[int] = []
             for item in list(ledger_ids or []):
                 try:
@@ -309,7 +309,7 @@ def build_langchain_tools(
     if _enabled("conversation_current"):
         @tool("conversation_current")
         async def conversation_current_tool() -> str:
-            """Return current active conversation as JSON object."""
+            """返回当前激活会话的 JSON 对象。"""
             return await _run_tool(
                 context=context,
                 source="builtin",
@@ -322,7 +322,7 @@ def build_langchain_tools(
     if _enabled("conversation_list"):
         @tool("conversation_list")
         async def conversation_list_tool(limit: int = 20) -> str:
-            """List conversation rows as JSON array with active marker."""
+            """返回带有激活标记的会话 JSON 数组。"""
             return await _run_tool(
                 context=context,
                 source="builtin",
@@ -335,7 +335,7 @@ def build_langchain_tools(
     if _enabled("memory_list"):
         @tool("memory_list")
         async def memory_list_tool(limit: int = 120) -> str:
-            """List long-term memories as JSON array."""
+            """返回长期记忆的 JSON 数组。"""
             return await _run_tool(
                 context=context,
                 source="builtin",
@@ -353,7 +353,7 @@ def build_langchain_tools(
             status: str = "PENDING",
             job_id: str = "",
         ) -> str:
-            """Create one schedule reminder and return JSON row."""
+            """创建一条日程提醒，并返回 JSON 行数据。"""
             return await _run_tool(
                 context=context,
                 source="builtin",
@@ -376,7 +376,7 @@ def build_langchain_tools(
             trigger_time: str = "",
             status: str = "",
         ) -> str:
-            """Update one schedule reminder and return JSON row."""
+            """更新一条日程提醒，并返回 JSON 行数据。"""
             return await _run_tool(
                 context=context,
                 source="builtin",
@@ -394,7 +394,7 @@ def build_langchain_tools(
     if _enabled("schedule_delete"):
         @tool("schedule_delete")
         async def schedule_delete_tool(schedule_id: int) -> str:
-            """Delete one schedule reminder and return deleted JSON row."""
+            """删除一条日程提醒，并返回被删除的 JSON 行数据。"""
             return await _run_tool(
                 context=context,
                 source="builtin",
@@ -415,7 +415,7 @@ def build_langchain_tools(
             order: str = "asc",
             schedule_ids: list[int] | None = None,
         ) -> str:
-            """List schedule rows by optional status/time window as JSON list."""
+            """按可选状态和时间窗口列出日程，并返回 JSON 列表。"""
             safe_ids: list[int] = []
             for item in list(schedule_ids or []):
                 try:

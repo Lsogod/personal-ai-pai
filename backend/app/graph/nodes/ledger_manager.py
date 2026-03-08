@@ -727,21 +727,21 @@ async def _extract_update_rewrite_fields(content: str, conversation_context: str
     runnable = llm.with_structured_output(LedgerUpdateRewriteExtraction)
     system = SystemMessage(
         content=(
-            "Extract update rewrite intent for ledger operations. "
-            "Return one JSON object only. "
-            "Return structured fields only: target_item, item, category, amount, amount_explicit, confidence. "
-            "For expressions like '把A改成B/将A修改为B', target_item must be A and item must be B. "
-            "For multi-source rewrites like '把A和B改成C', target_item must contain the full source set (A and B) "
-            "and item must be C. Do not collapse source set into destination. "
-            "Set amount_explicit=true only when current user message explicitly gives a new numeric amount to set. "
-            "If user only changes item/category wording and does not explicitly set amount, amount_explicit=false and amount=null. "
-            "If uncertain, keep fields empty and confidence low."
+            "请提取账单操作中的改写式更新意图。"
+            "只返回一个 JSON 对象。"
+            "只返回结构化字段：target_item, item, category, amount, amount_explicit, confidence。"
+            "对于“把A改成B/将A修改为B”这类表达，target_item 必须是 A，item 必须是 B。"
+            "对于“把A和B改成C”这类多源改写，target_item 必须保留完整源集合（A 和 B），"
+            "item 必须是 C。不要把源集合错误折叠成目标值。"
+            "只有当当前用户消息明确给出新的数值金额时，amount_explicit 才设为 true。"
+            "如果用户只是修改 item/category 表述，且没有明确设置金额，则 amount_explicit=false 且 amount=null。"
+            "如果不确定，保持字段为空，并将 confidence 设低。"
         )
     )
     human = HumanMessage(
         content=(
-            f"conversation_context:\n{conversation_context}\n\n"
-            f"user_message:\n{content}"
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"用户消息:\n{content}"
         )
     )
     parsed = await runnable.ainvoke([system, human])
@@ -764,25 +764,25 @@ async def _understand_preview_control_message(
     candidate_rows = [dict(item) for item in list(pending.get("candidate_rows") or []) if isinstance(item, dict)][:10]
     system = SystemMessage(
         content=(
-            "Classify user message under an existing pending preview-commit task. "
-            "Return one JSON object only. "
-            "Return structured fields only: action, indexes, comparator, threshold, confidence. "
-            "action must be one of: confirm, cancel, pick_indexes, refine_amount, new_request, unknown. "
-            "pick_indexes means the user selected subset rows by display index (1-based). "
-            "refine_amount means filtering current candidates by amount comparator and threshold. "
-            "Use refine_amount only when user explicitly states a concrete amount condition in the current message "
-            "(for example: 金额>30, 大于30, 小于等于20, 等于30). "
-            "Do not infer refine_amount from complaints/questions like '你怎么把金额改了' or '金额是30不是60'. "
-            "new_request means user started a different full request and should not be treated as pending control."
+            "请对已有待提交预览任务下的用户消息进行分类。"
+            "只返回一个 JSON 对象。"
+            "只返回结构化字段：action, indexes, comparator, threshold, confidence。"
+            "action 只能是：confirm, cancel, pick_indexes, refine_amount, new_request, unknown。"
+            "pick_indexes 表示用户按展示序号（从 1 开始）选择了部分记录。"
+            "refine_amount 表示用户希望按金额比较条件和阈值筛选当前候选项。"
+            "只有当用户在当前消息里明确给出具体金额条件时，才使用 refine_amount "
+            "（例如：金额>30、大于30、小于等于20、等于30）。"
+            "不要从“你怎么把金额改了”或“金额是30不是60”这类抱怨或疑问中推断 refine_amount。"
+            "new_request 表示用户发起了另一条完整新请求，不应按待处理控制语义理解。"
         )
     )
     human = HumanMessage(
         content=(
-            f"conversation_context:\n{conversation_context}\n\n"
-            f"pending_operation: {str(pending.get('operation') or '').strip().lower()}\n"
-            f"pending_summary_json:\n{json.dumps(summary, ensure_ascii=False)}\n\n"
-            f"pending_candidate_rows_json:\n{json.dumps(candidate_rows, ensure_ascii=False)}\n\n"
-            f"user_message:\n{content}"
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"待处理操作: {str(pending.get('operation') or '').strip().lower()}\n"
+            f"待处理摘要 JSON:\n{json.dumps(summary, ensure_ascii=False)}\n\n"
+            f"待处理候选行 JSON:\n{json.dumps(candidate_rows, ensure_ascii=False)}\n\n"
+            f"用户消息:\n{content}"
         )
     )
     parsed = await runnable.ainvoke([system, human])
@@ -803,20 +803,21 @@ async def _decide_handoff_to_chat_manager(
     runnable = llm.with_structured_output(LedgerHandoffDecision)
     system = SystemMessage(
         content=(
-            "You are a routing guard for ledger_manager. Return one JSON object only. "
-            "Return structured fields only: handoff, confidence. "
-            "Set handoff=true only when user message is primarily meta/general conversation "
-            "(assistant identity, product/project capabilities, usage guidance, chitchat) "
-            "and not an actionable ledger task. "
-            "Set handoff=false for actionable ledger intents: insert/query/list/update/delete/confirm/cancel/refine selection. "
-            "Do not rely on keyword matching; judge semantic intent from full context."
+            "你是 ledger_manager 的路由守卫。只返回一个 JSON 对象。"
+            "只返回结构化字段：handoff, confidence。"
+            "只有当用户消息主要是在进行元信息或泛闲聊对话 "
+            "（例如助手身份、产品或项目能力、使用说明、寒暄），"
+            "且不是可执行的账单任务时，才设置 handoff=true。"
+            "对于可执行的账单意图：insert/query/list/update/delete/confirm/cancel/refine selection，"
+            "都应设置 handoff=false。"
+            "不要依赖关键词匹配，要基于完整上下文判断语义意图。"
         )
     )
     human = HumanMessage(
         content=(
-            f"conversation_context:\n{conversation_context}\n\n"
-            f"pending_preview_hint:\n{pending_preview_hint or 'none'}\n\n"
-            f"user_message:\n{content}"
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"待处理预览提示:\n{pending_preview_hint or '无'}\n\n"
+            f"用户消息:\n{content}"
         )
     )
     parsed = await runnable.ainvoke([system, human])
@@ -1282,17 +1283,17 @@ async def _answer_ledger_with_llm(
     payload = _build_ledger_payload(rows)
     system = SystemMessage(
         content=(
-            "You are a ledger query assistant. Answer only from provided ledger rows. "
-            "Be concise and do not mention JSON/schema/internal details."
+            "你是账单查询助手。只能依据提供的账单行回答。"
+            "回答要简洁，不要提及 JSON、schema 或内部实现细节。"
         )
     )
     human = HumanMessage(
         content=(
-            f"query_label: {label}\n"
-            f"category_filter: {category or 'none'}\n\n"
-            f"conversation_context:\n{conversation_context}\n\n"
-            f"user_question:\n{content}\n\n"
-            f"ledger_json:\n{json.dumps(payload, ensure_ascii=False)}"
+            f"查询标签: {label}\n"
+            f"分类筛选: {category or '无'}\n\n"
+            f"会话上下文:\n{conversation_context}\n\n"
+            f"用户问题:\n{content}\n\n"
+            f"账单 JSON:\n{json.dumps(payload, ensure_ascii=False)}"
         )
     )
     response = await llm.ainvoke([system, human])

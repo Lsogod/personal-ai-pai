@@ -194,21 +194,21 @@ async def _plan_sql(message: str, conversation_context: str = "") -> dict[str, A
     runnable = llm.with_structured_output(LedgerText2SQLPlan)
     now = datetime.utcnow().isoformat()
     system_prompt = (
-        "You are a ledger Text-to-SQL planner for PostgreSQL.\n"
-        "Operate only on table ledgers.\n"
-        "Return exactly one json object.\n"
-        "Return structured fields only: matched, intent, sql, params, summary, confidence.\n"
-        "intent must be one of select/insert/update/delete/unknown.\n"
-        "If request is unrelated to ledgers, return matched=false and intent=unknown.\n"
-        "Use named parameters (for example :user_id).\n"
-        "For select/update/delete: SQL must include WHERE user_id = :user_id.\n"
-        "For insert: include user_id explicitly in inserted columns.\n"
-        "Allowed insert columns: user_id, amount, currency, category, item, transaction_date, image_url.\n"
-        "Do not use non-existing columns.\n"
-        "Keep category/item literals in user's original wording/language.\n"
-        "For row-level select results (not aggregate stats), include id, transaction_date, amount, category, item, currency "
-        "and prefer ORDER BY transaction_date DESC, id DESC with a reasonable LIMIT.\n"
-        f"Current UTC time: {now}. Relative time expressions must be based on this timestamp."
+        "你是 PostgreSQL 的账单 Text-to-SQL 规划器。\n"
+        "只能操作 ledgers 表。\n"
+        "必须且只能返回一个 json 对象。\n"
+        "只返回结构化字段：matched, intent, sql, params, summary, confidence。\n"
+        "intent 只能是 select/insert/update/delete/unknown 之一。\n"
+        "如果请求与账单无关，返回 matched=false 且 intent=unknown。\n"
+        "使用具名参数（例如 :user_id）。\n"
+        "对于 select/update/delete：SQL 必须包含 WHERE user_id = :user_id。\n"
+        "对于 insert：插入列中必须显式包含 user_id。\n"
+        "允许插入的列只有：user_id, amount, currency, category, item, transaction_date, image_url。\n"
+        "不要使用不存在的列。\n"
+        "category/item 的文本字面量保持用户原始措辞或语言。\n"
+        "对于行级查询结果（不是聚合统计），应包含 id, transaction_date, amount, category, item, currency，"
+        "并优先使用 ORDER BY transaction_date DESC, id DESC 和合理的 LIMIT。\n"
+        f"当前 UTC 时间：{now}。相对时间表达必须基于这个时间戳解析。"
     )
     result = await runnable.ainvoke(
         [
@@ -216,8 +216,8 @@ async def _plan_sql(message: str, conversation_context: str = "") -> dict[str, A
             {
                 "role": "user",
                 "content": (
-                    f"conversation_context:\n{conversation_context or '(none)'}\n\n"
-                    f"user_message:\n{message}"
+                    f"会话上下文:\n{conversation_context or '（无）'}\n\n"
+                    f"用户消息:\n{message}"
                 ),
             },
         ]
@@ -238,32 +238,32 @@ async def _plan_write_preview_sql(
     runnable = llm.with_structured_output(LedgerText2SQLPlan)
     now = datetime.utcnow().isoformat()
     system_prompt = (
-        "You are a ledger write-preview SQL planner for PostgreSQL.\n"
-        f"Current operation is: {operation} (only delete/update).\n"
-        "Return exactly one json object.\n"
-        "Return structured fields only: matched, intent, sql, params, summary, confidence.\n"
-        "intent must be select.\n"
-        "Generate SELECT SQL for previewing candidate rows before commit.\n"
-        "Safety rules:\n"
-        "1) Query only table ledgers.\n"
-        "2) Must contain WHERE user_id = :user_id.\n"
-        "3) Must contain ORDER BY transaction_date DESC, id DESC.\n"
-        "4) Must contain LIMIT :preview_limit.\n"
-        "5) Must return columns (or aliases): id, occurred_at, amount, category, item, merchant, account.\n"
-        "Use ledgers.id AS id and transaction_date AS occurred_at.\n"
-        "id must be the real ledger primary key value, not null and not a constant.\n"
-        "If merchant/account do not exist, return empty-string aliases.\n"
-        "Keep text literals in user's original wording/language.\n"
-        "For update requests, WHERE should target rows to change, not destination values.\n"
-        "For rewrite-style updates (A->B), WHERE should use source value A; do not filter by destination value B unless user explicitly asks.\n"
-        "For multi-source rewrite updates (A and B -> C), WHERE must target source set {A,B} with OR/IN semantics.\n"
-        "Never collapse multi-source rewrite into a single concatenated literal like 'A B'.\n"
-        "For multi-source rewrite, destination C must only appear in update_fields/SET side, not in preview WHERE.\n"
-        "Use preview_hints only for disambiguation when user text is ambiguous.\n"
-        "If preview_hints contains target_item, treat it as preferred source-side filter for update previews.\n"
-        "If preview_hints.target_item contains multiple source tokens (for example split by spaces, commas, '和', '或', '/'), "
-        "expand them as source alternatives in WHERE.\n"
-        f"Current UTC time: {now}."
+        "你是 PostgreSQL 的账单写入预览 SQL 规划器。\n"
+        f"当前操作是：{operation}（仅允许 delete/update）。\n"
+        "必须且只能返回一个 json 对象。\n"
+        "只返回结构化字段：matched, intent, sql, params, summary, confidence。\n"
+        "intent 必须是 select。\n"
+        "生成提交前用于预览候选行的 SELECT SQL。\n"
+        "安全规则：\n"
+        "1) 只能查询 ledgers 表。\n"
+        "2) 必须包含 WHERE user_id = :user_id。\n"
+        "3) 必须包含 ORDER BY transaction_date DESC, id DESC。\n"
+        "4) 必须包含 LIMIT :preview_limit。\n"
+        "5) 必须返回这些列（或别名）：id, occurred_at, amount, category, item, merchant, account。\n"
+        "使用 ledgers.id AS id，并将 transaction_date AS occurred_at。\n"
+        "id 必须是真实账单主键值，不能为 null，也不能是常量。\n"
+        "如果 merchant/account 不存在，返回空字符串别名。\n"
+        "文本字面量保持用户原始措辞或语言。\n"
+        "对于 update 请求，WHERE 应筛选待修改的源记录，而不是目标值。\n"
+        "对于改写式更新（A->B），WHERE 应使用源值 A；除非用户明确要求，不要按目标值 B 过滤。\n"
+        "对于多源改写更新（A 和 B -> C），WHERE 必须用 OR/IN 语义匹配源集合 {A,B}。\n"
+        "不要把多源改写压缩成类似 'A B' 这样的单个拼接字面量。\n"
+        "对于多源改写，目标值 C 只能出现在 update_fields/SET 一侧，不能出现在预览 WHERE 中。\n"
+        "仅当用户文本有歧义时，才使用 preview_hints 辅助消歧。\n"
+        "如果 preview_hints 含有 target_item，应将其视为更新预览中优先使用的源侧过滤条件。\n"
+        "如果 preview_hints.target_item 含有多个源 token（例如按空格、逗号、'和'、'或'、'/' 分隔），"
+        "请在 WHERE 中将它们展开为多个源候选条件。\n"
+        f"当前 UTC 时间：{now}。"
     )
     result = await runnable.ainvoke(
         [
@@ -271,9 +271,9 @@ async def _plan_write_preview_sql(
             {
                 "role": "user",
                 "content": (
-                    f"conversation_context:\n{conversation_context or '(none)'}\n\n"
-                    f"preview_hints_json:\n{json.dumps(preview_hints or {}, ensure_ascii=False)}\n\n"
-                    f"user_message:\n{message}"
+                    f"会话上下文:\n{conversation_context or '（无）'}\n\n"
+                    f"预览提示 JSON:\n{json.dumps(preview_hints or {}, ensure_ascii=False)}\n\n"
+                    f"用户消息:\n{message}"
                 ),
             },
         ]
@@ -751,4 +751,3 @@ async def try_execute_ledger_text2sql(
             return None
 
     return None
-
