@@ -869,8 +869,14 @@ async def _sse_stream_live(
     result_holder: dict[str, dict] = {}
     error_holder: dict[str, str] = {}
 
+    TOOL_EVENT_PREFIX = "\x00TOOL_EVENT:"
+
     async def _on_stream_chunk(chunk: str) -> None:
         if not chunk:
+            return
+        # Tool-call events are prefixed with a marker and forwarded as-is
+        if chunk.startswith(TOOL_EVENT_PREFIX):
+            await queue.put(chunk)
             return
         streamed_chunks.append(chunk)
         await queue.put(chunk)
@@ -879,7 +885,7 @@ async def _sse_stream_live(
         streamer_token = set_llm_streamer(_on_stream_chunk)
         # Stream only terminal NL generation nodes; avoid leaking
         # classifier/planner/tool-agent intermediate content.
-        stream_nodes_token = set_llm_stream_nodes({"chat_manager_final", "help_center", "complex_task_agent"})
+        stream_nodes_token = set_llm_stream_nodes({"main_agent", "chat_manager_final", "help_center", "complex_task_agent"})
         try:
             result_holder["result"] = await handle_message(source_platform, normalized, session)
         except Exception as exc:
@@ -895,6 +901,10 @@ async def _sse_stream_live(
             item = await queue.get()
             if item is None:
                 break
+            # Forward tool-call events as their own SSE data frame
+            if isinstance(item, str) and item.startswith(TOOL_EVENT_PREFIX):
+                yield f"data: {item[len(TOOL_EVENT_PREFIX):]}\n\n"
+                continue
             payload = json.dumps({"chunk": item}, ensure_ascii=False)
             yield f"data: {payload}\n\n"
 

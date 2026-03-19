@@ -158,6 +158,34 @@ export function LedgerStatsCard({ stats, token }: LedgerStatsCardProps) {
   const shownCount = hasMonthlyData ? model.recordCount : stats.count;
   const hasTrend = model.daily.some((item) => item.amount > 0);
 
+  if (query.isLoading) {
+    return (
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-surface-hover animate-pulse" />
+            <div className="space-y-1.5">
+              <div className="h-4 w-20 rounded bg-surface-hover animate-pulse" />
+              <div className="h-3 w-28 rounded bg-surface-hover animate-pulse" />
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-surface-secondary p-4 h-20 animate-pulse" />
+            <div className="rounded-xl bg-surface-secondary p-4 h-20 animate-pulse" />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-lg bg-surface-secondary p-3 h-14 animate-pulse" />
+            <div className="rounded-lg bg-surface-secondary p-3 h-14 animate-pulse" />
+            <div className="rounded-lg bg-surface-secondary p-3 h-14 animate-pulse" />
+          </div>
+          <div className="rounded-xl bg-surface-secondary p-3 h-48 animate-pulse" />
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -194,7 +222,7 @@ export function LedgerStatsCard({ stats, token }: LedgerStatsCardProps) {
           </div>
           <div className="rounded-lg bg-surface-secondary p-3">
             <p className="text-content-tertiary">近7天环比</p>
-            <p className={`mt-1 font-semibold ${model.trendPct >= 0 ? "text-rose-500" : "text-emerald-500"}`}>
+            <p className={`mt-1 font-semibold ${model.trendPct >= 0 ? "text-danger" : "text-success"}`}>
               {model.trendPct >= 0 ? "+" : ""}
               {model.trendPct.toFixed(1)}%
             </p>

@@ -25,6 +25,8 @@ export function NotificationToasts({ items, onDismiss }: NotificationToastsProps
       {items.map((item) => (
         <div
           key={item.id}
+          role="alert"
+          aria-label={item.title}
           className="pointer-events-auto animate-slide-in rounded-2xl border border-border bg-surface-card shadow-card backdrop-blur-md"
         >
           <div className="flex items-start gap-3 p-3">
@@ -36,6 +38,7 @@ export function NotificationToasts({ items, onDismiss }: NotificationToastsProps
                 <p className="text-sm font-semibold text-content">{item.title}</p>
                 <button
                   type="button"
+                  aria-label="关闭通知"
                   onClick={() => onDismiss(item.id)}
                   className="rounded-md p-1 text-content-tertiary hover:bg-surface-hover hover:text-content transition-colors"
                 >

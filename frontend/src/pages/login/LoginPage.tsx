@@ -210,6 +210,7 @@ export function LoginPage() {
       {/* Theme toggle */}
       <button
         onClick={toggleTheme}
+        aria-label={theme === "dark" ? "切换到浅色模式" : "切换到深色模式"}
         className="absolute top-5 right-5 p-2.5 rounded-xl text-content-secondary hover:text-content hover:bg-surface-hover transition-all duration-200"
       >
         {theme === "dark" ? <Sun size={20} /> : <Moon size={20} />}

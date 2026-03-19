@@ -439,4 +439,77 @@ def build_langchain_tools(
 
         tools.append(schedule_list_tool)
 
+    if _enabled("update_user_profile"):
+        @tool("update_user_profile")
+        async def update_user_profile_tool(
+            nickname: str = "",
+            ai_name: str = "",
+            ai_emoji: str = "",
+        ) -> str:
+            """更新用户档案。可设置用户昵称(nickname)、AI助手名称(ai_name)、AI助手表情(ai_emoji)。仅传入需要修改的字段。"""
+            from app.db.session import AsyncSessionLocal
+            from app.models.user import User
+            from app.services.memory import deactivate_identity_memories_for_user
+
+            user_id = context.user_id
+            if not user_id:
+                return "未找到用户信息。"
+            async with AsyncSessionLocal() as session:
+                user = await session.get(User, user_id)
+                if not user:
+                    return "未找到用户信息。"
+                changed = False
+                if nickname and nickname != str(user.nickname or "").strip():
+                    user.nickname = nickname
+                    changed = True
+                if ai_name and ai_name != str(user.ai_name or "").strip():
+                    user.ai_name = ai_name
+                    changed = True
+                if ai_emoji and ai_emoji != str(user.ai_emoji or "").strip():
+                    user.ai_emoji = ai_emoji
+                    changed = True
+                if changed:
+                    await deactivate_identity_memories_for_user(session, user_id=user_id)
+                    session.add(user)
+                    await session.commit()
+                parts: list[str] = []
+                if nickname:
+                    parts.append(f"昵称已更新为{nickname}")
+                if ai_name:
+                    parts.append(f"助手名称已更新为{ai_name}")
+                if ai_emoji:
+                    parts.append(f"助手表情已更新为{ai_emoji}")
+                return "，".join(parts) + "。" if parts else "未检测到需要修改的字段。"
+
+        tools.append(update_user_profile_tool)
+
+    if _enabled("query_user_profile"):
+        @tool("query_user_profile")
+        async def query_user_profile_tool() -> str:
+            """查询当前用户的完整档案信息（昵称、助手名称、表情、平台、邮箱等）。"""
+            from app.db.session import AsyncSessionLocal
+            from app.models.user import User
+
+            user_id = context.user_id
+            if not user_id:
+                return "未找到用户信息。"
+            async with AsyncSessionLocal() as session:
+                user = await session.get(User, user_id)
+                if not user:
+                    return "未找到用户信息。"
+                nickname = str(user.nickname or "").strip() or "未设置"
+                ai_name = str(user.ai_name or "").strip() or "AI 助手"
+                ai_emoji = str(user.ai_emoji or "").strip() or "🤖"
+                platform = str(user.platform or "").strip() or "unknown"
+                email = str(user.email or "").strip() or "未绑定"
+                return (
+                    f"昵称：{nickname}\n"
+                    f"助手名称：{ai_name}\n"
+                    f"助手表情：{ai_emoji}\n"
+                    f"平台：{platform}\n"
+                    f"邮箱：{email}"
+                )
+
+        tools.append(query_user_profile_tool)
+
     return tools

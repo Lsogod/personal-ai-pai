@@ -3,13 +3,19 @@ import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 
-import { Image, Bot, ArrowUpCircle, X, Copy, Check } from "../ui/icons";
+import { Image, Bot, ArrowUpCircle, X, Copy, Check, Zap, ChevronRight } from "../ui/icons";
 import { formatHmLocal } from "../../lib/datetime";
 
 export interface ChatMessage {
   role: string;
   content: string;
   created_at: string;
+}
+
+export interface ToolStep {
+  name: string;
+  label: string;
+  status: "start" | "done";
 }
 
 type RenderChatMessage = ChatMessage & {
@@ -25,6 +31,7 @@ interface Profile {
 interface ChatWindowProps {
   history: ChatMessage[];
   streamingReply: string;
+  toolSteps?: ToolStep[];
   pending: boolean;
   onSend: (content: string, imageUrls: string[]) => Promise<void>;
   profile?: Profile;
@@ -115,7 +122,68 @@ function formatTime(iso: string) {
   return formatHmLocal(iso);
 }
 
-export function ChatWindow({ history, streamingReply, pending, onSend, profile }: ChatWindowProps) {
+function ToolStepsCard({ steps, isRunning }: { steps: ToolStep[]; isRunning: boolean }) {
+  const allDone = steps.every((s) => s.status === "done");
+  const [userToggled, setUserToggled] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+
+  // Auto-collapse once all done, unless user manually toggled
+  useEffect(() => {
+    if (allDone && !isRunning && !userToggled) {
+      setExpanded(false);
+    }
+  }, [allDone, isRunning, userToggled]);
+
+  const doneCount = steps.filter((s) => s.status === "done").length;
+  const summary = allDone
+    ? `已完成 ${doneCount} 个步骤`
+    : `执行中 (${doneCount}/${steps.length})`;
+
+  return (
+    <div className="mb-2">
+      <button
+        type="button"
+        onClick={() => { setUserToggled(true); setExpanded(!expanded); }}
+        className="flex items-center gap-1.5 text-[11px] text-content-tertiary hover:text-content-secondary transition-colors"
+      >
+        <Zap size={12} className={allDone ? "text-success" : "text-accent"} />
+        <span>{summary}</span>
+        <ChevronRight
+          size={12}
+          className={`transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
+        />
+      </button>
+      {expanded && (
+        <div className="mt-1.5 pl-1 space-y-1 border-l-2 border-border/50 ml-1.5">
+          {steps.map((step, i) => (
+            <div
+              key={`${step.name}-${i}`}
+              className="flex items-center gap-2 text-xs pl-2 animate-fade-in"
+            >
+              {step.status === "start" ? (
+                <span className="flex h-3.5 w-3.5 items-center justify-center shrink-0">
+                  <svg className="animate-spin h-3 w-3 text-accent" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                </span>
+              ) : (
+                <span className="flex h-3.5 w-3.5 items-center justify-center shrink-0 text-success">
+                  <Check size={12} />
+                </span>
+              )}
+              <span className={step.status === "done" ? "text-content-tertiary" : "text-content-secondary"}>
+                {step.label}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function ChatWindow({ history, streamingReply, toolSteps = [], pending, onSend, profile }: ChatWindowProps) {
   const [content, setContent] = useState("");
   const [images, setImages] = useState<SelectedImage[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -292,13 +360,16 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
       (lastHistory.content || "").trim() === (streamingReply || "").trim()
     );
 
+  // Show streaming bubble if we have text OR tool steps (even without text yet)
+  const showStreamingBubble = shouldShowStreaming || (pending && toolSteps.length > 0);
+
   const allMessages: RenderChatMessage[] = [
     ...history,
-    ...(shouldShowStreaming
+    ...(showStreamingBubble
       ? [
           {
             role: "assistant",
-            content: streamingReply,
+            content: streamingReply || "",
             created_at: streamingStartedAtRef.current,
             __streaming: true,
           },
@@ -362,36 +433,51 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
                   }`}
                 >
                   {msg.role === "assistant" ? (
-                    <div className="prose prose-sm max-w-none markdown-chat">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm, remarkBreaks]}
-                        components={{
-                          a: ({ ...props }) => (
-                            <a {...props} target="_blank" rel="noreferrer noopener" />
-                          ),
-                          pre: ({ className, children }) => (
-                            <MarkdownPre className={className}>{children}</MarkdownPre>
-                          ),
-                          code: ({ inline, className, children, ...props }) => {
-                            if (inline) {
-                              return (
-                                <code {...props} className={className}>
-                                  {children}
-                                </code>
-                              );
-                            }
-                            return <code {...props} className={className}>{children}</code>;
-                          },
-                          table: ({ children }) => (
-                            <div className="markdown-table-wrap">
-                              <table>{children}</table>
-                            </div>
-                          ),
-                        }}
-                      >
-                        {normalizeMarkdown(msg.content)}
-                      </ReactMarkdown>
-                    </div>
+                    <>
+                      {/* Tool steps card — show on streaming bubble OR last assistant message */}
+                      {toolSteps.length > 0 &&
+                        (msg.__streaming || (!pending && idx === allMessages.length - 1)) && (
+                        <ToolStepsCard steps={toolSteps} isRunning={pending} />
+                      )}
+                      {msg.content ? (
+                        <div className="prose prose-sm max-w-none markdown-chat">
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm, remarkBreaks]}
+                            components={{
+                              a: ({ ...props }) => (
+                                <a {...props} target="_blank" rel="noreferrer noopener" />
+                              ),
+                              pre: ({ className, children }) => (
+                                <MarkdownPre className={className}>{children}</MarkdownPre>
+                              ),
+                              code: ({ inline, className, children, ...props }) => {
+                                if (inline) {
+                                  return (
+                                    <code {...props} className={className}>
+                                      {children}
+                                    </code>
+                                  );
+                                }
+                                return <code {...props} className={className}>{children}</code>;
+                              },
+                              table: ({ children }) => (
+                                <div className="markdown-table-wrap">
+                                  <table>{children}</table>
+                                </div>
+                              ),
+                            }}
+                          >
+                            {normalizeMarkdown(msg.content)}
+                          </ReactMarkdown>
+                        </div>
+                      ) : msg.__streaming && pending ? (
+                        <div className="flex gap-1 mt-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-content-tertiary animate-pulse-soft" style={{ animationDelay: "0ms" }} />
+                          <span className="w-1.5 h-1.5 rounded-full bg-content-tertiary animate-pulse-soft" style={{ animationDelay: "300ms" }} />
+                          <span className="w-1.5 h-1.5 rounded-full bg-content-tertiary animate-pulse-soft" style={{ animationDelay: "600ms" }} />
+                        </div>
+                      ) : null}
+                    </>
                   ) : (
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                   )}
@@ -410,7 +496,8 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
                 )}
               </div>
             ))}
-            {pending && !streamingReply && (
+            {/* Simple typing indicator (no tools, no streaming bubble yet) */}
+            {pending && !streamingReply && toolSteps.length === 0 && (
               <div className="flex gap-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-surface-hover text-accent">
                   <Bot size={16} />
@@ -481,6 +568,7 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
               <button
                 type="button"
                 onClick={handlePickImage}
+                aria-label="上传图片"
                 className={`absolute left-2 inset-y-0 my-auto z-10 flex h-9 w-9 items-center justify-center rounded-xl transition-colors ${
                   images.length > 0
                     ? "text-accent bg-surface-hover"
@@ -510,6 +598,7 @@ export function ChatWindow({ history, streamingReply, pending, onSend, profile }
               <button
                 type="submit"
                 disabled={pending || (!content.trim() && images.length === 0)}
+                aria-label="发送消息"
                 className="absolute right-2 inset-y-0 my-auto z-10 flex h-10 w-10 items-center justify-center rounded-xl text-accent hover:bg-accent-subtle disabled:opacity-30 disabled:hover:bg-transparent transition-all"
               >
                 <ArrowUpCircle size={22} />

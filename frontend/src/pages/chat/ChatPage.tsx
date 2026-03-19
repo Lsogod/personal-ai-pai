@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiRequest, streamSsePost } from "../../lib/api";
+import { apiRequest, streamSsePost, type ToolCallEvent } from "../../lib/api";
 import {
   ADMIN_PREF_SHOW_EXECUTION_PANEL_KEY,
   getAdminShowExecutionPanel,
@@ -19,8 +19,11 @@ import {
   LogOut,
   Sun,
   Moon,
-  LayoutGrid
+  LayoutGrid,
+  PanelRightClose,
+  PanelRightOpen,
 } from "../../components/ui/icons";
+import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 
 interface Profile {
   uuid: string;
@@ -47,11 +50,13 @@ export function ChatPage() {
   const { theme, toggleTheme } = useThemeStore();
   const queryClient = useQueryClient();
   const [streamingReply, setStreamingReply] = useState("");
+  const [toolSteps, setToolSteps] = useState<{ name: string; label: string; status: "start" | "done" }[]>([]);
   const [lastRunDebug, setLastRunDebug] = useState<ChatDebugPayload | null>(null);
   const [showExecutionPanel, setShowExecutionPanel] = useState<boolean>(() => getAdminShowExecutionPanel());
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [confirmLogout, setConfirmLogout] = useState(false);
   const streamBufferRef = useRef("");
   const streamFlushTimerRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -126,14 +131,14 @@ export function ChatPage() {
     queryKey: ["history"],
     enabled: !!token,
     queryFn: () => apiRequest("/api/chat/history", {}, token),
-    refetchInterval: token ? 15000 : false,
+    refetchInterval: token ? 30000 : false,
   });
 
   const { data: stats = emptyStats } = useQuery<LedgerStats>({
     queryKey: ["stats"],
     enabled: !!token,
     queryFn: () => apiRequest("/api/stats/ledger?scope=month", {}, token),
-    refetchInterval: token ? 15000 : false,
+    refetchInterval: token ? 60000 : false,
   });
 
   async function refreshSideData() {
@@ -302,6 +307,7 @@ export function ChatPage() {
         streamFlushTimerRef.current = null;
       }
       setStreamingReply("");
+      setToolSteps([]);
       setLastRunDebug(null);
       await streamSsePost(
         "/api/chat/send?stream=true",
@@ -327,6 +333,19 @@ export function ChatPage() {
             setLastRunDebug(done.debug as ChatDebugPayload);
           }
         },
+        (toolEvent: ToolCallEvent) => {
+          setToolSteps((prev) => {
+            if (toolEvent.status === "start") {
+              return [...prev, { name: toolEvent.name, label: toolEvent.label, status: "start" }];
+            }
+            // Mark existing step as done
+            return prev.map((s) =>
+              s.name === toolEvent.name && s.status === "start"
+                ? { ...s, status: "done" as const }
+                : s
+            );
+          });
+        },
       );
       if (streamFlushTimerRef.current !== null) {
         window.clearTimeout(streamFlushTimerRef.current);
@@ -343,6 +362,7 @@ export function ChatPage() {
         streamFlushTimerRef.current = null;
       }
       setStreamingReply("");
+      // Keep toolSteps visible — they'll be cleared when next message is sent
     },
     onError: (_error, _payload, context) => {
       if (context?.previousHistory) {
@@ -354,6 +374,7 @@ export function ChatPage() {
         streamFlushTimerRef.current = null;
       }
       setStreamingReply("");
+      setToolSteps([]);
     },
   });
 
@@ -362,9 +383,7 @@ export function ChatPage() {
   }
 
   const handleLogout = () => {
-    if (window.confirm("确定要退出登录吗？")) {
-      setToken(null);
-    }
+    setConfirmLogout(true);
   };
 
   return (
@@ -465,19 +484,29 @@ export function ChatPage() {
           <ChatWindow
             history={history}
             streamingReply={streamingReply}
+            toolSteps={toolSteps}
             pending={sendMutation.isPending}
             onSend={handleSend}
             profile={profile}
           />
         </div>
+
+        {/* Desktop right panel toggle */}
+        <button
+          onClick={() => setRightPanelOpen(!rightPanelOpen)}
+          className="hidden xl:flex absolute top-3 right-3 z-20 items-center justify-center h-8 w-8 rounded-lg text-content-secondary hover:text-content hover:bg-surface-hover transition-colors border border-transparent hover:border-border"
+          aria-label={rightPanelOpen ? "收起右侧面板" : "展开右侧面板"}
+        >
+          {rightPanelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+        </button>
       </main>
 
       {/* Right Sidebar (Widgets) */}
-      <aside 
+      <aside
         className={`
           flex-col h-full border-l border-border bg-surface-card shrink-0 transition-all duration-300 ease-in-out
-          ${rightPanelOpen ? "w-[360px] translate-x-0 opacity-100" : "w-0 translate-x-full opacity-0 hidden xl:hidden"}
           hidden xl:flex
+          ${rightPanelOpen ? "w-[360px] translate-x-0 opacity-100" : "xl:hidden w-0 opacity-0"}
         `}
       >
         <div className="w-[360px] h-full overflow-hidden">
@@ -489,6 +518,20 @@ export function ChatPage() {
            />
         </div>
       </aside>
+
+      {/* Logout confirmation dialog */}
+      <ConfirmDialog
+        open={confirmLogout}
+        title="退出登录"
+        message="确定要退出登录吗？"
+        confirmText="退出"
+        variant="danger"
+        onConfirm={() => {
+          setConfirmLogout(false);
+          setToken(null);
+        }}
+        onCancel={() => setConfirmLogout(false)}
+      />
     </div>
   );
 }

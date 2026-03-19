@@ -4,6 +4,7 @@ import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-q
 import { createLedger, deleteLedger, fetchLedgers, updateLedger, type LedgerItem } from "../../lib/api";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader } from "../ui/card";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Input } from "../ui/input";
 import { Pencil, Plus, Trash2 } from "../ui/icons";
 
@@ -54,6 +55,10 @@ function formatDateTime(value: string): string {
   const hh = `${dt.getHours()}`.padStart(2, "0");
   const mi = `${dt.getMinutes()}`.padStart(2, "0");
   return `${mm}-${dd} ${hh}:${mi}`;
+}
+
+function formatAmount(n: number): string {
+  return n.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function normalizeCategory(value: string | undefined): string {
@@ -127,6 +132,8 @@ export function LedgerListCard({ token }: LedgerListCardProps) {
   const [editCategory, setEditCategory] = useState("其他");
   const [editCustomCategory, setEditCustomCategory] = useState("");
   const [editItem, setEditItem] = useState("");
+
+  const [confirmDelete, setConfirmDelete] = useState<{ id: number } | null>(null);
 
   const [keyword, setKeyword] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
@@ -338,7 +345,7 @@ export function LedgerListCard({ token }: LedgerListCardProps) {
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
           />
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <select
               className="h-10 rounded-xl border border-border bg-surface-input px-3 text-sm text-content"
               value={filterCategory}
@@ -393,16 +400,14 @@ export function LedgerListCard({ token }: LedgerListCardProps) {
                     <button
                       onClick={() => beginEdit(row)}
                       className="p-1 rounded-md text-content-tertiary hover:text-accent hover:bg-surface-active transition-colors"
+                      aria-label="编辑"
                     >
                       <Pencil size={13} />
                     </button>
                     <button
-                      onClick={() => {
-                        if (window.confirm(`确认删除账单 #${row.id} 吗？`)) {
-                          deleteMutation.mutate(row.id);
-                        }
-                      }}
+                      onClick={() => setConfirmDelete({ id: row.id })}
                       className="p-1 rounded-md text-content-tertiary hover:text-danger hover:bg-surface-active transition-colors"
+                      aria-label="删除"
                     >
                       <Trash2 size={13} />
                     </button>
@@ -460,7 +465,7 @@ export function LedgerListCard({ token }: LedgerListCardProps) {
                     <p className="text-xs text-content-tertiary mt-0.5">{normalizeCategory(row.category)}</p>
                   </div>
                   <p className="text-sm font-semibold text-content">
-                    ¥{Number(row.amount || 0).toFixed(2)}{" "}
+                    ¥{formatAmount(Number(row.amount || 0))}{" "}
                     <span className="text-xs text-content-tertiary font-normal">{row.currency}</span>
                   </p>
                 </div>
@@ -480,6 +485,19 @@ export function LedgerListCard({ token }: LedgerListCardProps) {
           </Button>
         </div>
       </CardContent>
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title="删除账单"
+        message={confirmDelete ? `确认删除账单 #${confirmDelete.id} 吗？` : ""}
+        variant="danger"
+        confirmText="删除"
+        onConfirm={() => {
+          if (confirmDelete) deleteMutation.mutate(confirmDelete.id);
+          setConfirmDelete(null);
+        }}
+        onCancel={() => setConfirmDelete(null)}
+      />
     </Card>
   );
 }

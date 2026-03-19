@@ -4,14 +4,8 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
 from app.graph.state import GraphState
-from app.graph.nodes.router import route_intent, router_node
 from app.graph.nodes.onboarding import onboarding_node
-from app.graph.nodes.complex_task import complex_task_node
-from app.graph.nodes.ledger_manager import ledger_manager_node
-from app.graph.nodes.schedule_manager import schedule_manager_node
-from app.graph.nodes.chat_manager import chat_manager_node
-from app.graph.nodes.skill_manager import skill_manager_node
-from app.graph.nodes.help_center import help_center_node
+from app.graph.nodes.main_agent import main_agent_node
 
 _graph = None
 _graph_lock = asyncio.Lock()
@@ -19,55 +13,38 @@ _redis_cm_sync = None
 _redis_cm_async = None
 
 
-def _route_after_ledger(state: GraphState) -> str:
-    routed = str(state.get("intent") or "").strip().lower()
-    if routed == "chat_manager":
-        return "chat_manager"
-    return "end"
+def _route_setup(state: GraphState) -> str:
+    """Pure logic gate — no LLM call."""
+    if state.get("user_setup_stage", 0) < 3:
+        return "onboarding"
+    return "agent"
+
+
+async def _entry_node(state: GraphState) -> GraphState:
+    """Pass-through entry; only used for the conditional edge."""
+    return state
 
 
 def _build_graph(checkpointer):
     graph = StateGraph(GraphState)
 
-    graph.add_node("router", router_node)
+    graph.add_node("entry", _entry_node)
     graph.add_node("onboarding", onboarding_node)
-    graph.add_node("complex_task", complex_task_node)
-    graph.add_node("ledger_manager", ledger_manager_node)
-    graph.add_node("schedule_manager", schedule_manager_node)
-    graph.add_node("chat_manager", chat_manager_node)
-    graph.add_node("skill_manager", skill_manager_node)
-    graph.add_node("help_center", help_center_node)
+    graph.add_node("agent", main_agent_node)
 
-    graph.set_entry_point("router")
+    graph.set_entry_point("entry")
 
     graph.add_conditional_edges(
-        "router",
-        route_intent,
+        "entry",
+        _route_setup,
         {
             "onboarding": "onboarding",
-            "complex_task": "complex_task",
-            "ledger_manager": "ledger_manager",
-            "schedule_manager": "schedule_manager",
-            "chat_manager": "chat_manager",
-            "skill_manager": "skill_manager",
-            "help_center": "help_center",
+            "agent": "agent",
         },
     )
 
     graph.add_edge("onboarding", END)
-    graph.add_edge("complex_task", END)
-    graph.add_conditional_edges(
-        "ledger_manager",
-        _route_after_ledger,
-        {
-            "chat_manager": "chat_manager",
-            "end": END,
-        },
-    )
-    graph.add_edge("schedule_manager", END)
-    graph.add_edge("chat_manager", END)
-    graph.add_edge("skill_manager", END)
-    graph.add_edge("help_center", END)
+    graph.add_edge("agent", END)
 
     return graph.compile(checkpointer=checkpointer)
 

@@ -46,9 +46,25 @@ SCHEDULE_TOOL_NAMES: set[str] = {
     "schedule_list",
 }
 
+PROFILE_TOOL_NAMES: set[str] = {
+    "update_user_profile",
+    "query_user_profile",
+}
+
+# Main agent: single ReAct agent with full tool access.
+MAIN_AGENT_TOOL_NAMES: set[str] = (
+    SHARED_TOOL_NAMES
+    | MCP_TOOL_NAMES
+    | CONVERSATION_TOOL_NAMES
+    | LEDGER_TOOL_NAMES
+    | SCHEDULE_TOOL_NAMES
+    | PROFILE_TOOL_NAMES
+)
+
 # Node-scoped tool visibility. Nodes should consume tools from this registry
 # instead of embedding ad-hoc tool name sets in node files.
 NODE_TOOL_NAMES: dict[str, set[str]] = {
+    "main_agent": MAIN_AGENT_TOOL_NAMES,
     "chat_manager": SHARED_TOOL_NAMES | MCP_TOOL_NAMES | CONVERSATION_TOOL_NAMES,
     "schedule_manager": SHARED_TOOL_NAMES | MCP_TOOL_NAMES | SCHEDULE_TOOL_NAMES,
     "ledger_manager": LEDGER_TOOL_NAMES,

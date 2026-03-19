@@ -55,6 +55,7 @@ export function RightInfoPanel({
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
+              aria-label={`切换到${tab.label}标签`}
               className={[
                 "flex flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-colors",
                 isActive

@@ -59,7 +59,22 @@ def _extract_token_usage(output: Any) -> tuple[int, int, int]:
     return prompt_tokens, completion_tokens, total_tokens
 
 
+def _is_reasoning_chunk(chunk: Any) -> bool:
+    """Check if this chunk contains reasoning/thinking content (e.g. GLM5)."""
+    # LangChain wraps additional_kwargs from the raw delta
+    additional = getattr(chunk, "additional_kwargs", None)
+    if isinstance(additional, dict) and additional.get("reasoning_content"):
+        return True
+    # Some providers put it directly on the chunk
+    if getattr(chunk, "reasoning_content", None):
+        return True
+    return False
+
+
 def _extract_stream_text(chunk: Any) -> str:
+    # Skip reasoning/thinking tokens – don't send to user
+    if _is_reasoning_chunk(chunk):
+        return ""
     content = getattr(chunk, "content", None)
     if isinstance(content, str):
         return content
@@ -173,10 +188,13 @@ class TrackingChatOpenAI(ChatOpenAI):
 
 def get_llm(model: str | None = None, node_name: str = "unknown") -> TrackingChatOpenAI:
     settings = get_settings()
+    resolved_model = model or settings.openai_model
+
     return TrackingChatOpenAI(
-        model=model or settings.openai_model,
+        model=resolved_model,
         api_key=settings.openai_api_key,
         base_url=settings.openai_base_url,
         temperature=0.2,
+        max_tokens=16384,
         node_name=node_name,
     )

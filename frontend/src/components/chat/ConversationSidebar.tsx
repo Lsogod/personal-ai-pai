@@ -13,6 +13,7 @@ import { formatMdHmLocal } from "../../lib/datetime";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Plus, Pencil, Trash2, MessageSquare } from "../ui/icons";
+import { ConfirmDialog, PromptDialog } from "../ui/ConfirmDialog";
 
 interface ConversationSidebarProps {
   token: string | null;
@@ -26,6 +27,8 @@ export function ConversationSidebar({ token }: ConversationSidebarProps) {
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
   const [showNew, setShowNew] = useState(false);
+  const [confirmDeleteItem, setConfirmDeleteItem] = useState<ConversationItem | null>(null);
+  const [promptRenameItem, setPromptRenameItem] = useState<ConversationItem | null>(null);
 
   const { data: conversations = [] } = useQuery<ConversationItem[]>({
     queryKey: ["conversations"],
@@ -79,22 +82,18 @@ export function ConversationSidebar({ token }: ConversationSidebarProps) {
         queryClient.invalidateQueries({ queryKey: ["history"] }),
       ]);
     },
-    onError: (error: Error) => {
-      window.alert(error.message || "删除会话失败，请稍后重试。");
+    onError: (_error: Error) => {
+      // Error is surfaced through deleteMutation.error if needed
     },
   });
 
   function onRename(item: ConversationItem) {
-    const nextTitle = window.prompt("请输入新会话名称", item.title)?.trim();
-    if (!nextTitle || nextTitle === item.title) return;
-    renameMutation.mutate({ conversationId: item.id, title: nextTitle });
+    setPromptRenameItem(item);
   }
 
   function onDelete(item: ConversationItem) {
     if (deleteMutation.isPending) return;
-    const ok = window.confirm(`确认删除会话「${item.title}」吗？`);
-    if (!ok) return;
-    deleteMutation.mutate(item.id);
+    setConfirmDeleteItem(item);
   }
 
   return (
@@ -106,6 +105,7 @@ export function ConversationSidebar({ token }: ConversationSidebarProps) {
           onClick={() => setShowNew(!showNew)}
           className="p-1 rounded-md text-content-secondary hover:text-accent hover:bg-surface-hover transition-colors"
           title="新建会话"
+          aria-label="新建会话"
         >
           <Plus size={16} />
         </button>
@@ -167,7 +167,7 @@ export function ConversationSidebar({ token }: ConversationSidebarProps) {
                       {formatTime(item.last_message_at)}
                     </p>
                   </div>
-                  <div className="flex gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0">
+                  <div className="flex gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -175,6 +175,7 @@ export function ConversationSidebar({ token }: ConversationSidebarProps) {
                       }}
                       disabled={renameMutation.isPending || deleteMutation.isPending}
                       className="p-1 rounded-md hover:bg-surface-active text-content-tertiary hover:text-content transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                      aria-label={`重命名会话「${item.title}」`}
                     >
                       <Pencil size={12} />
                     </button>
@@ -185,6 +186,7 @@ export function ConversationSidebar({ token }: ConversationSidebarProps) {
                       }}
                       disabled={deleteMutation.isPending}
                       className="p-1 rounded-md hover:bg-danger/10 text-content-tertiary hover:text-danger transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                      aria-label={`删除会话「${item.title}」`}
                     >
                       <Trash2 size={12} />
                     </button>
@@ -202,6 +204,37 @@ export function ConversationSidebar({ token }: ConversationSidebarProps) {
           当前：{activeConversation ? `#${activeConversation.id} ${activeConversation.title}` : "无"}
         </p>
       </div>
+
+      {/* Delete confirmation dialog */}
+      <ConfirmDialog
+        open={!!confirmDeleteItem}
+        title="删除会话"
+        message={confirmDeleteItem ? `确认删除会话「${confirmDeleteItem.title}」吗？` : ""}
+        confirmText="删除"
+        variant="danger"
+        onConfirm={() => {
+          if (confirmDeleteItem) deleteMutation.mutate(confirmDeleteItem.id);
+          setConfirmDeleteItem(null);
+        }}
+        onCancel={() => setConfirmDeleteItem(null)}
+      />
+
+      {/* Rename prompt dialog */}
+      <PromptDialog
+        open={!!promptRenameItem}
+        title="重命名会话"
+        message="请输入新会话名称"
+        defaultValue={promptRenameItem?.title || ""}
+        placeholder="会话名称"
+        onConfirm={(value) => {
+          const nextTitle = value.trim();
+          if (nextTitle && promptRenameItem && nextTitle !== promptRenameItem.title) {
+            renameMutation.mutate({ conversationId: promptRenameItem.id, title: nextTitle });
+          }
+          setPromptRenameItem(null);
+        }}
+        onCancel={() => setPromptRenameItem(null)}
+      />
     </div>
   );
 }
