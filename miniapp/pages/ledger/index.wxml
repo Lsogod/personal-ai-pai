@@ -175,7 +175,8 @@
         <view class="empty-state" wx:if="{{filteredCount===0}}">
           <image class="empty-icon-img" src="/assets/icons/ic-receipt.svg" mode="aspectFit" />
           <text class="empty-text">暂无符合条件的账单</text>
-          <view class="empty-action" bindtap="onResetFilters">清空筛选</view>
+          <text class="empty-text" style="font-size:22rpx;" wx:if="{{filterSummary && filterSummary !== '全部'}}">当前筛选：{{filterSummary}}</text>
+          <view class="empty-action" bindtap="onResetFilters">清空筛选条件</view>
         </view>
 
         <block wx:for="{{listGroups}}" wx:key="key">

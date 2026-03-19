@@ -62,7 +62,7 @@ export function ConfirmDialog({
       {/* Dialog */}
       <div
         ref={dialogRef}
-        className="relative w-full max-w-sm rounded-2xl border border-border bg-surface-card p-5 shadow-elevated animate-fade-in"
+        className="relative w-full max-w-[90vw] sm:max-w-sm rounded-2xl border border-border bg-surface-card p-5 shadow-elevated animate-fade-in"
       >
         <button
           type="button"
@@ -155,7 +155,7 @@ export function PromptDialog({
         className="absolute inset-0 bg-black/40 backdrop-blur-sm animate-fade-in"
         onClick={onCancel}
       />
-      <div className="relative w-full max-w-sm rounded-2xl border border-border bg-surface-card p-5 shadow-elevated animate-fade-in">
+      <div className="relative w-full max-w-[90vw] sm:max-w-sm rounded-2xl border border-border bg-surface-card p-5 shadow-elevated animate-fade-in">
         <button
           type="button"
           onClick={onCancel}

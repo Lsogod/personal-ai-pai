@@ -426,7 +426,7 @@ export function ChatWindow({ history, streamingReply, toolSteps = [], pending, o
                   </div>
                 )}
                 <div
-                  className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                  className={`max-w-[88%] sm:max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                     msg.role === "assistant"
                       ? "bg-bubble-ai text-content rounded-tl-md"
                       : "bg-bubble-user text-white rounded-tr-md"

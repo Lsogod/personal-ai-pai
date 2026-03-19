@@ -118,6 +118,13 @@
 
   <!-- Log stream -->
   <view class="log-list" wx:if="{{!guideVisible}}">
+    <!-- Loading skeleton -->
+    <view wx:if="{{loadingHistory && messages.length === 0}}" class="log-list">
+      <view class="skeleton-entry" wx:for="{{[1,2,3]}}" wx:key="*this">
+        <view class="skeleton-cmd"><view class="skeleton-line w60"></view></view>
+        <view class="skeleton-result"><view class="skeleton-line w80"></view><view class="skeleton-line w40"></view></view>
+      </view>
+    </view>
     <view
       wx:for="{{messages}}"
       wx:key="index"
@@ -238,8 +245,9 @@
           bindconfirm="onConfirmSend"
         />
       </view>
-      <view class="send-btn {{inputText || selectedImages.length > 0 ? 'active' : ''}}" bindtap="onSend">
-        <image class="icon-send" src="/assets/icons/send.svg" mode="aspectFit"/>
+      <view class="send-btn {{inputText || selectedImages.length > 0 ? 'active' : ''}} {{sending ? 'sending' : ''}}" bindtap="onSend">
+        <image wx:if="{{!sending}}" class="icon-send" src="/assets/icons/send.svg" mode="aspectFit"/>
+        <text wx:else class="icon-send" style="font-size:30rpx;color:#fff;">⟳</text>
       </view>
     </view>
   </view>

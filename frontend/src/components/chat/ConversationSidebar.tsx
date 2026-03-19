@@ -167,7 +167,7 @@ export function ConversationSidebar({ token }: ConversationSidebarProps) {
                       {formatTime(item.last_message_at)}
                     </p>
                   </div>
-                  <div className="flex gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0">
+                  <div className="flex gap-0.5 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();

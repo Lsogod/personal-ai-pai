@@ -184,7 +184,8 @@ Page({
     selectedImages: [],
     sending: false,
     wsOpen: false,
-    notifyCards: []
+    notifyCards: [],
+    loadingHistory: false
   },
 
   onLoad() {
@@ -307,6 +308,7 @@ Page({
 
   async loadInitial() {
     if (!this.data.authed) return;
+    this.setData({ loadingHistory: true });
     try {
       const [profile, history, stats] = await Promise.all([
         fetchProfile(),
@@ -325,6 +327,8 @@ Page({
       this.scrollToBottom(true);
     } catch (err) {
       wx.showToast({ title: err.message || "加载失败", icon: "none" });
+    } finally {
+      this.setData({ loadingHistory: false });
     }
   },
 

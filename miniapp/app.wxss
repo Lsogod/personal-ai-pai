@@ -36,6 +36,16 @@ page {
   --shadow-sm: 0 2rpx 8rpx rgba(26, 29, 38, 0.03);
   --shadow-md: 0 4rpx 20rpx rgba(26, 29, 38, 0.05);
   --shadow-lg: 0 8rpx 40rpx rgba(26, 29, 38, 0.08);
+  /* Semantic tokens */
+  --c-amount-positive: #16a34a;
+  --c-amount-negative: #ef4444;
+  --c-notification: rgba(26, 29, 38, 0.92);
+  /* Icon background tokens */
+  --c-icon-bg-primary: #ebeffe;
+  --c-icon-bg-pink: #fce7f3;
+  --c-icon-bg-green: #d1fae5;
+  --c-icon-bg-orange: #fff4e5;
+  --c-icon-bg-purple: #f3e8ff;
   /* Legacy aliases for compat */
   --primary-color: var(--c-primary);
   --primary-dark: var(--c-primary-dark);
