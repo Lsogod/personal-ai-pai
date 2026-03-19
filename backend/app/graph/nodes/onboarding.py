@@ -132,6 +132,14 @@ async def _understand_binding_answer(raw: str, conversation_context: str) -> str
     text = (raw or "").strip()
     if not text:
         return "unknown"
+    # Fast keyword match before LLM fallback
+    lower = text.lower()
+    if lower in {"没有", "没", "no", "否", "不是", "没有账号", "没有其他账号"}:
+        return "no_account"
+    if lower in {"有", "yes", "是", "有账号", "有的"}:
+        return "has_account"
+    if lower in {"继续", "下一步", "跳过", "continue", "skip"}:
+        return "continue"
     system = SystemMessage(
         content=(
             "你是绑定引导意图解析器。请仅返回结构化字段。"

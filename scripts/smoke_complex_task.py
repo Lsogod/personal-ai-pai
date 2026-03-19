@@ -71,11 +71,13 @@ def _send_chat(base_url: str, token: str, content: str) -> list[str]:
 def _complete_onboarding(base_url: str, token: str) -> dict[str, Any]:
     samples = [
         "你好",
+        "没有，我没有其他账号",
         "没有",
         "小王",
         "小派 🤖",
         "继续",
         "我准备好了",
+        "确认",
     ]
     transcript: list[dict[str, Any]] = []
     for text in samples:
@@ -140,7 +142,7 @@ def main() -> None:
         base_url=args.base_url,
         method="POST",
         path="/api/auth/register",
-        payload={"email": email, "password": password},
+        payload={"email": email, "password": password, "confirm_password": password},
         timeout=args.timeout_sec,
     )
     _must(register_status == 200 and isinstance(register_data, dict), f"register failed: {register_status}, {register_data}")
@@ -149,7 +151,7 @@ def main() -> None:
         base_url=args.base_url,
         method="POST",
         path="/api/auth/login",
-        payload={"email": email, "password": password},
+        payload={"email": email, "password": password, "confirm_password": password},
         timeout=args.timeout_sec,
     )
     _must(login_status == 200 and isinstance(login_data, dict), f"login failed: {login_status}, {login_data}")

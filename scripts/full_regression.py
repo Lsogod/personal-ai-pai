@@ -275,7 +275,7 @@ class RegressionRunner:
 
     def _complete_onboarding(self) -> dict[str, Any]:
         transcript: list[dict[str, Any]] = []
-        samples = ["你好", "没有", "小帅", "贾维斯 🤖", "继续", "我准备好了"]
+        samples = ["你好", "没有，我没有其他账号", "没有", "小帅", "贾维斯 🤖", "继续", "我准备好了", "确认"]
         for text in samples:
             profile_before = self._profile()
             if int(profile_before.get("setup_stage") or 0) >= 3:
@@ -403,7 +403,7 @@ class RegressionRunner:
         status, data = self.call(
             "POST",
             "/api/auth/register",
-            payload={"email": self.email, "password": self.password},
+            payload={"email": self.email, "password": self.password, "confirm_password": self.password},
             token="",
         )
         _must(status == 200 and isinstance(data, dict), f"register failed: status={status}, data={data}")
@@ -413,7 +413,7 @@ class RegressionRunner:
         status, data = self.call(
             "POST",
             "/api/auth/login",
-            payload={"email": self.email, "password": self.password},
+            payload={"email": self.email, "password": self.password, "confirm_password": self.password},
             token="",
         )
         _must(status == 200 and isinstance(data, dict), f"login failed: status={status}, data={data}")
