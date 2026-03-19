@@ -348,6 +348,12 @@ async def main_agent_node(state: GraphState) -> GraphState:
                 data = event.get("data", {})
                 # data can be an AIMessageChunk or a dict with "chunk" key
                 chunk_obj = data.get("chunk", data) if isinstance(data, dict) else data
+                # Skip reasoning/thinking chunks (e.g. MiniMax, GLM)
+                ak = getattr(chunk_obj, "additional_kwargs", None) or {}
+                if ak.get("reasoning_content"):
+                    continue
+                if getattr(chunk_obj, "reasoning_content", None):
+                    continue
                 chunk_content = getattr(chunk_obj, "content", None)
                 if isinstance(chunk_content, str) and chunk_content:
                     streamed_text_parts.append(chunk_content)

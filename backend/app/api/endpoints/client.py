@@ -883,15 +883,14 @@ async def _sse_stream_live(
 
     async def _runner() -> None:
         streamer_token = set_llm_streamer(_on_stream_chunk)
-        # Stream only terminal NL generation nodes; avoid leaking
-        # classifier/planner/tool-agent intermediate content.
-        stream_nodes_token = set_llm_stream_nodes({"main_agent", "chat_manager_final", "help_center", "complex_task_agent"})
+        # Don't set stream_nodes — main_agent.astream_events handles
+        # streaming directly via the streamer callback. Setting stream_nodes
+        # would cause TrackingChatOpenAI to ALSO stream, doubling output.
         try:
             result_holder["result"] = await handle_message(source_platform, normalized, session)
         except Exception as exc:
             error_holder["error"] = str(exc)
         finally:
-            reset_llm_stream_nodes(stream_nodes_token)
             reset_llm_streamer(streamer_token)
             await queue.put(None)
 

@@ -1000,10 +1000,9 @@ async def handle_message(
             stream_nodes_token = None
             if miniapp_stream_enabled:
                 stream_token = set_llm_streamer(_emit_miniapp_stream_chunk)
-                # Stream only terminal NL generation nodes.
-                stream_nodes_token = set_llm_stream_nodes(
-                    {"main_agent"}
-                )
+                # Don't set stream_nodes — main_agent.astream_events handles
+                # streaming itself. Setting stream_nodes would cause
+                # TrackingChatOpenAI to ALSO stream, resulting in double output.
             try:
                 try:
                     result = await graph.ainvoke(
