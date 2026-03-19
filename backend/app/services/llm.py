@@ -124,14 +124,7 @@ class TrackingChatOpenAI(ChatOpenAI):
             return await super().ainvoke(input, config=config, **kwargs)
 
         full_output = None
-        _dbg_count = 0
         async for chunk in super().astream(input, config=config, **kwargs):
-            _dbg_count += 1
-            ak = getattr(chunk, 'additional_kwargs', None) or {}
-            rc = ak.get('reasoning_content', '')
-            ct = getattr(chunk, 'content', '')
-            if rc or _dbg_count <= 3 or ct:
-                print(f"[stream_dbg] #{_dbg_count} content={ct!r} reasoning={rc!r}", flush=True)
             text = _extract_stream_text(chunk)
             if text:
                 try:

@@ -495,11 +495,12 @@ Page({
     if (text) {
       const current = messages[index];
       const nextContent = `${current.content || ""}${text}`;
+      // During streaming, use plain text node to avoid broken markdown rendering
       messages[index] = {
         ...current,
         content: nextContent,
         display_content: nextContent,
-        content_nodes: markdownToRichNodes(nextContent),
+        content_nodes: [{ type: "node", name: "span", attrs: { style: "white-space:pre-wrap;" }, children: [{ type: "text", text: nextContent }] }],
       };
     }
     this.setData({ messages }, () => this.scrollToBottom());
@@ -511,8 +512,15 @@ Page({
     const index = this._wsChunkStreams.get(sid);
     this._wsChunkStreams.delete(sid);
     if (!Number.isFinite(index)) return;
-    const msg = this.data.messages[index];
+    const messages = [...this.data.messages];
+    const msg = messages[index];
     if (msg && msg.content) {
+      // Stream finished – now render full markdown
+      messages[index] = {
+        ...msg,
+        content_nodes: markdownToRichNodes(msg.content),
+      };
+      this.setData({ messages });
       this._seenKeys.add(this.messageKey(msg));
     }
     this.clearPendingByAssistantSignal();
