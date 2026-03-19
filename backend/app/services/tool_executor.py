@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, TypedDict
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -107,11 +107,22 @@ def _resolve_user_id(value: Any) -> int:
     return user_id
 
 
-def _parse_datetime_arg(value: Any) -> datetime | None:
+def _normalize_datetime_text(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
+        return ""
+    return text.replace("T", " ").replace("/", "-")
+
+
+def _is_date_only_text(value: Any) -> bool:
+    normalized = _normalize_datetime_text(value)
+    return len(normalized) == 10 and normalized.count("-") == 2 and ":" not in normalized
+
+
+def _parse_local_naive_arg(value: Any) -> datetime | None:
+    normalized = _normalize_datetime_text(value)
+    if not normalized:
         return None
-    normalized = text.replace("T", " ").replace("/", "-")
     if normalized.endswith("Z"):
         normalized = normalized[:-1] + "+00:00"
     try:
@@ -122,6 +133,22 @@ def _parse_datetime_arg(value: Any) -> datetime | None:
         return dt
     local_tz = ZoneInfo(get_settings().timezone)
     return dt.astimezone(local_tz).replace(tzinfo=None)
+
+
+def _parse_utc_naive_arg(value: Any) -> datetime | None:
+    normalized = _normalize_datetime_text(value)
+    if not normalized:
+        return None
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(normalized)
+    except Exception:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+    local_tz = ZoneInfo(get_settings().timezone)
+    return dt.replace(tzinfo=local_tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
 
 
 def _ledger_to_payload(row: Ledger) -> dict[str, Any]:
@@ -369,7 +396,7 @@ async def execute_capability(
                     return _result(False, error="invalid amount")
                 category = str(params.get("category") or "其他").strip() or "其他"
                 item = str(params.get("item") or "消费").strip() or "消费"
-                transaction_date = _parse_datetime_arg(params.get("transaction_date")) or datetime.utcnow()
+                transaction_date = _parse_utc_naive_arg(params.get("transaction_date")) or datetime.utcnow()
                 image_url = str(params.get("image_url") or "").strip() or None
                 session = get_session()
                 row = await insert_ledger(
@@ -405,7 +432,7 @@ async def execute_capability(
                         return _result(False, error="invalid amount")
                 category = str(params.get("category") or "").strip() or None
                 item = str(params.get("item") or "").strip() or None
-                transaction_date = _parse_datetime_arg(params.get("transaction_date"))
+                transaction_date = _parse_utc_naive_arg(params.get("transaction_date"))
                 session = get_session()
                 row = await update_ledger(
                     session=session,
@@ -498,8 +525,12 @@ async def execute_capability(
                     if picked_ids:
                         stmt = stmt.where(Ledger.id.in_(picked_ids))
 
-                start_at = _parse_datetime_arg(params.get("start_at"))
-                end_at = _parse_datetime_arg(params.get("end_at"))
+                start_at_raw = params.get("start_at")
+                end_at_raw = params.get("end_at")
+                start_at = _parse_utc_naive_arg(start_at_raw)
+                end_at = _parse_utc_naive_arg(end_at_raw)
+                if end_at is not None and _is_date_only_text(end_at_raw):
+                    end_at += timedelta(days=1)
                 if start_at is not None:
                     stmt = stmt.where(Ledger.transaction_date >= start_at)
                 if end_at is not None:
@@ -589,7 +620,7 @@ async def execute_capability(
                 content = str(params.get("content") or "").strip()
                 if not content:
                     return _result(False, error="missing required arg: content")
-                trigger_time = _parse_datetime_arg(params.get("trigger_time"))
+                trigger_time = _parse_local_naive_arg(params.get("trigger_time"))
                 if trigger_time is None:
                     return _result(False, error="missing or invalid arg: trigger_time")
                 status = str(params.get("status") or "PENDING").strip().upper() or "PENDING"
@@ -631,7 +662,7 @@ async def execute_capability(
                 content_value = str(params.get("content") or "").strip()
                 if content_value:
                     row.content = content_value
-                trigger_time = _parse_datetime_arg(params.get("trigger_time"))
+                trigger_time = _parse_local_naive_arg(params.get("trigger_time"))
                 if trigger_time is not None:
                     row.trigger_time = trigger_time
                 status_value = str(params.get("status") or "").strip().upper()
@@ -699,8 +730,8 @@ async def execute_capability(
                     if picked_ids:
                         stmt = stmt.where(Schedule.id.in_(picked_ids))
 
-                start_at = _parse_datetime_arg(params.get("start_at"))
-                end_at = _parse_datetime_arg(params.get("end_at"))
+                start_at = _parse_local_naive_arg(params.get("start_at"))
+                end_at = _parse_local_naive_arg(params.get("end_at"))
                 if start_at is not None:
                     stmt = stmt.where(Schedule.trigger_time >= start_at)
                 if end_at is not None:
