@@ -148,6 +148,24 @@
       <!-- System result -->
       <view wx:else class="log-result-wrap">
         <view class="log-result card">
+          <!-- Tool steps: show on last assistant message -->
+          <view wx:if="{{toolSteps.length > 0 && index === messages.length - 1}}" class="tool-steps-wrap">
+            <view class="tool-steps-header" data-expanded="{{toolStepsExpanded}}" bindtap="onToggleToolSteps">
+              <text class="tool-steps-icon">⚡</text>
+              <text class="tool-steps-summary" wx:if="{{toolStepsDone}}">已完成 {{toolSteps.length}} 个步骤</text>
+              <text class="tool-steps-summary" wx:else>执行中 ({{toolStepsDoneCount}}/{{toolSteps.length}})</text>
+              <text class="tool-steps-arrow {{toolStepsExpanded ? 'expanded' : ''}}">›</text>
+            </view>
+            <view wx:if="{{toolStepsExpanded}}" class="tool-steps-list">
+              <view wx:for="{{toolSteps}}" wx:for-item="step" wx:for-index="stepIdx" wx:key="stepIdx" class="tool-step">
+                <view class="tool-step-icon {{step.status === 'running' ? 'spinning' : 'done'}}">
+                  <text wx:if="{{step.status === 'running'}}">⟳</text>
+                  <text wx:else>✓</text>
+                </view>
+                <text class="tool-step-name">{{step.name}}</text>
+              </view>
+            </view>
+          </view>
           <view wx:if="{{item.image_urls && item.image_urls.length > 0}}" class="log-result-images">
             <image
               wx:for="{{item.image_urls}}"
@@ -168,22 +186,11 @@
       </view>
     </view>
 
-    <!-- Tool steps & Pending -->
-    <view wx:if="{{toolSteps.length > 0 || pendingState}}" class="log-entry">
+    <!-- Pending (no tool steps — just thinking dots) -->
+    <view wx:if="{{pendingState && toolSteps.length === 0}}" class="log-entry">
       <view class="log-result-wrap">
         <view class="log-result card log-result-pending">
-          <!-- Tool call steps -->
-          <view wx:if="{{toolSteps.length > 0}}" class="tool-steps">
-            <view wx:for="{{toolSteps}}" wx:key="index" class="tool-step">
-              <view class="tool-step-icon {{item.status === 'running' ? 'spinning' : 'done'}}">
-                <text wx:if="{{item.status === 'running'}}">⟳</text>
-                <text wx:else>✓</text>
-              </view>
-              <text class="tool-step-name">{{item.name}}</text>
-            </view>
-          </view>
-          <!-- Thinking dots (show when no tool steps active) -->
-          <view wx:if="{{pendingState && toolSteps.length === 0}}" class="typing-line">
+          <view class="typing-line">
             <text class="typing-label">执行中</text>
             <view class="typing-dots">
               <text class="typing-dot dot-1">·</text>

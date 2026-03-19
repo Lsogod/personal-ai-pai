@@ -386,27 +386,58 @@
   50% { opacity: 1; transform: scale(1.1); }
 }
 
-/* Tool call steps */
-.tool-steps {
+/* Tool call steps (collapsible, inside message bubble) */
+.tool-steps-wrap {
+  margin-bottom: 12rpx;
+  padding-bottom: 12rpx;
+  border-bottom: 1rpx solid var(--c-border-light);
+}
+.tool-steps-header {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  padding: 6rpx 0;
+}
+.tool-steps-icon {
+  font-size: 22rpx;
+  flex-shrink: 0;
+}
+.tool-steps-summary {
+  flex: 1;
+  font-size: 22rpx;
+  color: var(--c-text-3);
+  font-weight: 500;
+}
+.tool-steps-arrow {
+  font-size: 24rpx;
+  color: var(--c-text-4);
+  transition: transform 0.2s;
+  transform: rotate(0deg);
+}
+.tool-steps-arrow.expanded {
+  transform: rotate(90deg);
+}
+.tool-steps-list {
+  margin-top: 8rpx;
   display: flex;
   flex-direction: column;
-  gap: 12rpx;
+  gap: 8rpx;
 }
 .tool-step {
   display: flex;
   align-items: center;
-  gap: 12rpx;
-  font-size: 24rpx;
+  gap: 10rpx;
+  font-size: 22rpx;
   color: var(--c-text-2);
   line-height: 1.5;
 }
 .tool-step-icon {
-  width: 32rpx;
-  height: 32rpx;
+  width: 28rpx;
+  height: 28rpx;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24rpx;
+  font-size: 22rpx;
   flex-shrink: 0;
 }
 .tool-step-icon.spinning {

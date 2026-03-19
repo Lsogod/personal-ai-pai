@@ -168,6 +168,9 @@ Page({
     loadingConversations: false,
     pendingState: "",
     toolSteps: [],
+    toolStepsExpanded: true,
+    toolStepsDone: false,
+    toolStepsDoneCount: 0,
     inputText: "",
     guideVisible: true,
     onboardingTitle: "",
@@ -779,19 +782,35 @@ Page({
       }
 
       if (payload.type === "tool_event") {
-        const event = payload.event; // "tool_start" or "tool_end"
-        const toolName = payload.name || "";
-        if (event === "tool_start") {
+        const tc = payload.tool_call || {};
+        const event = tc.status || payload.event || ""; // "start" or "done"
+        const toolName = tc.name || "";
+        const toolLabel = tc.label || toolName;
+        if (event === "start" || event === "tool_start") {
           const toolSteps = [...(this.data.toolSteps || [])];
-          toolSteps.push({ name: toolName, status: "running" });
-          this.setData({ toolSteps, pendingState: "" });
-        } else if (event === "tool_end") {
+          toolSteps.push({ name: toolLabel, status: "running" });
+          const doneCount = toolSteps.filter(s => s.status === "done").length;
+          this.setData({
+            toolSteps,
+            toolStepsDoneCount: doneCount,
+            toolStepsDone: false,
+            toolStepsExpanded: true,
+            pendingState: "",
+          });
+        } else if (event === "done" || event === "tool_end") {
           const toolSteps = [...(this.data.toolSteps || [])];
-          const idx = toolSteps.findIndex(s => s.name === toolName && s.status === "running");
+          const idx = toolSteps.findIndex(s => s.name === toolLabel && s.status === "running");
           if (idx !== -1) {
-            toolSteps[idx] = { ...toolSteps[idx], status: "done", result: payload.result_preview || "" };
+            toolSteps[idx] = { ...toolSteps[idx], status: "done" };
           }
-          this.setData({ toolSteps });
+          const doneCount = toolSteps.filter(s => s.status === "done").length;
+          const allDone = doneCount === toolSteps.length;
+          this.setData({
+            toolSteps,
+            toolStepsDoneCount: doneCount,
+            toolStepsDone: allDone,
+            toolStepsExpanded: !allDone,
+          });
         }
         this.scrollToBottom();
         return;
@@ -860,6 +879,10 @@ Page({
     };
     const list = [row, ...this.data.notifyCards].slice(0, 4);
     this.setData({ notifyCards: list });
+  },
+
+  onToggleToolSteps() {
+    this.setData({ toolStepsExpanded: !this.data.toolStepsExpanded });
   },
 
   onDismissNotify(e) {
@@ -967,7 +990,7 @@ Page({
     this.queuePendingUserEcho(text || "[图片]");
 
     // Optimistic clear: avoid keeping sent text in input while waiting server response.
-    this.setData({ sending: true, inputText: "", selectedImages: [], toolSteps: [] });
+    this.setData({ sending: true, inputText: "", selectedImages: [], toolSteps: [], toolStepsExpanded: true, toolStepsDone: false, toolStepsDoneCount: 0 });
     this.setPendingState("thinking");
     try {
       const imageUrls = selectedImagesSnapshot.map((x) => x.dataUrl);
