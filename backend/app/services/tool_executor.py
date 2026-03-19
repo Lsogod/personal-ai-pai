@@ -57,6 +57,16 @@ BUILTIN_TOOL_ALIAS: dict[str, str] = {
 }
 
 
+def _to_client_tz_iso(value: datetime | None, *, assume_utc: bool) -> str:
+    if value is None:
+        return ""
+    tz = ZoneInfo(get_settings().timezone)
+    if value.tzinfo is None:
+        source_tz = ZoneInfo("UTC") if assume_utc else tz
+        value = value.replace(tzinfo=source_tz)
+    return value.astimezone(tz).isoformat(timespec="seconds")
+
+
 def _render_now_time(timezone: str) -> str:
     tz = (timezone or "").strip() or "Asia/Shanghai"
     try:
@@ -123,7 +133,7 @@ def _ledger_to_payload(row: Ledger) -> dict[str, Any]:
         "category": str(row.category or ""),
         "item": str(row.item or ""),
         "image_url": str(row.image_url or ""),
-        "transaction_date": row.transaction_date.isoformat(sep=" ", timespec="seconds") if row.transaction_date else "",
+        "transaction_date": _to_client_tz_iso(row.transaction_date, assume_utc=True),
     }
 
 
@@ -134,7 +144,7 @@ def _schedule_to_payload(row: Schedule) -> dict[str, Any]:
         "job_id": str(row.job_id or ""),
         "content": str(row.content or ""),
         "status": str(row.status or ""),
-        "trigger_time": row.trigger_time.isoformat(sep=" ", timespec="seconds") if row.trigger_time else "",
+        "trigger_time": _to_client_tz_iso(row.trigger_time, assume_utc=False),
     }
 
 
@@ -144,11 +154,7 @@ def _conversation_to_payload(row: Any, active_id: int | None) -> dict[str, Any]:
         "id": row_id,
         "title": str(getattr(row, "title", "") or ""),
         "summary": str(getattr(row, "summary", "") or ""),
-        "last_message_at": (
-            getattr(row, "last_message_at").isoformat(sep=" ", timespec="seconds")
-            if getattr(row, "last_message_at", None) is not None
-            else ""
-        ),
+        "last_message_at": _to_client_tz_iso(getattr(row, "last_message_at", None), assume_utc=True),
         "active": bool(active_id and row_id == int(active_id)),
     }
 
