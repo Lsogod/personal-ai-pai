@@ -167,6 +167,7 @@ Page({
     conversations: [],
     loadingConversations: false,
     pendingState: "",
+    toolSteps: [],
     inputText: "",
     guideVisible: true,
     onboardingTitle: "",
@@ -769,6 +770,25 @@ Page({
         return;
       }
 
+      if (payload.type === "tool_event") {
+        const event = payload.event; // "tool_start" or "tool_end"
+        const toolName = payload.name || "";
+        if (event === "tool_start") {
+          const toolSteps = [...(this.data.toolSteps || [])];
+          toolSteps.push({ name: toolName, status: "running" });
+          this.setData({ toolSteps, pendingState: "" });
+        } else if (event === "tool_end") {
+          const toolSteps = [...(this.data.toolSteps || [])];
+          const idx = toolSteps.findIndex(s => s.name === toolName && s.status === "running");
+          if (idx !== -1) {
+            toolSteps[idx] = { ...toolSteps[idx], status: "done", result: payload.result_preview || "" };
+          }
+          this.setData({ toolSteps });
+        }
+        this.scrollToBottom();
+        return;
+      }
+
       if (payload.type === "message_chunk") {
         const streamId = String(payload.stream_id || "").trim();
         if (!streamId) return;
@@ -939,7 +959,7 @@ Page({
     this.queuePendingUserEcho(text || "[图片]");
 
     // Optimistic clear: avoid keeping sent text in input while waiting server response.
-    this.setData({ sending: true, inputText: "", selectedImages: [] });
+    this.setData({ sending: true, inputText: "", selectedImages: [], toolSteps: [] });
     this.setPendingState("thinking");
     try {
       const imageUrls = selectedImagesSnapshot.map((x) => x.dataUrl);

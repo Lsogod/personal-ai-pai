@@ -168,11 +168,22 @@
       </view>
     </view>
 
-    <!-- Pending -->
-    <view wx:if="{{pendingState}}" class="log-entry">
+    <!-- Tool steps & Pending -->
+    <view wx:if="{{toolSteps.length > 0 || pendingState}}" class="log-entry">
       <view class="log-result-wrap">
         <view class="log-result card log-result-pending">
-          <view class="typing-line">
+          <!-- Tool call steps -->
+          <view wx:if="{{toolSteps.length > 0}}" class="tool-steps">
+            <view wx:for="{{toolSteps}}" wx:key="index" class="tool-step">
+              <view class="tool-step-icon {{item.status === 'running' ? 'spinning' : 'done'}}">
+                <text wx:if="{{item.status === 'running'}}">⟳</text>
+                <text wx:else>✓</text>
+              </view>
+              <text class="tool-step-name">{{item.name}}</text>
+            </view>
+          </view>
+          <!-- Thinking dots (show when no tool steps active) -->
+          <view wx:if="{{pendingState && toolSteps.length === 0}}" class="typing-line">
             <text class="typing-label">执行中</text>
             <view class="typing-dots">
               <text class="typing-dot dot-1">·</text>

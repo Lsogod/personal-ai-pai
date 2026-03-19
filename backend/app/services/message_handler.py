@@ -905,6 +905,29 @@ async def handle_message(
         text = str(chunk or "")
         if not text:
             return
+
+        # Tool events use a special prefix and are sent as a separate WS type.
+        TOOL_EVENT_PREFIX = "\x00TOOL_EVENT:"
+        if text.startswith(TOOL_EVENT_PREFIX):
+            import json as _json
+
+            try:
+                tool_payload = _json.loads(text[len(TOOL_EVENT_PREFIX):])
+            except Exception:
+                return
+            miniapp_stream_used = True
+            await get_notification_hub().send_to_user(
+                user_id,
+                {
+                    "type": "tool_event",
+                    **tool_payload,
+                    "stream_id": miniapp_stream_id,
+                    "platform": platform,
+                    "conversation_id": conversation.id,
+                },
+            )
+            return
+
         miniapp_stream_chunks.append(text)
         miniapp_stream_used = True
         await get_notification_hub().send_to_user(
@@ -979,7 +1002,7 @@ async def handle_message(
                 stream_token = set_llm_streamer(_emit_miniapp_stream_chunk)
                 # Stream only terminal NL generation nodes.
                 stream_nodes_token = set_llm_stream_nodes(
-                    {"chat_manager_final", "help_center", "complex_task_agent"}
+                    {"main_agent"}
                 )
             try:
                 try:
