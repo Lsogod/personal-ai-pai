@@ -108,6 +108,45 @@ async def _invoke_structured(
     return schema()
 
 
+def _fallback_refined_memory_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    settings = get_settings()
+    refined: list[dict[str, Any]] = []
+    min_confidence = float(settings.long_term_memory_min_confidence)
+    for raw in candidates:
+        if not isinstance(raw, dict):
+            continue
+        op = str(raw.get("op") or "save").strip().lower()
+        if op != "save":
+            continue
+        content = str(raw.get("content") or "").strip()
+        if not content:
+            continue
+        confidence_raw = raw.get("confidence")
+        if confidence_raw is None or str(confidence_raw).strip() == "":
+            confidence = max(min_confidence, 0.8)
+        else:
+            try:
+                confidence = float(confidence_raw)
+            except Exception:
+                confidence = max(min_confidence, 0.8)
+        confidence = max(0.0, min(1.0, confidence))
+        if confidence < min_confidence:
+            continue
+        refined.append(
+            {
+                "op": "save",
+                "merge_target_id": raw.get("merge_target_id"),
+                "memory_type": _normalize_memory_type(str(raw.get("memory_type") or "fact")),
+                "key": str(raw.get("key") or "").strip(),
+                "content": content,
+                "importance": raw.get("importance"),
+                "confidence": confidence,
+                "ttl_days": raw.get("ttl_days"),
+            }
+        )
+    return refined
+
+
 async def _infer_memory_key_via_llm(
     *,
     memory_type: str,
@@ -523,7 +562,8 @@ async def _llm_refine_memory_candidates(
         )
         decisions = list(getattr(parsed, "decisions", []) or [])
     except Exception:
-        return []
+        logger.exception("memory refine failed; falling back to extracted candidates")
+        return _fallback_refined_memory_candidates(prepared)
 
     by_index: dict[int, dict[str, Any]] = {}
     for item in decisions:
@@ -552,7 +592,10 @@ async def _llm_refine_memory_candidates(
             "ttl_days": decision.get("ttl_days", raw.get("ttl_days")),
         }
         refined.append(merged)
-    return refined
+    if refined:
+        return refined
+    logger.warning("memory refine returned 0 kept candidates; falling back to extracted candidates")
+    return _fallback_refined_memory_candidates(prepared)
 
 
 async def upsert_long_term_memories(
