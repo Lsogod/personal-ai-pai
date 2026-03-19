@@ -151,6 +151,16 @@ def _to_client_tz_iso(value: datetime | None, *, assume_utc: bool) -> str:
     return value.astimezone(tz).isoformat(timespec="seconds")
 
 
+def _to_client_tz_iso(value: datetime | None, *, assume_utc: bool) -> str:
+    if value is None:
+        return ""
+    tz = ZoneInfo(get_settings().timezone)
+    if value.tzinfo is None:
+        source_tz = ZoneInfo("UTC") if assume_utc else tz
+        value = value.replace(tzinfo=source_tz)
+    return value.astimezone(tz).isoformat(timespec="seconds")
+
+
 def _render_now_time(timezone: str) -> str:
     tz = (timezone or "").strip() or "Asia/Shanghai"
     try:
