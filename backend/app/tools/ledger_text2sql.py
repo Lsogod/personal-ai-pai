@@ -4,11 +4,13 @@ import json
 import re
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
 from sqlalchemy import bindparam, text
 
 from app.db.session import AsyncSessionLocal
+from app.core.config import get_settings
 from app.services.llm import get_llm
 
 
@@ -36,6 +38,7 @@ class LedgerText2SQLPlan(BaseModel):
 
 def _normalize_params(params: dict[str, Any]) -> dict[str, Any]:
     normalized: dict[str, Any] = {}
+    local_tz = ZoneInfo(get_settings().timezone)
     for key, value in (params or {}).items():
         if isinstance(value, str):
             candidate = value.strip()
@@ -50,15 +53,41 @@ def _normalize_params(params: dict[str, Any]) -> dict[str, Any]:
                     dt = datetime.fromisoformat(candidate)
                     if dt.tzinfo is not None:
                         dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+                    else:
+                        dt = dt.replace(tzinfo=local_tz).astimezone(timezone.utc).replace(tzinfo=None)
                     normalized[key] = dt
                     continue
                 except Exception:
                     pass
-        if isinstance(value, datetime) and value.tzinfo is not None:
-            normalized[key] = value.astimezone(timezone.utc).replace(tzinfo=None)
+        if isinstance(value, datetime):
+            if value.tzinfo is not None:
+                normalized[key] = value.astimezone(timezone.utc).replace(tzinfo=None)
+            else:
+                normalized[key] = value.replace(tzinfo=local_tz).astimezone(timezone.utc).replace(tzinfo=None)
             continue
         normalized[key] = value
     return normalized
+
+
+def _to_client_tz_text(value: Any, *, assume_utc: bool = True) -> str:
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        raw = str(value or "").strip()
+        if not raw:
+            return ""
+        cleaned = raw.replace("T", " ").replace("/", "-")
+        if cleaned.endswith("Z"):
+            cleaned = cleaned[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(cleaned)
+        except Exception:
+            return raw
+    local_tz = ZoneInfo(get_settings().timezone)
+    if dt.tzinfo is None:
+        source_tz = timezone.utc if assume_utc else local_tz
+        dt = dt.replace(tzinfo=source_tz)
+    return dt.astimezone(local_tz).replace(tzinfo=None).isoformat(sep=" ", timespec="seconds")
 
 
 def _strip_user_filter(where_clause: str) -> str:
@@ -193,6 +222,8 @@ async def _plan_sql(message: str, conversation_context: str = "") -> dict[str, A
     llm = get_llm(node_name="ledger_text2sql")
     runnable = llm.with_structured_output(LedgerText2SQLPlan)
     now = datetime.utcnow().isoformat()
+    local_tz = get_settings().timezone
+    now_local = datetime.now(ZoneInfo(local_tz)).strftime("%Y-%m-%d %H:%M:%S")
     system_prompt = (
         "你是 PostgreSQL 的账单 Text-to-SQL 规划器。\n"
         "只能操作 ledgers 表。\n"
@@ -208,7 +239,10 @@ async def _plan_sql(message: str, conversation_context: str = "") -> dict[str, A
         "category/item 的文本字面量保持用户原始措辞或语言。\n"
         "对于行级查询结果（不是聚合统计），应包含 id, transaction_date, amount, category, item, currency，"
         "并优先使用 ORDER BY transaction_date DESC, id DESC 和合理的 LIMIT。\n"
-        f"当前 UTC 时间：{now}。相对时间表达必须基于这个时间戳解析。"
+        "ledgers.transaction_date 在数据库中按 UTC-naive 存储。\n"
+        f"用户时区：{local_tz}。当前本地时间：{now_local}。当前 UTC 时间：{now}。\n"
+        "相对时间表达（今天/昨天/本月/上月）必须先按用户本地时区计算，再换算为 UTC-naive 参数。\n"
+        "时间范围优先使用左闭右开区间 [start, end)，例如“今天”应使用次日零点作为 end。\n"
     )
     result = await runnable.ainvoke(
         [
@@ -237,6 +271,8 @@ async def _plan_write_preview_sql(
     llm = get_llm(node_name="ledger_text2sql")
     runnable = llm.with_structured_output(LedgerText2SQLPlan)
     now = datetime.utcnow().isoformat()
+    local_tz = get_settings().timezone
+    now_local = datetime.now(ZoneInfo(local_tz)).strftime("%Y-%m-%d %H:%M:%S")
     system_prompt = (
         "你是 PostgreSQL 的账单写入预览 SQL 规划器。\n"
         f"当前操作是：{operation}（仅允许 delete/update）。\n"
@@ -263,7 +299,10 @@ async def _plan_write_preview_sql(
         "如果 preview_hints 含有 target_item，应将其视为更新预览中优先使用的源侧过滤条件。\n"
         "如果 preview_hints.target_item 含有多个源 token（例如按空格、逗号、'和'、'或'、'/' 分隔），"
         "请在 WHERE 中将它们展开为多个源候选条件。\n"
-        f"当前 UTC 时间：{now}。"
+        "ledgers.transaction_date 在数据库中按 UTC-naive 存储。\n"
+        f"用户时区：{local_tz}。当前本地时间：{now_local}。当前 UTC 时间：{now}。\n"
+        "相对时间表达必须先按用户本地时区计算，再换算为 UTC-naive 参数。\n"
+        "时间范围优先使用左闭右开区间 [start, end)。\n"
     )
     result = await runnable.ainvoke(
         [
@@ -285,9 +324,9 @@ async def _plan_write_preview_sql(
     return {}
 def _to_iso_text(value: Any) -> str:
     if isinstance(value, datetime):
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc).replace(tzinfo=None).isoformat(sep=" ", timespec="seconds")
+        return _to_client_tz_text(value, assume_utc=True)
+    if isinstance(value, str):
+        return _to_client_tz_text(value, assume_utc=True)
     return str(value or "").strip()
 
 
@@ -708,10 +747,8 @@ async def try_execute_ledger_text2sql(
                     currency = str(row.get("currency") or "CNY")
                     category = str(row.get("category") or "其他")
                     item = str(row.get("item") or "")
-                    transaction_date = str(
-                        row.get("occurred_at") or row.get("transaction_date") or row.get("created_at") or ""
-                    )
-                    time_text = transaction_date.replace("T", " ")[:16] if transaction_date else "未知时间"
+                    transaction_date = row.get("occurred_at") or row.get("transaction_date") or row.get("created_at") or ""
+                    time_text = _to_client_tz_text(transaction_date, assume_utc=True)[:16] if transaction_date else "未知时间"
                     row_prefix = f"#{row_id} | " if row_id > 0 else ""
                     lines.append(
                         f"{row_prefix}{time_text} | {amount:.2f} {currency} | {category} | {item}"

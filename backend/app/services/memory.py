@@ -6,6 +6,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
@@ -31,6 +32,15 @@ SEMANTIC_DUPLICATE_THRESHOLD = 0.82
 SEMANTIC_MERGE_STRICT_THRESHOLD = 0.9
 
 logger = logging.getLogger(__name__)
+
+
+def _to_client_tz_iso(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    tz = ZoneInfo(get_settings().timezone)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(tz).isoformat(timespec="seconds")
 
 
 class MemoryCandidateExtraction(BaseModel):
@@ -960,7 +970,7 @@ async def list_long_term_memories(
                 "content": row.content,
                 "importance": int(row.importance or 3),
                 "confidence": round(float(row.confidence or 0.0), 3),
-                "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+                "updated_at": _to_client_tz_iso(row.updated_at),
             }
         )
 

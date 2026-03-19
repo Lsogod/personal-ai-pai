@@ -730,8 +730,12 @@ async def execute_capability(
                     if picked_ids:
                         stmt = stmt.where(Schedule.id.in_(picked_ids))
 
-                start_at = _parse_local_naive_arg(params.get("start_at"))
-                end_at = _parse_local_naive_arg(params.get("end_at"))
+                start_at_raw = params.get("start_at")
+                end_at_raw = params.get("end_at")
+                start_at = _parse_local_naive_arg(start_at_raw)
+                end_at = _parse_local_naive_arg(end_at_raw)
+                if end_at is not None and _is_date_only_text(end_at_raw):
+                    end_at += timedelta(days=1)
                 if start_at is not None:
                     stmt = stmt.where(Schedule.trigger_time >= start_at)
                 if end_at is not None:
