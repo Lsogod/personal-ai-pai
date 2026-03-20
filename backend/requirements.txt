@@ -19,3 +19,4 @@ PyJWT>=2.8.0
 passlib[bcrypt]>=1.7.4
 bcrypt==3.2.2
 email-validator>=2.1.0
+dateparser>=1.2.0

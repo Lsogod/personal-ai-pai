@@ -173,43 +173,42 @@ def _is_date_only_text(value: Any) -> bool:
     return len(normalized) == 10 and normalized.count("-") == 2 and ":" not in normalized
 
 
-def _parse_relative_time(text: str) -> datetime | None:
-    """Parse Chinese/English relative time expressions like '10秒后', '5分钟后', '2小时后', '3天后',
-    '10s', '5min', '2h', 'in 10 seconds', etc. Returns local naive datetime or None."""
-    import re
-    s = text.strip().rstrip("后").strip()
+def _parse_natural_time(text: str) -> datetime | None:
+    """Parse natural language time expressions using dateparser.
 
-    patterns: list[tuple[str, str]] = [
-        (r"^(\d+(?:\.\d+)?)\s*秒$", "seconds"),
-        (r"^(\d+(?:\.\d+)?)\s*分钟?$", "minutes"),
-        (r"^(\d+(?:\.\d+)?)\s*小时$", "hours"),
-        (r"^(\d+(?:\.\d+)?)\s*天$", "days"),
-        (r"^(\d+(?:\.\d+)?)\s*(?:s|sec|seconds?)$", "seconds"),
-        (r"^(\d+(?:\.\d+)?)\s*(?:m|min|minutes?)$", "minutes"),
-        (r"^(\d+(?:\.\d+)?)\s*(?:h|hr|hours?)$", "hours"),
-        (r"^(\d+(?:\.\d+)?)\s*(?:d|days?)$", "days"),
-        (r"^in\s+(\d+(?:\.\d+)?)\s+(?:s|sec|seconds?)$", "seconds"),
-        (r"^in\s+(\d+(?:\.\d+)?)\s+(?:m|min|minutes?)$", "minutes"),
-        (r"^in\s+(\d+(?:\.\d+)?)\s+(?:h|hr|hours?)$", "hours"),
-        (r"^in\s+(\d+(?:\.\d+)?)\s+(?:d|days?)$", "days"),
-        (r"^半小时$", "__half_hour"),
-        (r"^半天$", "__half_day"),
-        (r"^一刻钟$", "__quarter"),
-    ]
-    for pattern, unit in patterns:
-        m = re.match(pattern, s, re.IGNORECASE)
-        if m:
-            if unit == "__half_hour":
-                delta = timedelta(minutes=30)
-            elif unit == "__half_day":
-                delta = timedelta(hours=12)
-            elif unit == "__quarter":
-                delta = timedelta(minutes=15)
-            else:
-                amount = float(m.group(1))
-                delta = timedelta(**{unit: amount})
-            tz = ZoneInfo(get_settings().timezone)
-            return (datetime.now(tz) + delta).replace(tzinfo=None)
+    Supports Chinese and English, relative and absolute:
+      - '10秒后', '5分钟后', '2小时后', '3天后', '半小时后'
+      - '明天下午3点', '下周一上午10点', '后天晚上8点半'
+      - 'in 10 minutes', 'next Monday 10am', 'tomorrow 3pm'
+    Returns local naive datetime or None.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    try:
+        import dateparser
+    except ImportError:
+        return None
+
+    tz_name = get_settings().timezone
+    settings: dict[str, Any] = {
+        "TIMEZONE": tz_name,
+        "TO_TIMEZONE": tz_name,
+        "RETURN_AS_TIMEZONE_AWARE": False,
+        "PREFER_DATES_FROM": "future",
+        "PREFER_DAY_OF_MONTH": "current",
+    }
+    result = dateparser.parse(raw, languages=["zh", "en"], settings=settings)
+    if result is not None:
+        return result
+
+    # dateparser may struggle with trailing '后' — try stripping it
+    stripped = raw.rstrip("后").strip()
+    if stripped != raw and stripped:
+        result = dateparser.parse(stripped, languages=["zh", "en"], settings=settings)
+        if result is not None:
+            return result
+
     return None
 
 
@@ -217,36 +216,51 @@ def _parse_local_naive_arg(value: Any) -> datetime | None:
     normalized = _normalize_datetime_text(value)
     if not normalized:
         return None
-    # Try relative time first (e.g. "10秒后", "5分钟后", "2小时后")
-    relative = _parse_relative_time(str(value or "").strip())
-    if relative is not None:
-        return relative
-    if normalized.endswith("Z"):
-        normalized = normalized[:-1] + "+00:00"
+    # 1. Try ISO format first (fastest path for absolute timestamps)
+    iso_result = None
+    iso_normalized = normalized
+    if iso_normalized.endswith("Z"):
+        iso_normalized = iso_normalized[:-1] + "+00:00"
     try:
-        dt = datetime.fromisoformat(normalized)
+        dt = datetime.fromisoformat(iso_normalized)
+        if dt.tzinfo is None:
+            iso_result = dt
+        else:
+            local_tz = ZoneInfo(get_settings().timezone)
+            iso_result = dt.astimezone(local_tz).replace(tzinfo=None)
     except Exception:
-        return None
-    if dt.tzinfo is None:
-        return dt
-    local_tz = ZoneInfo(get_settings().timezone)
-    return dt.astimezone(local_tz).replace(tzinfo=None)
+        pass
+    if iso_result is not None:
+        return iso_result
+    # 2. Try natural language parsing (relative & absolute)
+    natural = _parse_natural_time(str(value or "").strip())
+    if natural is not None:
+        return natural
+    return None
 
 
 def _parse_utc_naive_arg(value: Any) -> datetime | None:
     normalized = _normalize_datetime_text(value)
     if not normalized:
         return None
-    if normalized.endswith("Z"):
-        normalized = normalized[:-1] + "+00:00"
+    # 1. Try ISO format first
+    iso_normalized = normalized
+    if iso_normalized.endswith("Z"):
+        iso_normalized = iso_normalized[:-1] + "+00:00"
     try:
-        dt = datetime.fromisoformat(normalized)
+        dt = datetime.fromisoformat(iso_normalized)
+        if dt.tzinfo is not None:
+            return dt.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+        local_tz = ZoneInfo(get_settings().timezone)
+        return dt.replace(tzinfo=local_tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
     except Exception:
-        return None
-    if dt.tzinfo is not None:
-        return dt.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
-    local_tz = ZoneInfo(get_settings().timezone)
-    return dt.replace(tzinfo=local_tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+        pass
+    # 2. Try natural language parsing → local naive → convert to UTC
+    natural = _parse_natural_time(str(value or "").strip())
+    if natural is not None:
+        local_tz = ZoneInfo(get_settings().timezone)
+        return natural.replace(tzinfo=local_tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+    return None
 
 
 def _ledger_to_payload(row: Ledger) -> dict[str, Any]:
@@ -908,9 +922,15 @@ async def execute_capability(
                 content = str(params.get("content") or "").strip()
                 if not content:
                     return _result(False, error="missing required arg: content")
-                trigger_time = _parse_local_naive_arg(params.get("trigger_time"))
+                raw_trigger = str(params.get("trigger_time") or "").strip()
+                trigger_time = _parse_local_naive_arg(raw_trigger)
                 if trigger_time is None:
-                    return _result(False, error="missing or invalid arg: trigger_time")
+                    return _result(
+                        False,
+                        error=f"无法解析 trigger_time='{raw_trigger}'。"
+                              "请使用绝对时间格式（如 '2025-03-20 15:30:00'）"
+                              "或相对时间（如 '10秒后'、'5分钟后'、'明天下午3点'、'下周一上午10点'）重试。",
+                    )
                 status = str(params.get("status") or "PENDING").strip().upper() or "PENDING"
                 job_id = str(params.get("job_id") or "").strip() or str(uuid4())
                 session = get_session()
@@ -950,8 +970,16 @@ async def execute_capability(
                 content_value = str(params.get("content") or "").strip()
                 if content_value:
                     row.content = content_value
-                trigger_time = _parse_local_naive_arg(params.get("trigger_time"))
-                if trigger_time is not None:
+                raw_trigger_upd = str(params.get("trigger_time") or "").strip()
+                if raw_trigger_upd:
+                    trigger_time = _parse_local_naive_arg(raw_trigger_upd)
+                    if trigger_time is None:
+                        return _result(
+                            False,
+                            error=f"无法解析 trigger_time='{raw_trigger_upd}'。"
+                                  "请使用绝对时间格式（如 '2025-03-20 15:30:00'）"
+                                  "或相对时间（如 '10秒后'、'5分钟后'、'明天下午3点'）重试。",
+                        )
                     row.trigger_time = trigger_time
                 status_value = str(params.get("status") or "").strip().upper()
                 if status_value:
