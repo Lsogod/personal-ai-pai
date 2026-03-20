@@ -10,15 +10,17 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import delete, select
 
 from app.core.config import get_settings
+from app.models.conversation import Conversation
 from app.models.ledger import Ledger
+from app.models.message import Message
 from app.models.reminder_delivery import ReminderDelivery
 from app.models.schedule import Schedule
 from app.models.user import User
 from app.services.admin_tools import is_tool_enabled
 from app.services.conversations import ensure_active_conversation, list_conversations
-from app.services.memory import list_long_term_memories
+from app.services.memory import list_long_term_memories, upsert_long_term_memories
 from app.services.mcp_fetch import get_mcp_client_for_tool, get_mcp_fetch_client
-from app.services.runtime_context import get_scheduler, get_session
+from app.services.runtime_context import get_scheduler, get_session, get_tool_message_id
 from app.services.scheduler_tasks import send_reminder_job
 from app.services.tool_registry import (
     get_allowed_mcp_tool_names_for,
@@ -87,6 +89,45 @@ def _render_mcp_tool_rows(rows: list[dict[str, Any]]) -> str:
         enabled = bool(item.get("enabled") is True)
         lines.append(f"- {name} | enabled={str(enabled).lower()} | {desc}")
     return "\n".join(lines)
+
+
+async def _mark_source_message_memory_processed(
+    *,
+    session,
+    user_id: int,
+    conversation_id: int | None,
+    source_message_id: int | None,
+) -> None:
+    try:
+        message_id = int(source_message_id or 0)
+    except Exception:
+        return
+    if message_id <= 0:
+        return
+    row = await session.get(Message, message_id)
+    if (
+        row is None
+        or int(row.user_id or 0) != int(user_id)
+        or str(row.role or "").strip().lower() != "user"
+    ):
+        return
+    if conversation_id is not None and int(row.conversation_id or 0) != int(conversation_id):
+        return
+    row.memory_status = "PROCESSED"
+    row.memory_processed_at = datetime.now(ZoneInfo("UTC"))
+    row.memory_error = None
+    session.add(row)
+
+    conv_id = int(row.conversation_id or 0)
+    if conv_id > 0:
+        conversation = await session.get(Conversation, conv_id)
+        if conversation is not None and int(conversation.user_id or 0) == int(user_id):
+            prev = int(conversation.memory_last_processed_message_id or 0)
+            if prev < message_id:
+                conversation.memory_last_processed_message_id = message_id
+            conversation.memory_extracted_at = datetime.now(ZoneInfo("UTC"))
+            session.add(conversation)
+    await session.commit()
 
 
 def _try_parse_json_payload(text: str) -> Any | None:
@@ -611,6 +652,76 @@ async def execute_capability(
                     True,
                     output=json.dumps(payload or [], ensure_ascii=False),
                     output_data=payload or [],
+                )
+
+            if tool_l == "memory_save":
+                uid = _resolve_user_id(params.get("user_id", user_id))
+                if uid <= 0:
+                    return _result(False, error="missing required arg: user_id")
+                content = str(params.get("content") or "").strip()
+                if not content:
+                    return _result(False, error="missing required arg: content")
+                memory_type = str(params.get("memory_type") or "fact").strip().lower() or "fact"
+                memory_key = str(params.get("key") or "").strip()
+                try:
+                    importance = int(params.get("importance") or 3)
+                except Exception:
+                    importance = 3
+                importance = max(1, min(5, importance))
+                try:
+                    confidence = float(params.get("confidence") or 1.0)
+                except Exception:
+                    confidence = 1.0
+                confidence = max(0.0, min(1.0, confidence))
+                try:
+                    ttl_days = int(params.get("ttl_days") or settings.long_term_memory_default_ttl_days)
+                except Exception:
+                    ttl_days = int(settings.long_term_memory_default_ttl_days)
+                ttl_days = max(1, ttl_days)
+
+                session = get_session()
+                source_message_id = _resolve_user_id(params.get("source_message_id") or get_tool_message_id())
+                processed = await upsert_long_term_memories(
+                    session=session,
+                    user_id=uid,
+                    conversation_id=conversation_id,
+                    source_message_id=(source_message_id or None),
+                    candidates=[
+                        {
+                            "op": "save",
+                            "memory_type": memory_type,
+                            "key": memory_key,
+                            "content": content,
+                            "importance": importance,
+                            "confidence": confidence,
+                            "ttl_days": ttl_days,
+                        }
+                    ],
+                    user_text=f"用户明确要求记住：{content}",
+                    bypass_refine=True,
+                )
+                if processed <= 0:
+                    return _result(False, error="memory not saved")
+                await _mark_source_message_memory_processed(
+                    session=session,
+                    user_id=uid,
+                    conversation_id=conversation_id,
+                    source_message_id=(source_message_id or None),
+                )
+                payload = {
+                    "status": "saved",
+                    "content": content,
+                    "memory_type": memory_type,
+                    "importance": importance,
+                    "confidence": confidence,
+                    "ttl_days": ttl_days,
+                    "source_message_id": source_message_id or None,
+                    "conversation_id": conversation_id,
+                }
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
                 )
 
             if tool_l == "schedule_insert":

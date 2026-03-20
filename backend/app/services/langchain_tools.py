@@ -345,6 +345,33 @@ def build_langchain_tools(
 
         tools.append(memory_list_tool)
 
+    if _enabled("memory_save"):
+        @tool("memory_save")
+        async def memory_save_tool(
+            content: str,
+            memory_type: str = "fact",
+            importance: int = 3,
+            confidence: float = 1.0,
+            ttl_days: int = 180,
+            key: str = "",
+        ) -> str:
+            """将用户明确要求记住的信息写入长期记忆，并返回 JSON 结果。"""
+            return await _run_tool(
+                context=context,
+                source="builtin",
+                name="memory_save",
+                args={
+                    "content": content,
+                    "memory_type": memory_type,
+                    "importance": importance,
+                    "confidence": confidence,
+                    "ttl_days": ttl_days,
+                    "key": key,
+                },
+            )
+
+        tools.append(memory_save_tool)
+
     if _enabled("schedule_insert"):
         @tool("schedule_insert")
         async def schedule_insert_tool(

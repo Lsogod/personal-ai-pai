@@ -609,6 +609,7 @@ async def upsert_long_term_memories(
     user_nickname: str = "",
     user_ai_name: str = "",
     user_ai_emoji: str = "",
+    bypass_refine: bool = False,
 ) -> int:
     settings = get_settings()
     if not settings.long_term_memory_enabled:
@@ -632,11 +633,15 @@ async def upsert_long_term_memories(
     existing_by_id = {int(row.id): row for row in existing_rows if row.id is not None}
     working_rows = list(existing_rows)
 
-    vetted = await _llm_refine_memory_candidates(
-        user_text=user_text,
-        candidates=candidates,
-        existing_rows=existing_rows,
-    )
+    prepared_candidates = _prepare_memory_candidates(candidates)
+    if bypass_refine:
+        vetted = prepared_candidates
+    else:
+        vetted = await _llm_refine_memory_candidates(
+            user_text=user_text,
+            candidates=candidates,
+            existing_rows=existing_rows,
+        )
     if not vetted:
         return 0
 

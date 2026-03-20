@@ -48,6 +48,8 @@ from app.services.runtime_context import (
     reset_tool_platform,
     set_tool_conversation_id,
     reset_tool_conversation_id,
+    set_tool_message_id,
+    reset_tool_message_id,
     set_llm_streamer,
     reset_llm_streamer,
     set_llm_stream_nodes,
@@ -1139,6 +1141,7 @@ async def handle_message(
             tool_user_token = set_tool_user_id(user_id)
             tool_platform_token = set_tool_platform(platform)
             tool_conv_token = set_tool_conversation_id(conversation.id)
+            tool_message_token = set_tool_message_id(int(user_message_row.id or 0) or None)
             stream_token = None
             stream_nodes_token = None
             if miniapp_stream_enabled:
@@ -1171,6 +1174,7 @@ async def handle_message(
                     reset_llm_stream_nodes(stream_nodes_token)
                 if stream_token is not None:
                     reset_llm_streamer(stream_token)
+                reset_tool_message_id(tool_message_token)
                 reset_tool_conversation_id(tool_conv_token)
                 reset_tool_platform(tool_platform_token)
                 reset_tool_user_id(tool_user_token)
