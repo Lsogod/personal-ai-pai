@@ -42,10 +42,11 @@ LEDGER_TOOL_NAMES: set[str] = {
 }
 
 SCHEDULE_TOOL_NAMES: set[str] = {
-    "ledger_list",
     "schedule_insert",
     "schedule_update",
     "schedule_delete",
+    "schedule_get_latest",
+    "schedule_list_recent",
     "schedule_list",
 }
 

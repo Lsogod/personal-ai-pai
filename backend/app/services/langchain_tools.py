@@ -428,6 +428,32 @@ def build_langchain_tools(
 
         tools.append(memory_delete_tool)
 
+    if _enabled("schedule_get_latest"):
+        @tool("schedule_get_latest")
+        async def schedule_get_latest_tool() -> str:
+            """返回最新一条日程提醒的 JSON；如果没有则返回空 JSON。"""
+            return await _run_tool(
+                context=context,
+                source="builtin",
+                name="schedule_get_latest",
+                args={},
+            )
+
+        tools.append(schedule_get_latest_tool)
+
+    if _enabled("schedule_list_recent"):
+        @tool("schedule_list_recent")
+        async def schedule_list_recent_tool(limit: int = 10) -> str:
+            """返回最近日程提醒记录的 JSON 列表。"""
+            return await _run_tool(
+                context=context,
+                source="builtin",
+                name="schedule_list_recent",
+                args={"limit": limit},
+            )
+
+        tools.append(schedule_list_recent_tool)
+
     if _enabled("schedule_insert"):
         @tool("schedule_insert")
         async def schedule_insert_tool(
@@ -436,7 +462,7 @@ def build_langchain_tools(
             status: str = "PENDING",
             job_id: str = "",
         ) -> str:
-            """创建一条日程提醒，并返回 JSON 行数据。"""
+            """创建一条日程提醒，并返回 JSON 行数据。trigger_time 支持绝对时间（YYYY-MM-DD HH:MM:SS）和相对时间（如 '10秒后'、'5分钟后'、'2小时后'、'3天后'）。"""
             return await _run_tool(
                 context=context,
                 source="builtin",

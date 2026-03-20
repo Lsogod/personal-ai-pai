@@ -173,10 +173,54 @@ def _is_date_only_text(value: Any) -> bool:
     return len(normalized) == 10 and normalized.count("-") == 2 and ":" not in normalized
 
 
+def _parse_relative_time(text: str) -> datetime | None:
+    """Parse Chinese/English relative time expressions like '10秒后', '5分钟后', '2小时后', '3天后',
+    '10s', '5min', '2h', 'in 10 seconds', etc. Returns local naive datetime or None."""
+    import re
+    s = text.strip().rstrip("后").strip()
+
+    patterns: list[tuple[str, str]] = [
+        (r"^(\d+(?:\.\d+)?)\s*秒$", "seconds"),
+        (r"^(\d+(?:\.\d+)?)\s*分钟?$", "minutes"),
+        (r"^(\d+(?:\.\d+)?)\s*小时$", "hours"),
+        (r"^(\d+(?:\.\d+)?)\s*天$", "days"),
+        (r"^(\d+(?:\.\d+)?)\s*(?:s|sec|seconds?)$", "seconds"),
+        (r"^(\d+(?:\.\d+)?)\s*(?:m|min|minutes?)$", "minutes"),
+        (r"^(\d+(?:\.\d+)?)\s*(?:h|hr|hours?)$", "hours"),
+        (r"^(\d+(?:\.\d+)?)\s*(?:d|days?)$", "days"),
+        (r"^in\s+(\d+(?:\.\d+)?)\s+(?:s|sec|seconds?)$", "seconds"),
+        (r"^in\s+(\d+(?:\.\d+)?)\s+(?:m|min|minutes?)$", "minutes"),
+        (r"^in\s+(\d+(?:\.\d+)?)\s+(?:h|hr|hours?)$", "hours"),
+        (r"^in\s+(\d+(?:\.\d+)?)\s+(?:d|days?)$", "days"),
+        (r"^半小时$", "__half_hour"),
+        (r"^半天$", "__half_day"),
+        (r"^一刻钟$", "__quarter"),
+    ]
+    for pattern, unit in patterns:
+        m = re.match(pattern, s, re.IGNORECASE)
+        if m:
+            if unit == "__half_hour":
+                delta = timedelta(minutes=30)
+            elif unit == "__half_day":
+                delta = timedelta(hours=12)
+            elif unit == "__quarter":
+                delta = timedelta(minutes=15)
+            else:
+                amount = float(m.group(1))
+                delta = timedelta(**{unit: amount})
+            tz = ZoneInfo(get_settings().timezone)
+            return (datetime.now(tz) + delta).replace(tzinfo=None)
+    return None
+
+
 def _parse_local_naive_arg(value: Any) -> datetime | None:
     normalized = _normalize_datetime_text(value)
     if not normalized:
         return None
+    # Try relative time first (e.g. "10秒后", "5分钟后", "2小时后")
+    relative = _parse_relative_time(str(value or "").strip())
+    if relative is not None:
+        return relative
     if normalized.endswith("Z"):
         normalized = normalized[:-1] + "+00:00"
     try:
@@ -948,6 +992,49 @@ async def execute_capability(
                 await session.execute(delete(ReminderDelivery).where(ReminderDelivery.schedule_id == schedule_id))
                 await session.delete(row)
                 await session.commit()
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
+
+            if tool_l == "schedule_get_latest":
+                uid = _resolve_user_id(params.get("user_id", user_id))
+                if uid <= 0:
+                    return _result(False, error="missing required arg: user_id")
+                session = get_session()
+                stmt = (
+                    select(Schedule)
+                    .where(Schedule.user_id == uid)
+                    .order_by(Schedule.id.desc())
+                    .limit(1)
+                )
+                result = await session.execute(stmt)
+                row = result.scalars().first()
+                if row is None:
+                    return _result(True, output="{}", output_data={})
+                payload = _schedule_to_payload(row)
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
+
+            if tool_l == "schedule_list_recent":
+                uid = _resolve_user_id(params.get("user_id", user_id))
+                if uid <= 0:
+                    return _result(False, error="missing required arg: user_id")
+                limit = max(1, min(100, int(params.get("limit") or 10)))
+                session = get_session()
+                stmt = (
+                    select(Schedule)
+                    .where(Schedule.user_id == uid)
+                    .order_by(Schedule.id.desc())
+                    .limit(limit)
+                )
+                result = await session.execute(stmt)
+                rows = list(result.scalars().all())
+                payload = [_schedule_to_payload(item) for item in rows]
                 return _result(
                     True,
                     output=json.dumps(payload, ensure_ascii=False),
