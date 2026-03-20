@@ -451,6 +451,28 @@ cp miniapp/config.local.example.js miniapp/config.local.js
 
 ---
 
+## 🌿 分支说明
+
+| 分支 | 架构 | 说明 |
+|------|------|------|
+| **`main`** ⬅ 当前 | 分领域节点（Router + 6 专业节点） | 稳定版本。LLM 先做意图分类，再路由到 Ledger/Schedule/Chat/Skill/Help/Complex 等专业节点处理 |
+| **`feat/single-agent`** | 单 Agent（create_react_agent） | 实验版本。一个 ReAct Agent 拥有全部工具，自主决策调用，无需路由分类 |
+
+### main 分支（分领域节点）的优势
+- **意图隔离性强** — 各领域节点 prompt 独立优化，互不干扰
+- **路由可控** — 明确的意图分类结果，便于审计和调试
+- **节点级扩展** — 新增领域只需添加节点和路由，不影响其他节点
+- **精细化流式** — 仅终态自然语言节点流式推送，执行细节写入后端日志
+
+### feat/single-agent 分支的提升
+- **更低延迟** — 省去 Router LLM 意图分类调用，直接进入 Agent 决策
+- **跨领域任务更自然** — 无需 Complex Task 编排，Agent 自主组合多个工具（如同时记账+设提醒）
+- **架构更简洁** — 从 7 个节点简化为 entry → onboarding / agent 两条路径
+- **工具步骤可视化** — 小程序和 Web 端实时显示 Agent 正在调用的工具及进度
+- **UI/UX 改进** — 30 个小程序 SVG 图标统一为 Lucide 风格、CSS 变量 token 化、骨架屏加载等
+
+---
+
 ## 📄 License
 
 MIT
