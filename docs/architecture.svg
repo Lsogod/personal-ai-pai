@@ -1,240 +1,201 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 820">
-      <defs>
-        <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
-          <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#94A3B8" flood-opacity="0.12"/>
-        </filter>
-        <filter id="lightShadow" x="-10%" y="-10%" width="120%" height="120%">
-          <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#94A3B8" flood-opacity="0.08"/>
-        </filter>
+  <defs>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#94A3B8" flood-opacity="0.15"/>
+    </filter>
+    <filter id="lightShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#94A3B8" flood-opacity="0.10"/>
+    </filter>
 
-        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-          <path d="M 0 1 L 8 5 L 0 9 z" fill="#CBD5E1" />
-        </marker>
-        <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-          <path d="M 0 1 L 8 5 L 0 9 z" fill="#93C5FD" />
-        </marker>
+    <!-- 箭头标记 - 加大加深 -->
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#94A3B8" />
+    </marker>
+    <marker id="arr-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#60A5FA" />
+    </marker>
+    <marker id="arr-pink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#F472B6" />
+    </marker>
 
-        <style>
-          @keyframes dash { to { stroke-dashoffset: -32; } }
-          @keyframes flow { to { stroke-dashoffset: -32; } }
-          @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+    <style>
+      @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
+      .float-box { animation: float 4s ease-in-out infinite; }
+      .hover-card {
+        transition: transform .3s cubic-bezier(.34,1.56,.64,1), filter .3s ease;
+        transform-origin: center; transform-box: fill-box; cursor: pointer;
+      }
+      .hover-card:hover { transform: scale(1.03); filter: drop-shadow(0 8px 12px rgba(148,163,184,.2)); }
+      text { pointer-events: none; }
+    </style>
+  </defs>
 
-          .flow-line { stroke-dasharray: 8 8; animation: dash 2.5s linear infinite; fill: none; }
-          .flow-line-fast { stroke-dasharray: 8 8; animation: flow 1.5s linear infinite; fill: none; }
-          .float-box { animation: float 4s ease-in-out infinite; }
+  <!-- 背景 -->
+  <rect width="960" height="820" rx="32" fill="#F8FAFC"/>
 
-          .hover-card {
-            transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.3s ease;
-            transform-origin: center;
-            transform-box: fill-box;
-            cursor: pointer;
-          }
-          .hover-card:hover {
-            transform: scale(1.03);
-            filter: drop-shadow(0 10px 15px rgba(148, 163, 184, 0.2));
-          }
-          text { pointer-events: none; }
-        </style>
-      </defs>
+  <!-- ============ 连线层（先画，卡片覆盖在上面） ============ -->
 
-      <!-- 背景 -->
-      <rect width="960" height="820" rx="32" fill="#F8FAFC" />
+  <!-- 平台 → FastAPI (实线) -->
+  <g fill="none" stroke="#94A3B8" stroke-width="1.8" opacity="0.55">
+    <path d="M 270 144 L 270 158 L 410 158 L 410 170" marker-end="url(#arr)"/>
+    <path d="M 410 144 L 410 170" marker-end="url(#arr)"/>
+    <path d="M 550 144 L 550 170" marker-end="url(#arr)"/>
+    <path d="M 690 144 L 690 158 L 550 158 L 550 170" marker-end="url(#arr)"/>
+  </g>
 
-      <!-- 单 Agent 工作流大容器 -->
-      <rect x="30" y="290" width="900" height="230" rx="28" fill="rgba(255, 255, 255, 0.6)" stroke="#E2E8F0" stroke-width="2" filter="url(#softShadow)"/>
-      <text x="480" y="316" text-anchor="middle" dominant-baseline="central" fill="#0F172A" font-size="15" font-weight="800">🧠 LangGraph · Single Agent Architecture</text>
+  <!-- Web ←→ FastAPI / Miniapp ←→ FastAPI (蓝色双向) -->
+  <line x1="250" y1="210" x2="278" y2="210" stroke="#60A5FA" stroke-width="2" marker-start="url(#arr-blue)" opacity="0.7"/>
+  <line x1="682" y1="210" x2="710" y2="210" stroke="#60A5FA" stroke-width="2" marker-end="url(#arr-blue)" opacity="0.7"/>
 
-      <!-- 连线层 -->
-      <g stroke="#CBD5E1" stroke-width="2" class="flow-line" opacity="0.6">
-        <!-- 外部平台 -> FastAPI -->
-        <path d="M 270 144 L 270 150 L 410 150 L 410 170" fill="none" marker-end="url(#arrow)" />
-        <path d="M 410 144 L 410 170" fill="none" marker-end="url(#arrow)" />
-        <path d="M 550 144 L 550 170" fill="none" marker-end="url(#arrow)" />
-        <path d="M 690 144 L 690 150 L 550 150 L 550 170" fill="none" marker-end="url(#arrow)" />
+  <!-- FastAPI → Entry 条件检查 -->
+  <line x1="480" y1="250" x2="480" y2="332" stroke="#94A3B8" stroke-width="2" marker-end="url(#arr)" opacity="0.65"/>
 
-        <!-- FastAPI -> Entry -->
-        <path d="M 480 250 L 480 330" fill="none" marker-end="url(#arrow)" />
+  <!-- Entry → Onboarding / Agent (分叉线) -->
+  <path d="M 400 352 L 280 352 L 170 395" fill="none" stroke="#A78BFA" stroke-width="2" marker-end="url(#arr)" opacity="0.7"/>
+  <path d="M 560 352 L 640 352 L 620 395" fill="none" stroke="#34D399" stroke-width="2" marker-end="url(#arr)" opacity="0.7"/>
 
-        <!-- Entry -> Onboarding (left) -->
-        <path d="M 400 360 L 170 360 L 170 390" fill="none" marker-end="url(#arrow)" />
+  <!-- Onboarding → PostgreSQL -->
+  <path d="M 170 470 L 170 500 L 125 500 L 125 562" fill="none" stroke="#A78BFA" stroke-width="1.5" marker-end="url(#arr)" opacity="0.5"/>
 
-        <!-- Entry -> Main Agent (right) -->
-        <path d="M 560 360 L 620 360 L 620 390" fill="none" marker-end="url(#arrow)" />
+  <!-- Agent → 工具栏 -->
+  <line x1="620" y1="470" x2="620" y2="488" stroke="#F472B6" stroke-width="2" marker-end="url(#arr-pink)" opacity="0.7"/>
 
-        <!-- Onboarding -> Postgres -->
-        <path d="M 170 460 L 170 560" fill="none" marker-end="url(#arrow)" />
+  <!-- 工具栏 → 基础设施层 -->
+  <g fill="none" stroke="#94A3B8" stroke-width="1.5" opacity="0.50">
+    <path d="M 430 528 L 430 545 L 125 545 L 125 562" marker-end="url(#arr)"/>
+    <path d="M 500 528 L 500 548 L 361 548 L 361 562" marker-end="url(#arr)"/>
+    <path d="M 620 528 L 620 545 L 597 545 L 597 562" marker-end="url(#arr)"/>
+    <path d="M 780 528 L 780 545 L 833 545 L 833 562" marker-end="url(#arr)"/>
+  </g>
 
-        <!-- Agent -> Tools -->
-        <path d="M 620 460 L 620 490" fill="none" marker-end="url(#arrow)" />
+  <!-- LLM → MCP Fetch -->
+  <line x1="597" y1="622" x2="597" y2="638" stroke="#94A3B8" stroke-width="1.5" marker-end="url(#arr)" opacity="0.50"/>
 
-        <!-- Agent -> LLM -->
-        <path d="M 700 440 L 820 440 L 820 560" fill="none" marker-end="url(#arrow)" />
 
-        <!-- Agent -> Postgres (via tools) -->
-        <path d="M 450 510 L 250 510 L 250 560" fill="none" marker-end="url(#arrow)" />
+  <!-- ============ 卡片层 ============ -->
 
-        <!-- Agent -> Redis -->
-        <path d="M 500 510 L 440 510 L 440 560" fill="none" marker-end="url(#arrow)" />
+  <!-- 全局标题 -->
+  <text x="480" y="46" text-anchor="middle" fill="#1E293B" font-size="24" font-weight="800" letter-spacing="0.5">PAI · Personal AI Assistant — 系统架构</text>
+  <text x="480" y="72" text-anchor="middle" fill="#64748B" font-size="13" font-weight="500">多平台智能助手 · 单 Agent (create_react_agent) · MCP 工具协议 · 第一方沉浸式客户端</text>
 
-        <!-- Agent -> APScheduler -->
-        <path d="M 730 510 L 820 510 L 820 560" fill="none" marker-end="url(#arrow)" />
+  <!-- 第三方平台 -->
+  <g class="float-box" style="animation-delay:0s"><g class="hover-card">
+    <rect x="220" y="100" width="100" height="44" rx="22" fill="#DBEAFE" filter="url(#softShadow)"/>
+    <text x="270" y="126" text-anchor="middle" fill="#1E3A8A" font-size="12" font-weight="700">✈️ Telegram</text>
+  </g></g>
+  <g class="float-box" style="animation-delay:.2s"><g class="hover-card">
+    <rect x="360" y="100" width="100" height="44" rx="22" fill="#DCFCE7" filter="url(#softShadow)"/>
+    <text x="410" y="126" text-anchor="middle" fill="#14532D" font-size="12" font-weight="700">💬 微信</text>
+  </g></g>
+  <g class="float-box" style="animation-delay:.4s"><g class="hover-card">
+    <rect x="500" y="100" width="100" height="44" rx="22" fill="#E0F2FE" filter="url(#softShadow)"/>
+    <text x="550" y="126" text-anchor="middle" fill="#0C4A6E" font-size="12" font-weight="700">🐧 QQ</text>
+  </g></g>
+  <g class="float-box" style="animation-delay:.6s"><g class="hover-card">
+    <rect x="640" y="100" width="100" height="44" rx="22" fill="#FFEDD5" filter="url(#softShadow)"/>
+    <text x="690" y="126" text-anchor="middle" fill="#9A3412" font-size="12" font-weight="700">🐦 飞书</text>
+  </g></g>
+  <!-- 接入层标签 -->
+  <rect x="770" y="100" width="150" height="44" rx="22" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1.5"/>
+  <text x="845" y="118" text-anchor="middle" fill="#475569" font-size="11" font-weight="700">第三方平台接入</text>
+  <text x="845" y="134" text-anchor="middle" fill="#94A3B8" font-size="9" font-weight="600">Webhook / Polling</text>
 
-        <!-- LLM -> MCP -->
-        <path d="M 640 560 L 640 636" fill="none" marker-end="url(#arrow)" />
-      </g>
+  <!-- Web 客户端 (左) -->
+  <g class="float-box" style="animation-delay:.8s"><g class="hover-card">
+    <rect x="30" y="170" width="220" height="80" rx="24" fill="#EEF2FF" filter="url(#softShadow)"/>
+    <text x="140" y="198" text-anchor="middle" fill="#3730A3" font-size="14" font-weight="800">🎨 Web (React/Vite)</text>
+    <text x="140" y="218" text-anchor="middle" fill="#4F46E5" font-size="11" font-weight="600">流式对话 · 工具步骤可视化</text>
+    <text x="140" y="236" text-anchor="middle" fill="#4F46E5" font-size="11" font-weight="600">技能工作台 · 账号绑定</text>
+  </g></g>
+  <text x="264" y="203" text-anchor="middle" fill="#60A5FA" font-size="10" font-weight="700">SSE/WS</text>
 
-      <!-- 第一方客户端连接 (浅蓝色) -->
-      <g stroke="#93C5FD" stroke-width="2" class="flow-line-fast" opacity="0.6">
-        <path d="M 280 210 L 260 210" fill="none" marker-end="url(#arrow-blue)" />
-        <path d="M 680 210 L 700 210" fill="none" marker-end="url(#arrow-blue)" />
-      </g>
+  <!-- FastAPI 后端核心 (中) -->
+  <g class="hover-card">
+    <rect x="280" y="170" width="400" height="80" rx="32" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="2" filter="url(#softShadow)"/>
+    <text x="480" y="198" text-anchor="middle" fill="#1E293B" font-size="16" font-weight="800">⚡ FastAPI 后端核心</text>
+    <text x="480" y="218" text-anchor="middle" fill="#64748B" font-size="11" font-weight="600">认证鉴权 · 路由分发 · 管理 API</text>
+    <text x="480" y="236" text-anchor="middle" fill="#64748B" font-size="11" font-weight="600">astream_events 流式 · WebSocket 实时推送</text>
+  </g>
 
-      <!-- 全局标题 -->
-      <text x="480" y="46" text-anchor="middle" fill="#1E293B" font-size="24" font-weight="800" letter-spacing="0.5">PAI · Personal AI Assistant — 系统架构</text>
-      <text x="480" y="72" text-anchor="middle" fill="#64748B" font-size="13" font-weight="500">多平台智能助手 · 单 Agent (create_react_agent) · MCP 工具协议 · 第一方沉浸式客户端</text>
+  <!-- 微信小程序 (右) -->
+  <g class="float-box" style="animation-delay:1s"><g class="hover-card">
+    <rect x="710" y="170" width="220" height="80" rx="24" fill="#DCFCE7" filter="url(#softShadow)"/>
+    <text x="820" y="198" text-anchor="middle" fill="#166534" font-size="14" font-weight="800">📱 微信小程序 (原生)</text>
+    <text x="820" y="218" text-anchor="middle" fill="#16A34A" font-size="11" font-weight="600">便携聊天 · 工具步骤可视化</text>
+    <text x="820" y="236" text-anchor="middle" fill="#16A34A" font-size="11" font-weight="600">订阅提醒 · Markdown</text>
+  </g></g>
+  <text x="696" y="203" text-anchor="middle" fill="#60A5FA" font-size="10" font-weight="700">SSE/WS</text>
 
-      <!-- 第三方接入层 -->
-      <g class="float-box" style="animation-delay: 0s">
-        <g class="hover-card">
-            <rect x="220" y="100" width="100" height="44" rx="22" fill="#DBEAFE" filter="url(#softShadow)"/>
-            <text x="270" y="122" text-anchor="middle" dominant-baseline="central" fill="#1E3A8A" font-size="12" font-weight="700">✈️ Telegram</text>
-        </g>
-      </g>
-      <g class="float-box" style="animation-delay: 0.2s">
-        <g class="hover-card">
-            <rect x="360" y="100" width="100" height="44" rx="22" fill="#DCFCE7" filter="url(#softShadow)"/>
-            <text x="410" y="122" text-anchor="middle" dominant-baseline="central" fill="#14532D" font-size="12" font-weight="700">💬 微信</text>
-        </g>
-      </g>
-      <g class="float-box" style="animation-delay: 0.4s">
-        <g class="hover-card">
-            <rect x="500" y="100" width="100" height="44" rx="22" fill="#E0F2FE" filter="url(#softShadow)"/>
-            <text x="550" y="122" text-anchor="middle" dominant-baseline="central" fill="#0C4A6E" font-size="12" font-weight="700">🐧 QQ</text>
-        </g>
-      </g>
-      <g class="float-box" style="animation-delay: 0.6s">
-        <g class="hover-card">
-            <rect x="640" y="100" width="100" height="44" rx="22" fill="#FFEDD5" filter="url(#softShadow)"/>
-            <text x="690" y="122" text-anchor="middle" dominant-baseline="central" fill="#9A3412" font-size="12" font-weight="700">🐦 飞书</text>
-        </g>
-      </g>
+  <!-- LangGraph 大容器 -->
+  <rect x="30" y="290" width="900" height="240" rx="28" fill="rgba(255,255,255,0.55)" stroke="#E2E8F0" stroke-width="2" filter="url(#softShadow)"/>
+  <text x="480" y="316" text-anchor="middle" fill="#0F172A" font-size="15" font-weight="800">🧠 LangGraph · Single Agent Architecture</text>
 
-      <!-- 接入层标签 -->
-      <g class="float-box" style="animation-delay: 0.8s">
-        <rect x="760" y="100" width="160" height="44" rx="22" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1.5"/>
-        <text x="840" y="116" text-anchor="middle" dominant-baseline="central" fill="#475569" font-size="11" font-weight="700">第三方平台接入</text>
-        <text x="840" y="132" text-anchor="middle" dominant-baseline="central" fill="#94A3B8" font-size="9" font-weight="600">Webhook / Polling</text>
-      </g>
+  <!-- Entry 条件检查 -->
+  <g class="hover-card">
+    <rect x="400" y="332" width="160" height="36" rx="18" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1.5"/>
+    <text x="480" y="354" text-anchor="middle" fill="#334155" font-size="13" font-weight="700">🔀 setup_stage 检查</text>
+  </g>
+  <!-- 分叉标签 -->
+  <text x="280" y="345" fill="#7C3AED" font-size="10" font-weight="700">stage &lt; 3</text>
+  <text x="650" y="345" fill="#059669" font-size="10" font-weight="700">stage ≥ 3</text>
 
-      <!-- 左侧 Web 客户端 -->
-      <g class="float-box" style="animation-delay: 0.8s">
-        <g class="hover-card">
-            <rect x="30" y="170" width="220" height="80" rx="24" fill="#EEF2FF" filter="url(#softShadow)"/>
-            <text x="140" y="195" text-anchor="middle" dominant-baseline="central" fill="#3730A3" font-size="14" font-weight="800">🎨 Web (React/Vite)</text>
-            <text x="140" y="217" text-anchor="middle" dominant-baseline="central" fill="#4F46E5" font-size="11" font-weight="600">流式对话 · 工具步骤可视化</text>
-            <text x="140" y="235" text-anchor="middle" dominant-baseline="central" fill="#4F46E5" font-size="11" font-weight="600">技能工作台 · 账号绑定</text>
-        </g>
-      </g>
-      <text x="260" y="200" text-anchor="middle" fill="#60A5FA" font-size="10" font-weight="700">SSE/WS</text>
+  <!-- Onboarding -->
+  <g class="float-box" style="animation-delay:1.2s"><g class="hover-card" filter="url(#lightShadow)">
+    <rect x="70" y="395" width="200" height="75" rx="16" fill="#F3E8FF"/>
+    <text x="170" y="420" text-anchor="middle" fill="#6B21A8" font-size="14" font-weight="700">🚀 Onboarding</text>
+    <text x="170" y="440" text-anchor="middle" fill="#9333EA" font-size="10" font-weight="600">新用户三步引导</text>
+    <text x="170" y="458" text-anchor="middle" fill="#9333EA" font-size="9">昵称 → AI名称 → 确认</text>
+  </g></g>
 
-      <!-- 中央 FastAPI -->
-      <g class="hover-card">
-          <rect x="280" y="170" width="400" height="80" rx="32" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="2" filter="url(#softShadow)"/>
-          <text x="480" y="195" text-anchor="middle" dominant-baseline="central" fill="#1E293B" font-size="16" font-weight="800">⚡ FastAPI 后端核心</text>
-          <text x="480" y="217" text-anchor="middle" dominant-baseline="central" fill="#64748B" font-size="11" font-weight="600">认证鉴权 · 路由分发 · 管理 API</text>
-          <text x="480" y="235" text-anchor="middle" dominant-baseline="central" fill="#64748B" font-size="11" font-weight="600">astream_events 流式 · WebSocket 实时推送</text>
-      </g>
+  <!-- Main Agent -->
+  <g class="float-box" style="animation-delay:1.4s"><g class="hover-card" filter="url(#softShadow)">
+    <rect x="450" y="395" width="340" height="75" rx="16" fill="#FCE7F3" stroke="#FBCFE8" stroke-width="2"/>
+    <text x="620" y="420" text-anchor="middle" fill="#9D174D" font-size="14" font-weight="800">🤖 Main Agent (ReAct)</text>
+    <text x="620" y="440" text-anchor="middle" fill="#DB2777" font-size="11" font-weight="600">create_react_agent · 全部工具自主调用</text>
+    <text x="620" y="458" text-anchor="middle" fill="#EC4899" font-size="9">记账 · 日程 · 记忆 · 会话 · MCP · 天气 · 网页抓取</text>
+  </g></g>
 
-      <!-- 右侧小程序 -->
-      <g class="float-box" style="animation-delay: 1.0s">
-        <g class="hover-card">
-            <rect x="710" y="170" width="220" height="80" rx="24" fill="#DCFCE7" filter="url(#softShadow)"/>
-            <text x="820" y="195" text-anchor="middle" dominant-baseline="central" fill="#166534" font-size="14" font-weight="800">📱 微信小程序 (原生)</text>
-            <text x="820" y="217" text-anchor="middle" dominant-baseline="central" fill="#16A34A" font-size="11" font-weight="600">便携聊天 · 工具步骤可视化</text>
-            <text x="820" y="235" text-anchor="middle" dominant-baseline="central" fill="#16A34A" font-size="11" font-weight="600">订阅提醒 · Markdown</text>
-        </g>
-      </g>
-      <text x="700" y="200" text-anchor="middle" fill="#60A5FA" font-size="10" font-weight="700">SSE/WS</text>
+  <!-- 工具栏 -->
+  <g class="hover-card">
+    <rect x="350" y="490" width="540" height="38" rx="12" fill="#FEF9C3" stroke="#FDE047" stroke-width="1.5" filter="url(#lightShadow)"/>
+    <text x="620" y="506" text-anchor="middle" fill="#A16207" font-size="10" font-weight="700">🔧 ledger_* · schedule_* · memory_* · profile_* · conversation_* · fetch_url · maps_weather · mcp_*</text>
+    <text x="620" y="520" text-anchor="middle" fill="#CA8A04" font-size="8">tool_event 实时推送工具调用状态（start/done）到客户端</text>
+  </g>
 
-      <!-- Entry 条件路由 -->
-      <g class="hover-card">
-          <rect x="400" y="330" width="160" height="36" rx="18" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1.5"/>
-          <text x="480" y="348" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="13" font-weight="700">🔀 setup_stage 检查</text>
-      </g>
-      <text x="300" y="358" fill="#7C3AED" font-size="9" font-weight="700">stage &lt; 3</text>
-      <text x="650" y="358" fill="#059669" font-size="9" font-weight="700">stage ≥ 3</text>
+  <!-- 基础设施层 -->
+  <g class="float-box" style="animation-delay:.1s"><g class="hover-card" filter="url(#softShadow)">
+    <rect x="30" y="562" width="190" height="60" rx="20" fill="#E0F2FE"/>
+    <text x="125" y="586" text-anchor="middle" fill="#0369A1" font-size="14" font-weight="800">🐘 PostgreSQL</text>
+    <text x="125" y="606" text-anchor="middle" fill="#0284C7" font-size="11" font-weight="600">用户 · 账单 · 日程 · 记忆</text>
+  </g></g>
+  <g class="float-box" style="animation-delay:.3s"><g class="hover-card" filter="url(#softShadow)">
+    <rect x="266" y="562" width="190" height="60" rx="20" fill="#FFE4E6"/>
+    <text x="361" y="586" text-anchor="middle" fill="#BE123C" font-size="14" font-weight="800">🔴 Redis Stack</text>
+    <text x="361" y="606" text-anchor="middle" fill="#E11D48" font-size="11" font-weight="600">图状态游标 · 消息去重</text>
+  </g></g>
+  <g class="float-box" style="animation-delay:.5s"><g class="hover-card" filter="url(#softShadow)">
+    <rect x="502" y="562" width="190" height="60" rx="20" fill="#F3E8FF"/>
+    <text x="597" y="586" text-anchor="middle" fill="#6B21A8" font-size="14" font-weight="800">🤖 LLM (OpenAI)</text>
+    <text x="597" y="606" text-anchor="middle" fill="#9333EA" font-size="11" font-weight="600">GLM-4 · Vision · 结构化输出</text>
+  </g></g>
+  <g class="float-box" style="animation-delay:.7s"><g class="hover-card" filter="url(#softShadow)">
+    <rect x="738" y="562" width="190" height="60" rx="20" fill="#FEF9C3"/>
+    <text x="833" y="586" text-anchor="middle" fill="#A16207" font-size="14" font-weight="800">⏰ APScheduler</text>
+    <text x="833" y="606" text-anchor="middle" fill="#CA8A04" font-size="11" font-weight="600">定时提醒 · 异步多端广播</text>
+  </g></g>
 
-      <!-- Onboarding -->
-      <g class="float-box" style="animation-delay: 1.6s">
-        <g class="hover-card" filter="url(#lightShadow)">
-            <rect x="80" y="390" width="180" height="70" rx="16" fill="#F3E8FF" />
-            <text x="170" y="414" text-anchor="middle" dominant-baseline="central" fill="#6B21A8" font-size="13" font-weight="700">🚀 Onboarding</text>
-            <text x="170" y="436" text-anchor="middle" dominant-baseline="central" fill="#9333EA" font-size="10" font-weight="600">新用户三步引导</text>
-            <text x="170" y="452" text-anchor="middle" dominant-baseline="central" fill="#9333EA" font-size="9">昵称 → AI名称 → 确认</text>
-        </g>
-      </g>
+  <!-- MCP Fetch -->
+  <g class="float-box" style="animation-delay:.9s"><g class="hover-card">
+    <rect x="502" y="638" width="190" height="46" rx="16" fill="#F1F5F9" filter="url(#lightShadow)"/>
+    <text x="597" y="656" text-anchor="middle" fill="#334155" font-size="12" font-weight="800">🔌 MCP Fetch Tools</text>
+    <text x="597" y="672" text-anchor="middle" fill="#64748B" font-size="10" font-weight="600">网页抓取 · 天气 · 外部 API</text>
+  </g></g>
 
-      <!-- Main Agent -->
-      <g class="float-box" style="animation-delay: 1.8s">
-        <g class="hover-card" filter="url(#softShadow)">
-            <rect x="460" y="390" width="320" height="70" rx="16" fill="#FCE7F3" stroke="#FBCFE8" stroke-width="2"/>
-            <text x="620" y="414" text-anchor="middle" dominant-baseline="central" fill="#9D174D" font-size="14" font-weight="800">🤖 Main Agent (ReAct)</text>
-            <text x="620" y="436" text-anchor="middle" dominant-baseline="central" fill="#DB2777" font-size="11" font-weight="600">create_react_agent · 全部工具自主调用</text>
-            <text x="620" y="452" text-anchor="middle" dominant-baseline="central" fill="#EC4899" font-size="9">记账 · 日程 · 记忆 · 会话 · MCP · 天气 · 网页抓取</text>
-        </g>
-      </g>
+  <!-- Docker -->
+  <g class="hover-card">
+    <rect x="130" y="710" width="700" height="50" rx="16" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.5"/>
+    <text x="480" y="730" text-anchor="middle" fill="#475569" font-size="13" font-weight="800">🐳 Docker Compose 容器编排架构</text>
+    <text x="480" y="748" text-anchor="middle" fill="#94A3B8" font-size="11" font-weight="600">PostgreSQL 15 · Redis 7 · Memory Worker · GeWeChat 微信网关 · NapCat QQ 网关</text>
+  </g>
 
-      <!-- 工具集合 -->
-      <g class="hover-card">
-          <rect x="370" y="485" width="500" height="40" rx="12" fill="#FEF9C3" stroke="#FDE047" stroke-width="1.5" filter="url(#lightShadow)"/>
-          <text x="620" y="500" text-anchor="middle" dominant-baseline="central" fill="#A16207" font-size="11" font-weight="700">🔧 ledger_* · schedule_* · memory_* · profile_* · conversation_* · fetch_url · maps_weather · mcp_*</text>
-          <text x="620" y="516" text-anchor="middle" dominant-baseline="central" fill="#CA8A04" font-size="9">tool_event 实时推送工具调用状态（start/done）到客户端</text>
-      </g>
-
-      <!-- 基础设施层 -->
-      <g class="float-box" style="animation-delay: 0.1s">
-        <g class="hover-card" filter="url(#softShadow)">
-            <rect x="30" y="560" width="190" height="60" rx="20" fill="#E0F2FE" />
-            <text x="125" y="582" text-anchor="middle" dominant-baseline="central" fill="#0369A1" font-size="14" font-weight="800">🐘 PostgreSQL</text>
-            <text x="125" y="602" text-anchor="middle" dominant-baseline="central" fill="#0284C7" font-size="11" font-weight="600">用户 · 账单 · 日程 · 记忆</text>
-        </g>
-      </g>
-      <g class="float-box" style="animation-delay: 0.3s">
-        <g class="hover-card" filter="url(#softShadow)">
-            <rect x="266" y="560" width="190" height="60" rx="20" fill="#FFE4E6" />
-            <text x="361" y="582" text-anchor="middle" dominant-baseline="central" fill="#BE123C" font-size="14" font-weight="800">🔴 Redis Stack</text>
-            <text x="361" y="602" text-anchor="middle" dominant-baseline="central" fill="#E11D48" font-size="11" font-weight="600">图状态游标 · 消息去重</text>
-        </g>
-      </g>
-      <g class="float-box" style="animation-delay: 0.5s">
-        <g class="hover-card" filter="url(#softShadow)">
-            <rect x="502" y="560" width="190" height="60" rx="20" fill="#F3E8FF" />
-            <text x="597" y="582" text-anchor="middle" dominant-baseline="central" fill="#6B21A8" font-size="14" font-weight="800">🤖 LLM (OpenAI)</text>
-            <text x="597" y="602" text-anchor="middle" dominant-baseline="central" fill="#9333EA" font-size="11" font-weight="600">GLM-4 · Vision · 结构化输出</text>
-        </g>
-      </g>
-      <g class="float-box" style="animation-delay: 0.7s">
-        <g class="hover-card" filter="url(#softShadow)">
-            <rect x="738" y="560" width="190" height="60" rx="20" fill="#FEF9C3" />
-            <text x="833" y="582" text-anchor="middle" dominant-baseline="central" fill="#A16207" font-size="14" font-weight="800">⏰ APScheduler</text>
-            <text x="833" y="602" text-anchor="middle" dominant-baseline="central" fill="#CA8A04" font-size="11" font-weight="600">定时提醒 · 异步多端广播</text>
-        </g>
-      </g>
-
-      <!-- MCP Fetch -->
-      <g class="float-box" style="animation-delay: 0.9s">
-        <g class="hover-card">
-            <rect x="502" y="636" width="190" height="46" rx="16" fill="#F1F5F9" filter="url(#lightShadow)"/>
-            <text x="597" y="651" text-anchor="middle" dominant-baseline="central" fill="#334155" font-size="12" font-weight="800">🔌 MCP Fetch Tools</text>
-            <text x="597" y="668" text-anchor="middle" dominant-baseline="central" fill="#64748B" font-size="10" font-weight="600">网页抓取 · 天气 · 外部 API</text>
-        </g>
-      </g>
-
-      <!-- 底部 Docker -->
-      <g class="hover-card">
-          <rect x="130" y="710" width="700" height="50" rx="16" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1.5"/>
-          <text x="480" y="726" text-anchor="middle" dominant-baseline="central" fill="#475569" font-size="13" font-weight="800">🐳 Docker Compose 容器编排架构</text>
-          <text x="480" y="744" text-anchor="middle" dominant-baseline="central" fill="#94A3B8" font-size="11" font-weight="600">PostgreSQL 15 · Redis 7 · Memory Worker · GeWeChat 微信网关 · NapCat QQ 网关</text>
-      </g>
-
-    </svg>
+</svg>
