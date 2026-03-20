@@ -39,6 +39,9 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_message_limit INTEGER DEFAULT 0"))
             await conn.execute(text("ALTER TABLE users ALTER COLUMN monthly_message_limit SET DEFAULT 0"))
             await conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS conversation_id INTEGER"))
+            await conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS memory_status VARCHAR"))
+            await conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS memory_processed_at TIMESTAMPTZ"))
+            await conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS memory_error VARCHAR"))
             await conn.execute(
                 text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS memory_extracted_at TIMESTAMPTZ")
             )
@@ -52,6 +55,14 @@ async def init_db() -> None:
                 )
             )
             await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_conversation_id ON messages (conversation_id)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_memory_status ON messages (memory_status)"))
+            await conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_messages_memory_pending_scan "
+                    "ON messages (conversation_id, id) "
+                    "WHERE role = 'user' AND (memory_status IS NULL OR memory_status IN ('PENDING', 'FAILED'))"
+                )
+            )
             await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_active_conversation_id ON users (active_conversation_id)"))
             await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_users_is_blocked ON users (is_blocked)"))
             await conn.execute(

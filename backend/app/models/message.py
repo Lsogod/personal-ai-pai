@@ -14,6 +14,12 @@ class Message(SQLModel, table=True):
     role: str = Field(description="user/assistant/system")
     content: str = Field(default="")
     platform: str = Field(default="")
+    memory_status: Optional[str] = Field(default=None, index=True)
+    memory_processed_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    memory_error: Optional[str] = Field(default=None)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True), nullable=False),

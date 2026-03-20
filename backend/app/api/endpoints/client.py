@@ -81,6 +81,7 @@ from app.services.binding import (
 )
 from app.services.platforms import miniapp as miniapp_platform
 from app.services.message_handler import (
+    _has_pending_memory_messages,
     handle_message,
     schedule_conversation_memory_backfill,
 )
@@ -746,26 +747,14 @@ async def conversations_create(
     )
     if previous_conversation_id and previous_conversation_id != created.id:
         previous_conversation = await session.get(ConversationModel, int(previous_conversation_id))
-        latest_user_message_id = 0
-        if previous_conversation is not None:
-            latest_user_message_id = int(
-                (
-                    await session.execute(
-                        select(func.max(Message.id)).where(
-                            Message.user_id == int(user.id),
-                            Message.conversation_id == int(previous_conversation_id),
-                            Message.role == "user",
-                        )
-                    )
-                ).scalar_one()
-                or 0
-            )
-        processed_id = int(getattr(previous_conversation, "memory_last_processed_message_id", 0) or 0)
         if (
             previous_conversation is not None
             and int(previous_conversation.user_id or 0) == int(user.id)
-            and latest_user_message_id > 0
-            and processed_id < latest_user_message_id
+            and await _has_pending_memory_messages(
+                session=session,
+                user_id=int(user.id),
+                conversation_id=int(previous_conversation_id),
+            )
         ):
             schedule_conversation_memory_backfill(
                 user_id=int(user.id),
