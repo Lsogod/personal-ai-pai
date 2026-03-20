@@ -1,10 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 880" font-family="'Inter', system-ui, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 780" font-family="'Inter', system-ui, sans-serif">
   <defs>
-    <!-- 卡片外阴影 -->
     <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
       <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#94A3B8" flood-opacity="0.12"/>
     </filter>
-    <!-- 浅色内嵌阴影 -->
     <filter id="lightShadow" x="-10%" y="-10%" width="120%" height="120%">
       <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#94A3B8" flood-opacity="0.08"/>
     </filter>
@@ -15,6 +13,9 @@
     <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M 0 1 L 8 5 L 0 9 z" fill="#86EFAC" />
     </marker>
+    <marker id="arrow-pink" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#F9A8D4" />
+    </marker>
 
     <style>
       @keyframes dash { to { stroke-dashoffset: -32; } }
@@ -23,277 +24,208 @@
       .flow-line { stroke-dasharray: 8 8; animation: dash 2.5s linear infinite; }
       .pulse-node { animation: pulse 3s ease-in-out infinite; }
       .float-box { animation: float 4s ease-in-out infinite; }
-      .hover-card { 
-        transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.3s ease; 
-        transform-origin: center; 
+      .hover-card {
+        transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.3s ease;
+        transform-origin: center;
         transform-box: fill-box;
       }
-      .hover-card:hover { 
-        transform: scale(1.03); 
-        filter: drop-shadow(0 10px 15px rgba(148, 163, 184, 0.2)); 
+      .hover-card:hover {
+        transform: scale(1.03);
+        filter: drop-shadow(0 10px 15px rgba(148, 163, 184, 0.2));
       }
       text { pointer-events: none; }
     </style>
   </defs>
 
-  <rect width="960" height="880" rx="32" fill="#F8FAFC"/>
+  <rect width="960" height="780" rx="32" fill="#F8FAFC"/>
 
-  <text x="480" y="46" text-anchor="middle" fill="#1E293B" font-size="24" font-weight="800" letter-spacing="0.5">PAI · 智能体决策调度流程</text>
-  <text x="480" y="72" text-anchor="middle" fill="#64748B" font-size="13" font-weight="500">LangGraph StateGraph · LLM 意图分类 · MCP 工具协议 · 条件边路由 · Redis Checkpointer</text>
+  <!-- 标题 -->
+  <text x="480" y="46" text-anchor="middle" fill="#1E293B" font-size="24" font-weight="800" letter-spacing="0.5">PAI · 单 Agent 工作流</text>
+  <text x="480" y="72" text-anchor="middle" fill="#64748B" font-size="13" font-weight="500">LangGraph StateGraph · create_react_agent · astream_events 流式 · tool_event 实时推送</text>
 
+  <!-- Entry Point -->
   <g class="float-box" style="animation-delay:0s">
     <g class="hover-card">
-      <rect x="380" y="84" width="200" height="44" rx="22" fill="#FFFFFF" stroke="#818CF8" stroke-width="2" filter="url(#softShadow)"/>
-      <text x="480" y="111" text-anchor="middle" fill="#4F46E5" font-size="13" font-weight="800">▶ Entry Point</text>
+      <rect x="380" y="90" width="200" height="44" rx="22" fill="#FFFFFF" stroke="#818CF8" stroke-width="2" filter="url(#softShadow)"/>
+      <text x="480" y="117" text-anchor="middle" fill="#4F46E5" font-size="13" font-weight="800">▶ Entry Point</text>
     </g>
   </g>
-  <circle cx="480" cy="106" r="3" fill="#818CF8" class="pulse-node"/>
+  <circle cx="480" cy="112" r="3" fill="#818CF8" class="pulse-node"/>
 
-  <rect x="590" y="84" width="134" height="44" rx="12" fill="#EEF2FF" stroke="#C7D2FE" stroke-width="1.5"/>
-  <text x="657" y="103" text-anchor="middle" fill="#4F46E5" font-size="10" font-weight="700">set_entry_point</text>
-  <text x="657" y="118" text-anchor="middle" fill="#64748B" font-size="9">graph.ainvoke(state)</text>
+  <rect x="600" y="90" width="140" height="44" rx="12" fill="#EEF2FF" stroke="#C7D2FE" stroke-width="1.5"/>
+  <text x="670" y="109" text-anchor="middle" fill="#4F46E5" font-size="10" font-weight="700">set_entry_point</text>
+  <text x="670" y="124" text-anchor="middle" fill="#64748B" font-size="9">graph.ainvoke(state)</text>
 
-  <line x1="480" y1="128" x2="480" y2="166" class="flow-line" stroke="#818CF8" stroke-width="2" opacity="0.6"/>
+  <!-- Entry -> Condition -->
+  <line x1="480" y1="134" x2="480" y2="170" class="flow-line" stroke="#818CF8" stroke-width="2" opacity="0.6"/>
 
+  <!-- 条件判断 -->
   <g class="hover-card">
-    <rect x="280" y="162" width="400" height="84" rx="14" fill="#FFFFFF" stroke="#34D399" stroke-width="2" filter="url(#softShadow)"/>
-    <text x="480" y="190" text-anchor="middle" fill="#059669" font-size="15" font-weight="800">🔀 Router · 意图路由器</text>
-    <text x="480" y="210" text-anchor="middle" fill="#475569" font-size="11" font-weight="600">router_node() 意图分类  →  route_intent() 条件路由</text>
-    <text x="480" y="228" text-anchor="middle" fill="#64748B" font-size="10">上下文增强: conversation_context · has_image · has_pending_ledger · tool_catalog</text>
+    <rect x="340" y="170" width="280" height="54" rx="14" fill="#FFFFFF" stroke="#34D399" stroke-width="2" filter="url(#softShadow)"/>
+    <text x="480" y="193" text-anchor="middle" fill="#059669" font-size="14" font-weight="800">🔀 _route_setup()</text>
+    <text x="480" y="210" text-anchor="middle" fill="#475569" font-size="11" font-weight="600">user_setup_stage &lt; 3 ? → onboarding : agent</text>
   </g>
-  <circle cx="480" cy="190" r="3" fill="#34D399" class="pulse-node"/>
+  <circle cx="480" cy="193" r="3" fill="#34D399" class="pulse-node"/>
 
+  <!-- 说明框 -->
   <g class="hover-card" filter="url(#softShadow)">
-    <rect x="736" y="74" width="214" height="170" rx="12" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1.5" />
-    <text x="785" y="94" fill="#059669" font-size="11" font-weight="800">🧠 路由分层决策</text>
-    <line x1="746" y1="102" x2="940" y2="102" stroke="#CBD5E1" stroke-width="1"/>
-    <text x="746" y="116" fill="#B45309" font-size="9.5" font-weight="700">① 前置拦截 (router_node)</text>
-    <text x="756" y="128" fill="#64748B" font-size="9">setup_stage &lt; 3 → 跳过(由③处理)</text>
-    <text x="756" y="140" fill="#64748B" font-size="9">空消息且无图 → chat_manager</text>
-    <text x="746" y="156" fill="#B45309" font-size="9.5" font-weight="700">② LLM 意图分类</text>
-    <text x="756" y="168" fill="#64748B" font-size="9">_route_intent_with_llm()</text>
-    <text x="756" y="180" fill="#64748B" font-size="9">+context · +image · +pending</text>
-    <text x="756" y="192" fill="#64748B" font-size="9">输出允许意图 / unknown</text>
-    <text x="746" y="208" fill="#B45309" font-size="9.5" font-weight="700">③ 最终收敛 (route_intent)</text>
-    <text x="756" y="220" fill="#64748B" font-size="9">setup&lt;3→onboarding</text>
-    <text x="756" y="232" fill="#64748B" font-size="9">known直达 / unknown→complex_task</text>
+    <rect x="700" y="156" width="230" height="80" rx="12" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1.5"/>
+    <text x="720" y="176" fill="#059669" font-size="11" font-weight="800">🧠 简化路由</text>
+    <line x1="710" y1="184" x2="920" y2="184" stroke="#CBD5E1" stroke-width="1"/>
+    <text x="720" y="200" fill="#64748B" font-size="9">无 LLM 意图分类开销</text>
+    <text x="720" y="214" fill="#64748B" font-size="9">纯逻辑判断：setup_stage 检查</text>
+    <text x="720" y="228" fill="#64748B" font-size="9">Agent 自主决定工具调用</text>
   </g>
 
-  <line x1="680" y1="168" x2="736" y2="168" class="flow-line" stroke="#86EFAC" stroke-width="2" marker-end="url(#arrow-green)"/>
+  <line x1="620" y1="190" x2="700" y2="190" class="flow-line" stroke="#86EFAC" stroke-width="2" marker-end="url(#arrow-green)"/>
 
-  <text x="480" y="266" text-anchor="middle" fill="#64748B" font-size="10" font-weight="600">add_conditional_edges("router", route_intent)</text>
-
+  <!-- 条件分支 -->
   <g stroke="#CBD5E1" stroke-width="2" class="flow-line" opacity="0.6">
-    <path d="M 320 246 L 85 310" marker-end="url(#arrow)" style="animation-delay:.1s"/>    <!-- -> Onboarding -->
-    <path d="M 380 246 L 232 310" marker-end="url(#arrow)" style="animation-delay:.2s"/>   <!-- -> Ledger -->
-    <path d="M 440 246 L 381 310" marker-end="url(#arrow)" style="animation-delay:.3s"/>   <!-- -> Schedule -->
-    <path d="M 500 246 L 530 310" marker-end="url(#arrow)" style="animation-delay:.4s"/>   <!-- -> Chat -->
-    <path d="M 560 246 L 681 310" marker-end="url(#arrow)" style="animation-delay:.5s"/>   <!-- -> Skill -->
-    <path d="M 640 246 L 850 310" marker-end="url(#arrow)" style="animation-delay:.6s"/>   <!-- -> Help Center -->
-    <path d="M 600 246 L 842 456" marker-end="url(#arrow)" style="animation-delay:.7s"/>   <!-- -> Complex Task -->
+    <path d="M 400 224 L 160 280" marker-end="url(#arrow)" style="animation-delay:.1s"/>
+    <path d="M 560 224 L 480 280" marker-end="url(#arrow)" style="animation-delay:.2s"/>
   </g>
 
-  <text x="202" y="284" fill="#7C3AED" font-size="9" font-weight="700" transform="rotate(-15,202,284)">setup&lt;3</text>
-  <text x="306" y="284" fill="#059669" font-size="9" font-weight="700">ledger_mgr</text>
-  <text x="410" y="284" fill="#2563EB" font-size="9" font-weight="700">schedule_mgr</text>
-  <text x="515" y="284" fill="#DB2777" font-size="9" font-weight="700">chat_mgr</text>
-  <text x="620" y="284" fill="#D97706" font-size="9" font-weight="700">skill_mgr</text>
-  <text x="755" y="284" fill="#0891B2" font-size="9" font-weight="700">help_center</text>
-  <text x="740" y="340" fill="#B45309" font-size="9" font-weight="700">complex_task</text>
+  <text x="260" y="258" fill="#7C3AED" font-size="10" font-weight="700" transform="rotate(-12,260,258)">setup &lt; 3</text>
+  <text x="540" y="258" fill="#DB2777" font-size="10" font-weight="700">setup ≥ 3</text>
 
-  <!-- 节点层 -->
+  <!-- Onboarding -->
   <g class="float-box" style="animation-delay:0s">
     <g class="hover-card">
-      <rect x="20" y="310" width="130" height="140" rx="12" fill="#F3E8FF" stroke="#E9D5FF" stroke-width="1.5" filter="url(#softShadow)"/>
-      <text x="85" y="334" text-anchor="middle" fill="#6B21A8" font-size="12" font-weight="800">🚀 Onboarding</text>
-      <text x="85" y="348" text-anchor="middle" fill="#9333EA" font-size="9" font-weight="600">新用户引导</text>
-      <line x1="32" y1="358" x2="138" y2="358" stroke="#D8B4FE" stroke-width="1"/>
-      <text x="36" y="374" fill="#6B21A8" font-size="8">Step 1 设置昵称</text>
-      <text x="36" y="388" fill="#6B21A8" font-size="8">Step 2 命名 AI</text>
-      <text x="36" y="402" fill="#6B21A8" font-size="8">Step 3 选择表情</text>
-      <line x1="32" y1="412" x2="138" y2="412" stroke="#D8B4FE" stroke-width="1"/>
-      <text x="36" y="426" fill="#9333EA" font-size="8" font-style="italic">LLM 提取 → User</text>
-      <text x="36" y="440" fill="#9333EA" font-size="8" font-style="italic">stage 0→1→2→3</text>
+      <rect x="60" y="280" width="200" height="140" rx="12" fill="#F3E8FF" stroke="#E9D5FF" stroke-width="1.5" filter="url(#softShadow)"/>
+      <text x="160" y="304" text-anchor="middle" fill="#6B21A8" font-size="13" font-weight="800">🚀 Onboarding</text>
+      <text x="160" y="320" text-anchor="middle" fill="#9333EA" font-size="10" font-weight="600">onboarding_node()</text>
+      <line x1="72" y1="330" x2="248" y2="330" stroke="#D8B4FE" stroke-width="1"/>
+      <text x="80" y="346" fill="#6B21A8" font-size="9">Step 1 设置昵称</text>
+      <text x="80" y="362" fill="#6B21A8" font-size="9">Step 2 命名 AI</text>
+      <text x="80" y="378" fill="#6B21A8" font-size="9">Step 3 确认完成</text>
+      <line x1="72" y1="388" x2="248" y2="388" stroke="#D8B4FE" stroke-width="1"/>
+      <text x="80" y="404" fill="#9333EA" font-size="9" font-style="italic">关键词预匹配 + LLM 提取</text>
     </g>
   </g>
 
+  <!-- Main Agent -->
   <g class="float-box" style="animation-delay:.3s">
     <g class="hover-card">
-      <rect x="160" y="310" width="144" height="140" rx="12" fill="#DCFCE7" stroke="#BBF7D0" stroke-width="1.5" filter="url(#softShadow)"/>
-      <text x="232" y="334" text-anchor="middle" fill="#166534" font-size="12" font-weight="800">💰 Ledger Mgr</text>
-      <text x="232" y="348" text-anchor="middle" fill="#22C55E" font-size="9" font-weight="600">ledger_manager_node()</text>
-      <line x1="172" y1="358" x2="292" y2="358" stroke="#86EFAC" stroke-width="1"/>
-      <text x="176" y="374" fill="#166534" font-size="8">LLM 解析金额/分类</text>
-      <text x="176" y="388" fill="#166534" font-size="8">小票 OCR (Vision)</text>
-      <text x="176" y="402" fill="#166534" font-size="8">增/删/改/查 · Text2SQL</text>
-      <line x1="172" y1="412" x2="292" y2="412" stroke="#86EFAC" stroke-width="1"/>
-      <text x="176" y="426" fill="#22C55E" font-size="8" font-style="italic">pending_ledger 确认</text>
-      <text x="176" y="440" fill="#22C55E" font-size="8" font-style="italic">analyze_receipt()</text>
+      <rect x="310" y="280" width="360" height="140" rx="12" fill="#FCE7F3" stroke="#FBCFE8" stroke-width="2" filter="url(#softShadow)"/>
+      <text x="490" y="304" text-anchor="middle" fill="#9D174D" font-size="14" font-weight="800">🤖 Main Agent (ReAct)</text>
+      <text x="490" y="320" text-anchor="middle" fill="#EC4899" font-size="10" font-weight="600">main_agent_node() → create_react_agent()</text>
+      <line x1="322" y1="330" x2="658" y2="330" stroke="#F9A8D4" stroke-width="1"/>
+      <text x="330" y="346" fill="#9D174D" font-size="9">自主决策：根据用户消息自动选择工具</text>
+      <text x="330" y="362" fill="#9D174D" font-size="9">多工具链式调用：同一轮对话可调用多个工具</text>
+      <text x="330" y="378" fill="#9D174D" font-size="9">tool_event 推送：工具开始/完成状态实时通知客户端</text>
+      <line x1="322" y1="388" x2="658" y2="388" stroke="#F9A8D4" stroke-width="1"/>
+      <text x="330" y="404" fill="#DB2777" font-size="9" font-weight="700">astream_events(version="v2") 流式输出</text>
     </g>
   </g>
 
-  <g class="float-box" style="animation-delay:.6s">
-    <g class="hover-card">
-      <rect x="314" y="310" width="134" height="140" rx="12" fill="#DBEAFE" stroke="#BFDBFE" stroke-width="1.5" filter="url(#softShadow)"/>
-      <text x="381" y="334" text-anchor="middle" fill="#1E3A8A" font-size="12" font-weight="800">📅 Schedule Mgr</text>
-      <text x="381" y="348" text-anchor="middle" fill="#3B82F6" font-size="9" font-weight="600">schedule_manager_node()</text>
-      <line x1="326" y1="358" x2="436" y2="358" stroke="#93C5FD" stroke-width="1"/>
-      <text x="330" y="374" fill="#1E3A8A" font-size="8">自然语言→时间</text>
-      <text x="330" y="388" fill="#1E3A8A" font-size="8">APScheduler 持久化</text>
-      <text x="330" y="402" fill="#1E3A8A" font-size="8">日历查询(日/周/月)</text>
-      <line x1="326" y1="412" x2="436" y2="412" stroke="#93C5FD" stroke-width="1"/>
-      <text x="330" y="426" fill="#3B82F6" font-size="8" font-style="italic">send_reminder_job()</text>
-      <text x="330" y="440" fill="#3B82F6" font-size="8" font-style="italic">多端广播 + 投递记录</text>
-    </g>
-  </g>
+  <!-- Agent -> Tools 连线 -->
+  <line x1="490" y1="420" x2="490" y2="460" class="flow-line" stroke="#F472B6" stroke-width="2" opacity="0.6"/>
 
-  <g class="float-box" style="animation-delay:.9s">
-    <g class="hover-card">
-      <rect x="458" y="310" width="144" height="140" rx="12" fill="#FCE7F3" stroke="#FBCFE8" stroke-width="2" filter="url(#softShadow)"/>
-      <text x="530" y="334" text-anchor="middle" fill="#9D174D" font-size="12" font-weight="800">✍️ Chat Mgr + MCP</text>
-      <text x="530" y="348" text-anchor="middle" fill="#EC4899" font-size="9" font-weight="600">chat_manager_node()</text>
-      <line x1="470" y1="358" x2="590" y2="358" stroke="#F9A8D4" stroke-width="1"/>
-      <text x="474" y="374" fill="#9D174D" font-size="8">翻译/润色/写作/问答</text>
-      <text x="474" y="388" fill="#9D174D" font-size="8">天气查询 · 技能注入</text>
-      <text x="474" y="402" fill="#9D174D" font-size="8">通用问答 · 信息查询</text>
-      <line x1="470" y1="412" x2="590" y2="412" stroke="#F9A8D4" stroke-width="1"/>
-      <text x="474" y="426" fill="#DB2777" font-size="8" font-weight="700">↓ create_react_agent()</text>
-      <text x="474" y="440" fill="#EC4899" font-size="8" font-style="italic">tool_registry 动态发现</text>
-    </g>
+  <!-- Tool 集合 -->
+  <g stroke="#FDE047" stroke-width="2" class="flow-line" opacity="0.6">
+    <line x1="490" y1="480" x2="110" y2="510" style="animation-delay:.1s"/>
+    <line x1="490" y1="480" x2="250" y2="510" style="animation-delay:.2s"/>
+    <line x1="490" y1="480" x2="390" y2="510" style="animation-delay:.3s"/>
+    <line x1="490" y1="480" x2="530" y2="510" style="animation-delay:.4s"/>
+    <line x1="490" y1="480" x2="670" y2="510" style="animation-delay:.5s"/>
+    <line x1="490" y1="480" x2="830" y2="510" style="animation-delay:.6s"/>
   </g>
-
-  <g class="float-box" style="animation-delay:1.2s">
-    <g class="hover-card">
-      <rect x="612" y="310" width="138" height="140" rx="12" fill="#FFEDD5" stroke="#FED7AA" stroke-width="1.5" filter="url(#softShadow)"/>
-      <text x="681" y="334" text-anchor="middle" fill="#9A3412" font-size="12" font-weight="800">🎯 Skill Mgr</text>
-      <text x="681" y="348" text-anchor="middle" fill="#F97316" font-size="9" font-weight="600">skill_manager_node()</text>
-      <line x1="624" y1="358" x2="738" y2="358" stroke="#FDBA74" stroke-width="1"/>
-      <text x="628" y="374" fill="#9A3412" font-size="8">创建/更新技能草稿</text>
-      <text x="628" y="388" fill="#9A3412" font-size="8">发布 / 停用技能</text>
-      <text x="628" y="402" fill="#9A3412" font-size="8">查看技能内容</text>
-      <line x1="624" y1="412" x2="738" y2="412" stroke="#FDBA74" stroke-width="1"/>
-      <text x="628" y="426" fill="#F97316" font-size="8" font-style="italic">parse_skill_intent()</text>
-      <text x="628" y="440" fill="#F97316" font-size="8" font-style="italic">SKILL.md 模板</text>
-    </g>
-  </g>
-
-  <g class="float-box" style="animation-delay:1.5s">
-    <g class="hover-card">
-      <rect x="760" y="310" width="180" height="140" rx="12" fill="#CFFAFE" stroke="#A5F3FC" stroke-width="1.5" filter="url(#softShadow)"/>
-      <text x="850" y="334" text-anchor="middle" fill="#155E75" font-size="12" font-weight="800">📖 Help Center</text>
-      <text x="850" y="348" text-anchor="middle" fill="#06B6D4" font-size="9" font-weight="600">help_center_node()</text>
-      <line x1="772" y1="358" x2="928" y2="358" stroke="#67E8F9" stroke-width="1"/>
-      <text x="776" y="374" fill="#155E75" font-size="8">AGENT_GUIDE.md 知识库</text>
-      <text x="776" y="388" fill="#155E75" font-size="8">命令帮助说明</text>
-      <text x="776" y="402" fill="#155E75" font-size="8">工具能力概览</text>
-      <line x1="772" y1="412" x2="928" y2="412" stroke="#67E8F9" stroke-width="1"/>
-      <text x="776" y="426" fill="#06B6D4" font-size="8" font-style="italic">_load_help_doc()</text>
-      <text x="776" y="440" fill="#06B6D4" font-size="8" font-style="italic">tool_registry 注入</text>
-    </g>
-  </g>
-
-  <g class="float-box" style="animation-delay:1.7s">
-    <g class="hover-card">
-      <rect x="748" y="456" width="188" height="76" rx="14" fill="#FEF9C3" stroke="#FDE047" stroke-width="1.5" filter="url(#softShadow)"/>
-      <text x="842" y="478" text-anchor="middle" fill="#A16207" font-size="12" font-weight="800">🧠 Complex Task</text>
-      <text x="842" y="492" text-anchor="middle" fill="#CA8A04" font-size="9" font-weight="600">complex_task_node()</text>
-      <line x1="760" y1="498" x2="924" y2="498" stroke="#FDE047" stroke-width="1"/>
-      <text x="764" y="512" fill="#A16207" font-size="8">单次结构化决策 + ReAct 执行</text>
-      <text x="764" y="526" fill="#CA8A04" font-size="8" font-style="italic">跨节点编排后统一汇总回复</text>
-    </g>
-  </g>
-
-  <!-- ReAct -->
-  <line x1="533" y1="450" x2="533" y2="478" class="flow-line" stroke="#F472B6" stroke-width="2" opacity="0.6"/>
 
   <g class="hover-card">
-    <rect x="468" y="478" width="130" height="34" rx="12" fill="#FFFFFF" stroke="#F472B6" stroke-width="2" filter="url(#softShadow)"/>
-    <text x="533" y="500" text-anchor="middle" fill="#DB2777" font-size="11" font-weight="800">🤖 ReAct Agent</text>
-    <circle cx="533" cy="495" r="2.5" fill="#DB2777" class="pulse-node"/>
+    <rect x="420" y="455" width="140" height="30" rx="10" fill="#FFFFFF" stroke="#F472B6" stroke-width="2" filter="url(#softShadow)"/>
+    <text x="490" y="474" text-anchor="middle" fill="#DB2777" font-size="11" font-weight="800">🔧 工具注册中心</text>
+    <circle cx="490" cy="470" r="2.5" fill="#DB2777" class="pulse-node"/>
   </g>
 
-  <line x1="533" y1="512" x2="380" y2="542" class="flow-line" stroke="#FDE047" stroke-width="2" opacity="0.6"/>
-  <line x1="533" y1="512" x2="472" y2="542" class="flow-line" stroke="#FDE047" stroke-width="2" opacity="0.6"/>
-  <line x1="533" y1="512" x2="564" y2="542" class="flow-line" stroke="#FDE047" stroke-width="2" opacity="0.6"/>
-  <line x1="533" y1="512" x2="656" y2="542" class="flow-line" stroke="#FDE047" stroke-width="2" opacity="0.6"/>
-
+  <!-- 各工具卡片 -->
   <g class="hover-card">
-    <rect x="338" y="542" width="84" height="30" rx="8" fill="#FEF9C3" stroke="#FDE047" stroke-width="1.5" filter="url(#lightShadow)"/>
-    <text x="380" y="561" text-anchor="middle" fill="#A16207" font-size="10" font-weight="700">⏱ now_time</text>
-  </g>
-  <g class="hover-card">
-    <rect x="430" y="542" width="84" height="30" rx="8" fill="#FEF9C3" stroke="#FDE047" stroke-width="1.5" filter="url(#lightShadow)"/>
-    <text x="472" y="561" text-anchor="middle" fill="#A16207" font-size="10" font-weight="700">📋 list_tools</text>
-  </g>
-  <g class="hover-card">
-    <rect x="522" y="542" width="84" height="30" rx="8" fill="#FEF9C3" stroke="#FDE047" stroke-width="1.5" filter="url(#lightShadow)"/>
-    <text x="564" y="561" text-anchor="middle" fill="#A16207" font-size="10" font-weight="700">🔧 call_tool</text>
-  </g>
-  <g class="hover-card">
-    <rect x="614" y="542" width="84" height="30" rx="8" fill="#FEF9C3" stroke="#FDE047" stroke-width="1.5" filter="url(#lightShadow)"/>
-    <text x="656" y="561" text-anchor="middle" fill="#A16207" font-size="10" font-weight="700">🌐 fetch_url</text>
+    <rect x="48" y="510" width="124" height="50" rx="10" fill="#DCFCE7" stroke="#BBF7D0" stroke-width="1.5" filter="url(#lightShadow)"/>
+    <text x="110" y="530" text-anchor="middle" fill="#166534" font-size="10" font-weight="800">💰 记账工具</text>
+    <text x="110" y="546" text-anchor="middle" fill="#22C55E" font-size="8">insert·update·delete</text>
+    <text x="110" y="556" text-anchor="middle" fill="#22C55E" font-size="8">text2sql·receipt</text>
   </g>
 
-  <line x1="472" y1="572" x2="533" y2="600" class="flow-line" stroke="#67E8F9" stroke-width="2" opacity="0.6"/>
-  <line x1="564" y1="572" x2="533" y2="600" class="flow-line" stroke="#67E8F9" stroke-width="2" opacity="0.6"/>
-  <line x1="656" y1="572" x2="533" y2="600" class="flow-line" stroke="#67E8F9" stroke-width="2" opacity="0.6"/>
+  <g class="hover-card">
+    <rect x="188" y="510" width="124" height="50" rx="10" fill="#DBEAFE" stroke="#BFDBFE" stroke-width="1.5" filter="url(#lightShadow)"/>
+    <text x="250" y="530" text-anchor="middle" fill="#1E3A8A" font-size="10" font-weight="800">📅 日程工具</text>
+    <text x="250" y="546" text-anchor="middle" fill="#3B82F6" font-size="8">insert·update·delete</text>
+    <text x="250" y="556" text-anchor="middle" fill="#3B82F6" font-size="8">list · APScheduler</text>
+  </g>
 
   <g class="hover-card">
-    <rect x="468" y="600" width="130" height="34" rx="12" fill="#FFFFFF" stroke="#22D3EE" stroke-width="2" filter="url(#softShadow)"/>
-    <text x="533" y="622" text-anchor="middle" fill="#0891B2" font-size="11" font-weight="800">🔌 MCP Fetch Server</text>
-    <circle cx="533" cy="617" r="2.5" fill="#0891B2" class="pulse-node"/>
+    <rect x="328" y="510" width="124" height="50" rx="10" fill="#F3E8FF" stroke="#E9D5FF" stroke-width="1.5" filter="url(#lightShadow)"/>
+    <text x="390" y="530" text-anchor="middle" fill="#6B21A8" font-size="10" font-weight="800">🧠 记忆工具</text>
+    <text x="390" y="546" text-anchor="middle" fill="#9333EA" font-size="8">memory_list</text>
+    <text x="390" y="556" text-anchor="middle" fill="#9333EA" font-size="8">profile query·update</text>
   </g>
-  <text x="612" y="622" fill="#64748B" font-size="8" font-style="italic">Streamable HTTP · JSON-RPC 2.0</text>
 
-  <!-- Flow down to END -->
+  <g class="hover-card">
+    <rect x="468" y="510" width="124" height="50" rx="10" fill="#FFEDD5" stroke="#FED7AA" stroke-width="1.5" filter="url(#lightShadow)"/>
+    <text x="530" y="530" text-anchor="middle" fill="#9A3412" font-size="10" font-weight="800">💬 会话工具</text>
+    <text x="530" y="546" text-anchor="middle" fill="#F97316" font-size="8">conversation_current</text>
+    <text x="530" y="556" text-anchor="middle" fill="#F97316" font-size="8">conversation_list</text>
+  </g>
+
+  <g class="hover-card">
+    <rect x="608" y="510" width="124" height="50" rx="10" fill="#CFFAFE" stroke="#A5F3FC" stroke-width="1.5" filter="url(#lightShadow)"/>
+    <text x="670" y="530" text-anchor="middle" fill="#155E75" font-size="10" font-weight="800">🌐 网络工具</text>
+    <text x="670" y="546" text-anchor="middle" fill="#06B6D4" font-size="8">fetch_url</text>
+    <text x="670" y="556" text-anchor="middle" fill="#06B6D4" font-size="8">maps_weather</text>
+  </g>
+
+  <g class="hover-card">
+    <rect x="768" y="510" width="124" height="50" rx="10" fill="#FEF9C3" stroke="#FDE047" stroke-width="1.5" filter="url(#lightShadow)"/>
+    <text x="830" y="530" text-anchor="middle" fill="#A16207" font-size="10" font-weight="800">🔌 MCP 工具</text>
+    <text x="830" y="546" text-anchor="middle" fill="#CA8A04" font-size="8">mcp_list_tools</text>
+    <text x="830" y="556" text-anchor="middle" fill="#CA8A04" font-size="8">mcp_call_tool</text>
+  </g>
+
+  <!-- 工具 -> MCP Server -->
+  <line x1="830" y1="560" x2="830" y2="590" class="flow-line" stroke="#67E8F9" stroke-width="2" opacity="0.6"/>
+  <g class="hover-card">
+    <rect x="750" y="590" width="160" height="34" rx="12" fill="#FFFFFF" stroke="#22D3EE" stroke-width="2" filter="url(#softShadow)"/>
+    <text x="830" y="612" text-anchor="middle" fill="#0891B2" font-size="11" font-weight="800">🔌 MCP Fetch Server</text>
+    <circle cx="830" cy="607" r="2.5" fill="#0891B2" class="pulse-node"/>
+  </g>
+  <text x="830" y="640" text-anchor="middle" fill="#64748B" font-size="8" font-style="italic">Streamable HTTP · JSON-RPC 2.0</text>
+
+  <!-- 流向 END -->
   <g class="flow-line" stroke="#CBD5E1" stroke-width="2" opacity="0.6">
-    <path d="M 88 450 L 88 672" />
-    <path d="M 240 450 L 240 672" />
-    <path d="M 390 450 L 390 672" />
-    <path d="M 684 450 L 684 672" />
-    <path d="M 851 450 L 851 672" />
-    <path d="M 842 532 L 842 672" />
-    <path d="M 533 634 L 533 672" />
+    <path d="M 160 420 L 160 652" />
+    <path d="M 490 420 L 490 440 L 490 560 L 490 652" />
   </g>
 
-  <line x1="88" y1="672" x2="851" y2="672" stroke="#E2E8F0" stroke-width="2"/>
-  <text x="480" y="666" text-anchor="middle" fill="#64748B" font-size="10" font-weight="600">add_edge("node", END)</text>
+  <line x1="160" y1="652" x2="490" y2="652" stroke="#E2E8F0" stroke-width="2"/>
+  <text x="340" y="646" text-anchor="middle" fill="#64748B" font-size="10" font-weight="600">add_edge("node", END)</text>
 
-  <line x1="480" y1="672" x2="480" y2="702" class="flow-line" stroke="#CBD5E1" stroke-width="2" opacity="0.6"/>
+  <line x1="340" y1="652" x2="340" y2="678" class="flow-line" stroke="#CBD5E1" stroke-width="2" opacity="0.6"/>
 
   <g class="hover-card">
-    <rect x="410" y="700" width="140" height="40" rx="20" fill="#FFFFFF" stroke="#F87171" stroke-width="2" filter="url(#softShadow)"/>
-    <text x="480" y="725" text-anchor="middle" fill="#DC2626" font-size="14" font-weight="800">🏁 END</text>
-    <circle cx="480" cy="720" r="3" fill="#DC2626" class="pulse-node"/>
+    <rect x="270" y="676" width="140" height="40" rx="20" fill="#FFFFFF" stroke="#F87171" stroke-width="2" filter="url(#softShadow)"/>
+    <text x="340" y="701" text-anchor="middle" fill="#DC2626" font-size="14" font-weight="800">🏁 END</text>
+    <circle cx="340" cy="696" r="3" fill="#DC2626" class="pulse-node"/>
   </g>
 
-  <line x1="480" y1="740" x2="480" y2="764" class="flow-line" stroke="#F87171" stroke-width="2" opacity="0.4"/>
-  <text x="480" y="778" text-anchor="middle" fill="#475569" font-size="11" font-weight="600">responses: List[str] → UnifiedSender → 多平台投递</text>
+  <line x1="340" y1="716" x2="340" y2="736" class="flow-line" stroke="#F87171" stroke-width="2" opacity="0.4"/>
+  <text x="340" y="750" text-anchor="middle" fill="#475569" font-size="11" font-weight="600">responses: List[str] → UnifiedSender → 多平台投递</text>
 
-  <!-- Infra -->
+  <!-- Infra 底部 -->
   <g class="hover-card">
-    <rect x="30" y="800" width="300" height="58" rx="14" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1.5" filter="url(#lightShadow)"/>
-    <text x="52" y="821" fill="#4F46E5" font-size="11" font-weight="800">📦 GraphState</text>
-    <text x="52" y="836" fill="#64748B" font-size="10" font-family="monospace">user_id · conversation_id · setup_stage</text>
-    <text x="52" y="850" fill="#64748B" font-size="10" font-family="monospace">message · intent · responses · extra</text>
+    <rect x="520" y="660" width="210" height="50" rx="14" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1.5" filter="url(#lightShadow)"/>
+    <text x="542" y="679" fill="#4F46E5" font-size="10" font-weight="800">📦 GraphState</text>
+    <text x="542" y="693" fill="#64748B" font-size="9" font-family="monospace">user_id · conv_id · setup_stage</text>
+    <text x="542" y="705" fill="#64748B" font-size="9" font-family="monospace">message · responses · extra</text>
   </g>
 
   <g class="hover-card">
-    <rect x="350" y="800" width="310" height="58" rx="14" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1.5" filter="url(#lightShadow)"/>
-    <text x="372" y="821" fill="#059669" font-size="11" font-weight="800">🗄️ 数据存储</text>
-    <text x="372" y="836" fill="#64748B" font-size="10" font-family="monospace">PostgreSQL: users / ledgers / schedules / skills ...</text>
-    <text x="372" y="850" fill="#64748B" font-size="10" font-family="monospace">Redis: checkpointer · pending_ledger · dedup</text>
-  </g>
-
-  <g class="hover-card">
-    <rect x="680" y="800" width="250" height="58" rx="14" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1.5" filter="url(#lightShadow)"/>
-    <text x="702" y="821" fill="#1E293B" font-size="11" font-weight="800">📐 图例</text>
-    <line x1="742" y1="820" x2="772" y2="820" stroke="#34D399" stroke-width="2" stroke-dasharray="6 4"/>
-    <text x="780" y="823" fill="#64748B" font-size="9" font-weight="600">条件边 (conditional_edges)</text>
-    <line x1="742" y1="836" x2="772" y2="836" stroke="#FBBF24" stroke-width="2" stroke-dasharray="6 4"/>
-    <text x="780" y="839" fill="#64748B" font-size="9" font-weight="600">工具调用 (ReAct → MCP)</text>
-    <circle cx="750" cy="852" r="2.5" fill="#DB2777" class="pulse-node"/>
-    <text x="780" y="855" fill="#64748B" font-size="9" font-weight="600">脉冲节点 = 核心决策点</text>
+    <rect x="740" y="660" width="200" height="50" rx="14" fill="#F1F5F9" stroke="#E2E8F0" stroke-width="1.5" filter="url(#lightShadow)"/>
+    <text x="760" y="679" fill="#1E293B" font-size="10" font-weight="800">📐 图例</text>
+    <line x1="800" y1="678" x2="830" y2="678" stroke="#34D399" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="838" y="681" fill="#64748B" font-size="8" font-weight="600">条件边</text>
+    <line x1="800" y1="694" x2="830" y2="694" stroke="#FBBF24" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="838" y="697" fill="#64748B" font-size="8" font-weight="600">工具调用</text>
+    <circle cx="808" cy="706" r="2.5" fill="#DB2777" class="pulse-node"/>
+    <text x="838" y="709" fill="#64748B" font-size="8" font-weight="600">核心决策点</text>
   </g>
 
 </svg>

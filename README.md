@@ -35,21 +35,22 @@
 | **微信小程序** | 独立客户端 | `wx.login` + JWT，支持在线 WS 与离线订阅提醒 |
 | **Web** | 独立客户端 | React SPA，支持 SSE 流式对话 |
 
-### 🧠 LangGraph 智能工作流
-基于 LangGraph 的有向图工作流，通过 LLM 自动识别用户意图并路由到专业节点：
+### 🧠 单 Agent 架构（create_react_agent）
+基于 LangGraph `create_react_agent` 的统一智能体，**一个 Agent 拥有所有工具**，自主决策调用：
 
 <p align="center">
-  <img src="docs/agent-workflow.svg" alt="PAI 智能体决策调度流程图" width="100%"/>
+  <img src="docs/agent-workflow.svg" alt="PAI 单 Agent 工作流" width="100%"/>
 </p>
 
-- **🔀 Router** — 单次 LLM 路由分类（含 pending ledger / pending complex 上下文）
-- **💰 Ledger Manager** — 记账、消费统计、小票 OCR 识别
-- **📅 Schedule Manager** — 日程管理、定时提醒（APScheduler 持久化 · 多端广播投递）
-- **✨️ Chat Manager** — 翻译、润色、写作、通用问答、MCP 工具调用、天气查询
-- **🎯 Skill Manager** — 用户自定义技能的创建/更新/发布
-- **📖 Help Center** — 使用指南、命令帮助、工具能力概览（加载 knowledge/AGENT_GUIDE.md）
-- **🧠 Complex Task** — 复杂任务编排（单次结构化决策 + ReAct Subagent 执行）
-- **🚀 Onboarding** — 新用户三步引导流程
+- **🤖 Main Agent** — 单一 ReAct Agent，自主调用所有工具，无需预分类路由
+- **💰 记账工具** — `ledger_insert` / `ledger_update` / `ledger_delete` / `ledger_text2sql` / `analyze_receipt`
+- **📅 日程工具** — `schedule_insert` / `schedule_update` / `schedule_delete` / `schedule_list`
+- **🧠 记忆工具** — `memory_list` / `update_user_profile` / `query_user_profile`
+- **💬 会话工具** — `conversation_current` / `conversation_list`
+- **🌐 外部工具** — `fetch_url` / `maps_weather` / `mcp_list_tools` / `mcp_call_tool`
+- **🚀 Onboarding** — 新用户三步引导流程（setup_stage < 3 时前置拦截）
+
+> **与分领域节点版本的区别**：main 分支采用 Router + 6 个专业节点的分领域架构，需要 LLM 先做意图分类再路由；本分支用单一 Agent 替代全部节点，由 Agent 自主决定调用哪些工具，架构更简洁、延迟更低、跨领域任务无需编排。详见 [分支对比](#-分支说明)。
 
 <details>
 <summary>📊 完整数据流（点击展开）</summary>
@@ -58,33 +59,28 @@
 flowchart TB
     A["多端输入(Web / Telegram / Feishu / WeChat / QQ)"] --> B["Gateway / MessageHandler\n统一为 UnifiedMessage"]
     B --> C["LangGraph 入口"]
-    C --> D["router_node\nLLM 意图分类"]
-    D --> E{"route_intent"}
+    C --> D{"setup_stage < 3 ?"}
 
-    E -->|setup_stage < 3| N1["onboarding_node"]
-    E -->|skill_manager| N2["skill_manager_node"]
-    E -->|ledger_manager| N3["ledger_manager_node"]
-    E -->|schedule_manager| N4["schedule_manager_node"]
-    E -->|help_center| N5["help_center_node"]
-    E -->|chat_manager| N6["chat_manager_node"]
-    E -->|complex_task| N7["complex_task_node"]
+    D -->|是| N1["onboarding_node\n新用户引导"]
+    D -->|否| AG["🤖 Main Agent\ncreate_react_agent"]
 
-    N1 --> DB[(PostgreSQL users)]
-    N2 --> DB
-    N3 --> DB[(PostgreSQL ledgers / messages)]
-    N4 --> DB[(PostgreSQL schedules)]
-    N4 --> SCH["Scheduler"]
-    SCH --> PUSH["send_reminder_job\n消息推送"]
-    N5 --> DOC["AGENT_GUIDE + 技能/工具目录"]
-    N6 --> AG["LangGraph ReAct Agent"]
-    N7 --> ORCH["LLM 决策 + ReAct Subagent"]
+    AG --> T1["⏱ now_time"]
+    AG --> T2["🌐 fetch_url"]
+    AG --> T3["🌤 maps_weather"]
+    AG --> T4["💰 ledger_*"]
+    AG --> T5["📅 schedule_*"]
+    AG --> T6["🧠 memory_list"]
+    AG --> T7["👤 profile_*"]
+    AG --> T8["💬 conversation_*"]
+    AG --> T9["🔌 mcp_*"]
 
-    AG --> T1["now_time"]
-    AG --> T2["fetch_url"]
-    AG --> T3["mcp_list_tools"]
-    AG --> T4["mcp_call_tool"]
-    T3 --> MCP["MCP Fetch Server"]
-    T4 --> MCP
+    T9 --> MCP["MCP Fetch Server"]
+
+    N1 --> DB[(PostgreSQL)]
+    T4 --> DB
+    T5 --> DB
+    T5 --> SCH["APScheduler\n定时提醒"]
+    SCH --> PUSH["send_reminder_job\n多端广播"]
 ```
 
 </details>
@@ -104,7 +100,7 @@ flowchart TB
 - **JWT 认证** — Web 端安全登录/注册
 - **WebSocket 实时推送** — 跨平台消息同步 & 定时提醒通知
 - **系统级 MCP（Fetch）** — 统一网页抓取工具，可在对话中自然语言触发或命令触发
-- **真流式输出（LangChain `astream`）** — 仅流式推送终态自然语言节点，执行细节写入后端日志
+- **真流式输出（LangChain `astream_events`）** — Agent 工具调用实时推送工具步骤事件，终态文本流式输出
 - **分层记忆系统** — 会话短期上下文 + 用户级长期记忆（当前主链路注入全部有效长期记忆，排除身份档案项）
 - **长期记忆双通道写入** — 对话后异步抽取 + `memory_worker` 定时补扫未处理消息（支持已处理游标）
 - **管理后台（`/admin`）** — 用户/会话回放/工具开关/长期记忆清洗/首页弹窗配置
@@ -156,11 +152,10 @@ pai/
 │   │   ├── core/               # 配置 & 安全
 │   │   ├── db/                 # 数据库初始化 & 会话
 │   │   ├── graph/              # LangGraph 工作流
-│   │   │   ├── workflow.py     # 图构建 & Checkpointer
+│   │   │   ├── workflow.py     # 图构建 (entry → onboarding / agent)
 │   │   │   ├── state.py        # 状态定义
 │   │   │   ├── context.py      # 会话上下文渲染
-│   │   │   ├── prompts/        # 节点提示词模板（ledger/schedule）
-│   │   │   └── nodes/          # 各意图处理节点
+│   │   │   └── nodes/          # main_agent (ReAct) + onboarding
 │   │   ├── models/             # SQLModel 数据模型
 │   │   ├── schemas/            # Pydantic 请求/响应模型 (+ mcp.py)
 │   │   ├── services/           # 业务逻辑层
@@ -448,6 +443,26 @@ cp miniapp/config.local.example.js miniapp/config.local.js
 | `TIMEZONE` | - | `Asia/Shanghai` | 时区 |
 
 > 完整变量列表见 `.env.example`。
+
+---
+
+## 🌿 分支说明
+
+| 分支 | 架构 | 说明 |
+|------|------|------|
+| **`main`** | 分领域节点（Router + 6 专业节点） | 稳定版本。LLM 先做意图分类，再路由到 Ledger/Schedule/Chat/Skill/Help/Complex 等专业节点处理 |
+| **`feat/single-agent`** ⬅ 当前 | 单 Agent（create_react_agent） | 实验版本。一个 ReAct Agent 拥有全部工具，自主决策调用，无需路由分类 |
+
+### 单 Agent 分支的优势
+- **更低延迟** — 省去 Router LLM 意图分类调用，直接进入 Agent 决策
+- **跨领域任务更自然** — 无需 Complex Task 编排，Agent 自主组合多个工具（如同时记账+设提醒）
+- **架构更简洁** — 从 7 个节点简化为 entry → onboarding / agent 两条路径
+- **工具步骤可视化** — 小程序和 Web 端实时显示 Agent 正在调用的工具及进度
+
+### main 分支的优势
+- **意图隔离性强** — 各领域节点 prompt 独立优化，互不干扰
+- **路由可控** — 明确的意图分类结果，便于审计和调试
+- **节点级扩展** — 新增领域只需添加节点和路由，不影响其他节点
 
 ---
 
