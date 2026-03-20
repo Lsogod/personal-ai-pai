@@ -462,7 +462,7 @@ def build_langchain_tools(
             status: str = "PENDING",
             job_id: str = "",
         ) -> str:
-            """创建一条日程提醒，并返回 JSON 行数据。trigger_time 支持绝对时间（YYYY-MM-DD HH:MM:SS）和相对时间（如 '10秒后'、'5分钟后'、'2小时后'、'3天后'）。"""
+            """创建一条日程提醒，并返回 JSON 行数据。trigger_time 格式：YYYY-MM-DD HH:MM:SS。"""
             return await _run_tool(
                 context=context,
                 source="builtin",

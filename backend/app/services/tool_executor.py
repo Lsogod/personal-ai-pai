@@ -173,94 +173,36 @@ def _is_date_only_text(value: Any) -> bool:
     return len(normalized) == 10 and normalized.count("-") == 2 and ":" not in normalized
 
 
-def _parse_natural_time(text: str) -> datetime | None:
-    """Parse natural language time expressions using dateparser.
-
-    Supports Chinese and English, relative and absolute:
-      - '10秒后', '5分钟后', '2小时后', '3天后', '半小时后'
-      - '明天下午3点', '下周一上午10点', '后天晚上8点半'
-      - 'in 10 minutes', 'next Monday 10am', 'tomorrow 3pm'
-    Returns local naive datetime or None.
-    """
-    raw = (text or "").strip()
-    if not raw:
-        return None
-    try:
-        import dateparser
-    except ImportError:
-        return None
-
-    tz_name = get_settings().timezone
-    settings: dict[str, Any] = {
-        "TIMEZONE": tz_name,
-        "TO_TIMEZONE": tz_name,
-        "RETURN_AS_TIMEZONE_AWARE": False,
-        "PREFER_DATES_FROM": "future",
-        "PREFER_DAY_OF_MONTH": "current",
-    }
-    result = dateparser.parse(raw, languages=["zh", "en"], settings=settings)
-    if result is not None:
-        return result
-
-    # dateparser may struggle with trailing '后' — try stripping it
-    stripped = raw.rstrip("后").strip()
-    if stripped != raw and stripped:
-        result = dateparser.parse(stripped, languages=["zh", "en"], settings=settings)
-        if result is not None:
-            return result
-
-    return None
-
-
 def _parse_local_naive_arg(value: Any) -> datetime | None:
     normalized = _normalize_datetime_text(value)
     if not normalized:
         return None
-    # 1. Try ISO format first (fastest path for absolute timestamps)
-    iso_result = None
-    iso_normalized = normalized
-    if iso_normalized.endswith("Z"):
-        iso_normalized = iso_normalized[:-1] + "+00:00"
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
     try:
-        dt = datetime.fromisoformat(iso_normalized)
-        if dt.tzinfo is None:
-            iso_result = dt
-        else:
-            local_tz = ZoneInfo(get_settings().timezone)
-            iso_result = dt.astimezone(local_tz).replace(tzinfo=None)
+        dt = datetime.fromisoformat(normalized)
     except Exception:
-        pass
-    if iso_result is not None:
-        return iso_result
-    # 2. Try natural language parsing (relative & absolute)
-    natural = _parse_natural_time(str(value or "").strip())
-    if natural is not None:
-        return natural
-    return None
+        return None
+    if dt.tzinfo is None:
+        return dt
+    local_tz = ZoneInfo(get_settings().timezone)
+    return dt.astimezone(local_tz).replace(tzinfo=None)
 
 
 def _parse_utc_naive_arg(value: Any) -> datetime | None:
     normalized = _normalize_datetime_text(value)
     if not normalized:
         return None
-    # 1. Try ISO format first
-    iso_normalized = normalized
-    if iso_normalized.endswith("Z"):
-        iso_normalized = iso_normalized[:-1] + "+00:00"
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
     try:
-        dt = datetime.fromisoformat(iso_normalized)
-        if dt.tzinfo is not None:
-            return dt.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
-        local_tz = ZoneInfo(get_settings().timezone)
-        return dt.replace(tzinfo=local_tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+        dt = datetime.fromisoformat(normalized)
     except Exception:
-        pass
-    # 2. Try natural language parsing → local naive → convert to UTC
-    natural = _parse_natural_time(str(value or "").strip())
-    if natural is not None:
-        local_tz = ZoneInfo(get_settings().timezone)
-        return natural.replace(tzinfo=local_tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
-    return None
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+    local_tz = ZoneInfo(get_settings().timezone)
+    return dt.replace(tzinfo=local_tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
 
 
 def _ledger_to_payload(row: Ledger) -> dict[str, Any]:
