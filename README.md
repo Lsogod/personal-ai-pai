@@ -187,12 +187,13 @@ pai/
 │   ├── pages/
 │   │   ├── login/              # 小程序登录
 │   │   ├── home/               # 首页入口
-│   │   ├── chat/               # 聊天 (流式 WS + 多图 + Markdown)
-│   │   ├── ledger/             # 账单列表与统计
+│   │   ├── chat/               # 聊天 (流式 WS + 多图 + Markdown + 工具步骤)
+│   │   ├── ledger/             # 账单列表与筛选统计
 │   │   ├── calendar/           # 日历 (日程+账单聚合)
-│   │   ├── me/                 # 个人中心与账号设置
-│   │   ├── skills/             # 技能管理
-│   │   └── bindmgr/            # 跨平台绑定管理
+│   │   └── me/                 # 个人中心与账号设置
+│   │       ├── binding/        # 跨平台身份绑定管理
+│   │       ├── skills/         # 技能管理
+│   │       └── feedback/       # 问题反馈
 │   ├── utils/                  # 工具库
 │   │   ├── auth.js             # 登录 & Token 管理
 │   │   ├── http.js             # 请求封装
@@ -249,9 +250,18 @@ pai/
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/api/ledgers?limit=20` | 获取账单列表 |
+| POST | `/api/ledgers` | 创建账单 |
 | PATCH | `/api/ledgers/{ledger_id}` | 修改账单 |
 | DELETE | `/api/ledgers/{ledger_id}` | 删除账单 |
 | GET | `/api/stats/ledger` | 账单统计概览 |
+
+### 日程
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/schedules` | 获取日程列表 |
+| POST | `/api/schedules` | 创建日程 |
+| PATCH | `/api/schedules/{schedule_id}` | 修改日程 |
+| DELETE | `/api/schedules/{schedule_id}` | 删除日程 |
 
 ### 日历
 | 方法 | 路径 | 说明 |
