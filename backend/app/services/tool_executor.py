@@ -12,13 +12,14 @@ from sqlalchemy import delete, select
 from app.core.config import get_settings
 from app.models.conversation import Conversation
 from app.models.ledger import Ledger
+from app.models.memory import LongTermMemory
 from app.models.message import Message
 from app.models.reminder_delivery import ReminderDelivery
 from app.models.schedule import Schedule
 from app.models.user import User
 from app.services.admin_tools import is_tool_enabled
 from app.services.conversations import ensure_active_conversation, list_conversations
-from app.services.memory import list_long_term_memories, upsert_long_term_memories
+from app.services.memory import find_active_long_term_memory, list_long_term_memories, upsert_long_term_memories
 from app.services.mcp_fetch import get_mcp_client_for_tool, get_mcp_fetch_client
 from app.services.runtime_context import get_scheduler, get_session, get_tool_message_id
 from app.services.scheduler_tasks import send_reminder_job
@@ -128,6 +129,18 @@ async def _mark_source_message_memory_processed(
             conversation.memory_extracted_at = datetime.now(ZoneInfo("UTC"))
             session.add(conversation)
     await session.commit()
+
+
+def _long_term_memory_to_payload(row: LongTermMemory) -> dict[str, Any]:
+    return {
+        "id": int(row.id or 0),
+        "memory_key": str(row.memory_key or ""),
+        "memory_type": str(row.memory_type or ""),
+        "content": str(row.content or ""),
+        "importance": int(row.importance or 3),
+        "confidence": round(float(row.confidence or 0.0), 3),
+        "updated_at": _to_client_tz_iso(getattr(row, "updated_at", None), assume_utc=True),
+    }
 
 
 def _try_parse_json_payload(text: str) -> Any | None:
@@ -722,6 +735,126 @@ async def execute_capability(
                     True,
                     output=json.dumps(payload, ensure_ascii=False),
                     output_data=payload,
+                )
+
+            if tool_l == "memory_append":
+                uid = _resolve_user_id(params.get("user_id", user_id))
+                if uid <= 0:
+                    return _result(False, error="missing required arg: user_id")
+                append_text = str(params.get("content") or "").strip()
+                if not append_text:
+                    return _result(False, error="missing required arg: content")
+                memory_id = _resolve_user_id(params.get("memory_id")) or None
+                memory_key = str(params.get("memory_key") or "").strip()
+                target_hint = str(params.get("target_hint") or "").strip()
+                memory_type = str(params.get("memory_type") or "").strip().lower()
+                separator = str(params.get("separator") or "；").strip() or "；"
+                session = get_session()
+                target = await find_active_long_term_memory(
+                    session=session,
+                    user_id=uid,
+                    memory_id=memory_id,
+                    memory_key=memory_key,
+                    content_hint=target_hint,
+                    memory_type=memory_type,
+                )
+                if target is None:
+                    return _result(False, error="target memory not found")
+
+                current_content = str(target.content or "").strip()
+                if append_text in current_content:
+                    source_message_id = _resolve_user_id(params.get("source_message_id") or get_tool_message_id()) or None
+                    await _mark_source_message_memory_processed(
+                        session=session,
+                        user_id=uid,
+                        conversation_id=conversation_id,
+                        source_message_id=source_message_id,
+                    )
+                    payload = {
+                        "status": "unchanged",
+                        "memory": _long_term_memory_to_payload(target),
+                    }
+                    return _result(
+                        True,
+                        output=json.dumps(payload, ensure_ascii=False),
+                        output_data=payload,
+                    )
+
+                target.content = f"{current_content}{separator}{append_text}" if current_content else append_text
+                importance_raw = params.get("importance")
+                if importance_raw is not None and str(importance_raw).strip() != "":
+                    try:
+                        target.importance = max(1, min(5, int(importance_raw)))
+                    except Exception:
+                        pass
+                confidence_raw = params.get("confidence")
+                if confidence_raw is not None and str(confidence_raw).strip() != "":
+                    try:
+                        target.confidence = max(0.0, min(1.0, float(confidence_raw)))
+                    except Exception:
+                        pass
+                ttl_days_raw = params.get("ttl_days")
+                if ttl_days_raw is not None and str(ttl_days_raw).strip() != "":
+                    try:
+                        ttl_days = max(1, int(ttl_days_raw))
+                        target.expires_at = datetime.now(ZoneInfo("UTC")) + timedelta(days=ttl_days)
+                    except Exception:
+                        pass
+                target.conversation_id = conversation_id
+                target.source_message_id = _resolve_user_id(params.get("source_message_id") or get_tool_message_id()) or None
+                target.updated_at = datetime.now(ZoneInfo("UTC"))
+                session.add(target)
+                await session.commit()
+                await session.refresh(target)
+                await _mark_source_message_memory_processed(
+                    session=session,
+                    user_id=uid,
+                    conversation_id=conversation_id,
+                    source_message_id=target.source_message_id,
+                )
+                payload = {
+                    "status": "appended",
+                    "memory": _long_term_memory_to_payload(target),
+                }
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
+
+            if tool_l == "memory_delete":
+                uid = _resolve_user_id(params.get("user_id", user_id))
+                if uid <= 0:
+                    return _result(False, error="missing required arg: user_id")
+                memory_id = _resolve_user_id(params.get("memory_id")) or None
+                memory_key = str(params.get("memory_key") or "").strip()
+                target_hint = str(params.get("target_hint") or "").strip()
+                memory_type = str(params.get("memory_type") or "").strip().lower()
+                session = get_session()
+                target = await find_active_long_term_memory(
+                    session=session,
+                    user_id=uid,
+                    memory_id=memory_id,
+                    memory_key=memory_key,
+                    content_hint=target_hint,
+                    memory_type=memory_type,
+                )
+                if target is None:
+                    return _result(False, error="target memory not found")
+                payload = _long_term_memory_to_payload(target)
+                source_message_id = _resolve_user_id(params.get("source_message_id") or get_tool_message_id()) or None
+                await session.delete(target)
+                await session.commit()
+                await _mark_source_message_memory_processed(
+                    session=session,
+                    user_id=uid,
+                    conversation_id=conversation_id,
+                    source_message_id=source_message_id,
+                )
+                return _result(
+                    True,
+                    output=json.dumps({"status": "deleted", "memory": payload}, ensure_ascii=False),
+                    output_data={"status": "deleted", "memory": payload},
                 )
 
             if tool_l == "schedule_insert":

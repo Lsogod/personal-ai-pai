@@ -26,6 +26,8 @@ CONVERSATION_TOOL_NAMES: set[str] = {
     "conversation_list",
     "memory_list",
     "memory_save",
+    "memory_append",
+    "memory_delete",
 }
 
 LEDGER_TOOL_NAMES: set[str] = {

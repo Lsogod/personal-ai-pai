@@ -372,6 +372,62 @@ def build_langchain_tools(
 
         tools.append(memory_save_tool)
 
+    if _enabled("memory_append"):
+        @tool("memory_append")
+        async def memory_append_tool(
+            content: str,
+            memory_id: int | None = None,
+            memory_key: str = "",
+            target_hint: str = "",
+            memory_type: str = "",
+            separator: str = "；",
+            importance: int | None = None,
+            confidence: float | None = None,
+            ttl_days: int | None = None,
+        ) -> str:
+            """向一条已有长期记忆追加内容，并返回 JSON 结果。"""
+            return await _run_tool(
+                context=context,
+                source="builtin",
+                name="memory_append",
+                args={
+                    "content": content,
+                    "memory_id": memory_id,
+                    "memory_key": memory_key,
+                    "target_hint": target_hint,
+                    "memory_type": memory_type,
+                    "separator": separator,
+                    "importance": importance,
+                    "confidence": confidence,
+                    "ttl_days": ttl_days,
+                },
+            )
+
+        tools.append(memory_append_tool)
+
+    if _enabled("memory_delete"):
+        @tool("memory_delete")
+        async def memory_delete_tool(
+            memory_id: int | None = None,
+            memory_key: str = "",
+            target_hint: str = "",
+            memory_type: str = "",
+        ) -> str:
+            """删除一条已有长期记忆，并返回 JSON 结果。"""
+            return await _run_tool(
+                context=context,
+                source="builtin",
+                name="memory_delete",
+                args={
+                    "memory_id": memory_id,
+                    "memory_key": memory_key,
+                    "target_hint": target_hint,
+                    "memory_type": memory_type,
+                },
+            )
+
+        tools.append(memory_delete_tool)
+
     if _enabled("schedule_insert"):
         @tool("schedule_insert")
         async def schedule_insert_tool(

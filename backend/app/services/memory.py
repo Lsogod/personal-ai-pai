@@ -1026,6 +1026,104 @@ async def list_long_term_memories(
     return result
 
 
+async def find_active_long_term_memory(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    memory_id: int | None = None,
+    memory_key: str = "",
+    content_hint: str = "",
+    memory_type: str = "",
+) -> LongTermMemory | None:
+    settings = get_settings()
+    if not settings.long_term_memory_enabled:
+        return None
+
+    now = datetime.now(timezone.utc)
+    normalized_type = _normalize_memory_type(memory_type) if str(memory_type or "").strip() else ""
+    if memory_id is not None:
+        try:
+            target_id = int(memory_id)
+        except Exception:
+            target_id = 0
+        if target_id > 0:
+            row = await session.get(LongTermMemory, target_id)
+            if (
+                row is not None
+                and int(row.user_id or 0) == int(user_id)
+                and (row.expires_at is None or row.expires_at > now)
+                and not _is_identity_memory_candidate(
+                    memory_type=str(row.memory_type or ""),
+                    memory_key=str(row.memory_key or ""),
+                    content=str(row.content or ""),
+                )
+            ):
+                return row
+
+    normalized_key = _normalize_key(memory_key)
+    if normalized_key:
+        stmt = select(LongTermMemory).where(
+            LongTermMemory.user_id == user_id,
+            LongTermMemory.memory_key == normalized_key,
+            or_(LongTermMemory.expires_at.is_(None), LongTermMemory.expires_at > now),
+        )
+        row = (await session.execute(stmt)).scalar_one_or_none()
+        if row is not None and not _is_identity_memory_candidate(
+            memory_type=str(row.memory_type or ""),
+            memory_key=str(row.memory_key or ""),
+            content=str(row.content or ""),
+        ):
+            return row
+
+    hint = str(content_hint or "").strip()
+    if not hint:
+        return None
+
+    scan_limit = max(20, int(settings.long_term_memory_retrieve_scan_limit or 80))
+    stmt = (
+        select(LongTermMemory)
+        .where(
+            LongTermMemory.user_id == user_id,
+            or_(LongTermMemory.expires_at.is_(None), LongTermMemory.expires_at > now),
+        )
+        .order_by(LongTermMemory.updated_at.desc(), LongTermMemory.id.desc())
+        .limit(scan_limit)
+    )
+    rows = list((await session.execute(stmt)).scalars().all())
+    filtered_rows: list[LongTermMemory] = []
+    for row in rows:
+        if _is_identity_memory_candidate(
+            memory_type=str(row.memory_type or ""),
+            memory_key=str(row.memory_key or ""),
+            content=str(row.content or ""),
+        ):
+            continue
+        if normalized_type and str(row.memory_type or "").strip().lower() != normalized_type:
+            continue
+        filtered_rows.append(row)
+
+    if not filtered_rows:
+        return None
+
+    hint_lower = hint.lower()
+    for row in filtered_rows:
+        if hint == str(row.content or "").strip():
+            return row
+        if hint_lower == str(row.memory_key or "").strip().lower():
+            return row
+
+    best_row: LongTermMemory | None = None
+    best_score = 0.0
+    for row in filtered_rows:
+        score = _semantic_similarity(hint, str(row.content or ""))
+        if score > best_score:
+            best_score = score
+            best_row = row
+    if best_row is None or best_score < SEMANTIC_DUPLICATE_THRESHOLD:
+        return None
+    return best_row
+
+
 async def retrieve_relevant_long_term_memories(
     session: AsyncSession,
     *,

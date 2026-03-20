@@ -54,6 +54,8 @@ TOOL_DISPLAY_NAMES: dict[str, str] = {
     "conversation_list": "查看会话列表",
     "memory_list": "查看记忆",
     "memory_save": "写入记忆",
+    "memory_append": "追加记忆",
+    "memory_delete": "删除记忆",
     "update_user_profile": "更新档案",
     "query_user_profile": "查询档案",
 }
@@ -89,6 +91,8 @@ def _build_system_prompt(
         "- 外部信息/网页抓取：调用 fetch_url。\n"
         "- 会话/记忆查询：调用 conversation_current / conversation_list / memory_list。\n"
         "- 当用户明确要求你记住某件事、某偏好、某规则、某长期约束时，调用 memory_save 直接写入长期记忆。\n"
+        "- 当用户要求在现有记忆上补充信息时，先用 memory_list 找到目标，再调用 memory_append。\n"
+        "- 当用户要求忘记、删除某条长期记忆时，先用 memory_list 找到目标，再调用 memory_delete。\n"
         "- 简单记账（如'午饭35元'）：直接调用 ledger_insert，"
         "分类参考：餐饮/交通/购物/娱乐/医疗/教育/居家/通讯/社交/服饰/其他。\n"
         "- 账单查询/修改/删除：使用 ledger_list / ledger_update / ledger_delete / ledger_text2sql。\n"
