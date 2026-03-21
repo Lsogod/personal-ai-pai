@@ -156,29 +156,37 @@ def build_langchain_tools(
 
     if _enabled("analyze_receipt"):
         @tool("analyze_receipt")
-        async def analyze_receipt_tool(image_ref: str = "", image_index: int = 1) -> str:
-            """分析小票或支付图片，并返回结构化提取 JSON。仅用于记账相关场景。"""
-            image_refs = [str(item).strip() for item in (context.image_urls or []) if str(item).strip()]
-            selected_ref = str(image_ref or "").strip()
-            if not selected_ref:
-                try:
-                    idx = max(0, int(image_index) - 1)
-                except Exception:
-                    idx = 0
-                if idx < len(image_refs):
-                    selected_ref = image_refs[idx]
-                elif image_refs:
-                    selected_ref = image_refs[0]
-            if not selected_ref:
-                return "当前消息及最近会话里没有可用于记账识别的图片。"
+        async def analyze_receipt_tool(image_ref: str) -> str:
+            """分析小票或支付图片，并返回结构化提取 JSON。"""
             return await _run_tool(
                 context=context,
                 source="builtin",
                 name="analyze_receipt",
-                args={"image_ref": selected_ref},
+                args={"image_ref": image_ref},
             )
 
         tools.append(analyze_receipt_tool)
+
+    if _enabled("analyze_image"):
+        @tool("analyze_image")
+        async def analyze_image_tool(question: str = "", image_index: int = 1) -> str:
+            """分析当前消息附带的图片，适合回答“图中是什么”“图片里写了什么”等问题。"""
+            image_refs = [str(item).strip() for item in (context.image_urls or []) if str(item).strip()]
+            if not image_refs:
+                return "当前消息没有可分析的图片。"
+            try:
+                idx = max(0, int(image_index) - 1)
+            except Exception:
+                idx = 0
+            image_ref = image_refs[idx] if idx < len(image_refs) else image_refs[0]
+            return await _run_tool(
+                context=context,
+                source="builtin",
+                name="analyze_image",
+                args={"image_ref": image_ref, "question": question},
+            )
+
+        tools.append(analyze_image_tool)
 
     if _enabled("ledger_text2sql"):
         @tool("ledger_text2sql")

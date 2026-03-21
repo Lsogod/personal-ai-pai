@@ -14,6 +14,10 @@ SHARED_TOOL_NAMES: set[str] = {
     "fetch_url",
 }
 
+VISION_TOOL_NAMES: set[str] = {
+    "analyze_image",
+}
+
 # MCP-facing tool surface.
 MCP_TOOL_NAMES: set[str] = {
     "mcp_list_tools",
@@ -58,6 +62,7 @@ PROFILE_TOOL_NAMES: set[str] = {
 # Main agent: single ReAct agent with full tool access.
 MAIN_AGENT_TOOL_NAMES: set[str] = (
     SHARED_TOOL_NAMES
+    | VISION_TOOL_NAMES
     | MCP_TOOL_NAMES
     | CONVERSATION_TOOL_NAMES
     | LEDGER_TOOL_NAMES
