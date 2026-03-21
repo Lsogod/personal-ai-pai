@@ -40,7 +40,6 @@ TOOL_DISPLAY_NAMES: dict[str, str] = {
     "maps_weather": "查询天气",
     "mcp_list_tools": "查看外部工具",
     "mcp_call_tool": "调用外部工具",
-    "analyze_image": "分析图片",
     "analyze_receipt": "识别小票",
     "ledger_insert": "记账",
     "ledger_update": "更新账单",
@@ -135,10 +134,10 @@ def _build_system_prompt(
     image_section = ""
     if image_count > 0:
         image_section = (
-            "## 当前可分析图片\n"
-            f"- 当前消息或最近上下文中有 {image_count} 张可分析图片。\n"
-            "- 如果用户在问“图中是什么”“图片里写了什么”“帮我看图/看截图”，调用 analyze_image。\n"
-            "- 如果用户要根据小票、发票、支付截图记账，优先调用 analyze_receipt，再决定是否 ledger_insert。\n\n"
+            "## 当前可用于记账识别的图片\n"
+            f"- 当前消息或最近上下文中有 {image_count} 张图片可供记账识别。\n"
+            "- 只有在用户要记账、补录账单、识别小票/支付截图金额时，才调用 analyze_receipt。\n"
+            "- 不要把图片工具用于通用看图问答、描述图片内容或 OCR 问答。\n\n"
         )
 
     return (
@@ -150,7 +149,6 @@ def _build_system_prompt(
         "- 时间查询：调用 now_time。\n"
         "- 天气查询：优先 maps_weather；避免用 fetch_url 替代。\n"
         "- 外部信息/网页抓取：调用 fetch_url。\n"
-        "- 通用图片理解、识别截图内容、提取图片文字：调用 analyze_image。\n"
         "- 会话/记忆查询：调用 conversation_current / conversation_list / memory_list。\n"
         "- 当用户明确要求你记住某件事、某偏好、某规则、某长期约束时，调用 memory_save 直接写入长期记忆。\n"
         "- 当用户要求在现有记忆上补充信息时，先用 memory_list 找到目标，再调用 memory_append。\n"
@@ -158,7 +156,7 @@ def _build_system_prompt(
         "- 简单记账（如'午饭35元'）：直接调用 ledger_insert，"
         "分类参考：餐饮/交通/购物/娱乐/医疗/教育/居家/通讯/社交/服饰/其他。\n"
         "- 账单查询/修改/删除：使用 ledger_list / ledger_update / ledger_delete / ledger_text2sql。\n"
-        "- 小票/支付截图：调用 analyze_receipt 获取结构化数据后调用 ledger_insert。\n"
+        "- 小票/支付截图仅用于记账：调用 analyze_receipt 获取结构化数据后调用 ledger_insert。\n"
         "- 创建提醒：先调用 now_time 获取当前时间，再计算绝对时间，调用 schedule_insert。"
         "trigger_time 格式：YYYY-MM-DD HH:MM:SS（服务器时区）。\n"
         "- 查看提醒：使用 schedule_list / schedule_list_recent / schedule_get_latest。\n"

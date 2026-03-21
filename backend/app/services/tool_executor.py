@@ -41,7 +41,7 @@ from app.tools.ledger_text2sql import (
     plan_write_preview_text2sql,
     try_execute_ledger_text2sql,
 )
-from app.tools.vision import analyze_image, analyze_receipt
+from app.tools.vision import analyze_receipt
 
 
 class ToolExecResult(TypedDict):
@@ -366,19 +366,6 @@ async def execute_capability(
                 if not image_url:
                     return _result(False, error="missing required arg: image_url")
                 output = await analyze_receipt(image_url)
-                payload = output if isinstance(output, dict) else {"result": str(output)}
-                return _result(
-                    True,
-                    output=json.dumps(payload, ensure_ascii=False),
-                    output_data=payload,
-                )
-
-            if tool_l == "analyze_image":
-                image_url = str(params.get("image_url") or params.get("image_ref") or "").strip()
-                if not image_url:
-                    return _result(False, error="missing required arg: image_url")
-                question = str(params.get("question") or "").strip()
-                output = await analyze_image(image_url, question=question)
                 payload = output if isinstance(output, dict) else {"result": str(output)}
                 return _result(
                     True,

@@ -51,13 +51,6 @@ class VisionExtraction(BaseModel):
     notes: str = Field(default="")
 
 
-class GenericImageAnswer(BaseModel):
-    answer: str = Field(default="")
-    summary: str = Field(default="")
-    ocr_text: str = Field(default="")
-    confidence: float = Field(default=0.0)
-
-
 def _normalize_mime_type(content_type: str | None, image_ref: str) -> str:
     raw = (content_type or "").split(";")[0].strip().lower()
     if raw.startswith("image/"):
@@ -214,67 +207,3 @@ async def analyze_receipt(image_url: str) -> dict[str, Any]:
     normalized = _normalize_vision_output(data, json.dumps(data, ensure_ascii=False))
     return normalized
 
-
-async def analyze_image(image_url: str, question: str = "") -> dict[str, Any]:
-    settings = get_settings()
-    if not settings.openai_api_key:
-        return {"confidence": 0.0, "reason": "missing_api_key"}
-
-    image_data_url, reason = await _resolve_image_ref_to_data_url(image_url)
-    if not image_data_url:
-        return {"confidence": 0.0, "reason": reason or "image_resolve_failed"}
-
-    llm = get_llm(model=settings.vision_model, node_name="vision")
-    runnable = llm.with_structured_output(GenericImageAnswer)
-    prompt_question = str(question or "").strip() or "请概括图中主要内容，并识别图中的关键文字。"
-    system = SystemMessage(
-        content=(
-            "你是通用视觉分析助手。你会收到一张图片和一个问题。"
-            "请结合图片内容回答问题，并返回一个 JSON 对象。字段："
-            "answer(str), summary(str), ocr_text(str), confidence(float 0-1)。"
-            "规则："
-            "1) answer 要直接回答用户问题；"
-            "2) summary 用一句话概括图像主体；"
-            "3) ocr_text 提取图中最关键的可见文字，没有则留空；"
-            "4) 看不清或无法判断时，要明确说明不确定，并降低 confidence；"
-            "5) 不要输出 markdown，不要输出 JSON 以外的解释。"
-        )
-    )
-    human = HumanMessage(
-        content=[
-            {"type": "text", "text": prompt_question},
-            {"type": "image_url", "image_url": {"url": image_data_url}},
-        ]
-    )
-
-    try:
-        parsed = await runnable.ainvoke([system, human])
-    except Exception as exc:
-        return {"confidence": 0.0, "reason": "vision_invoke_failed", "error": str(exc)}
-
-    if isinstance(parsed, BaseModel):
-        data = parsed.model_dump()
-    elif isinstance(parsed, dict):
-        data = parsed
-    else:
-        data = {}
-
-    if not data:
-        return {"confidence": 0.0, "reason": "invalid_vision_json", "raw": ""}
-
-    answer = str(data.get("answer") or "").strip()
-    summary = str(data.get("summary") or "").strip()
-    ocr_text = str(data.get("ocr_text") or "").strip()
-    confidence = _as_float(data.get("confidence")) or 0.0
-    if confidence < 0:
-        confidence = 0.0
-    if confidence > 1:
-        confidence = 1.0
-
-    result: dict[str, Any] = {
-        "answer": answer or summary or "暂时无法判断图片内容。",
-        "summary": summary,
-        "ocr_text": ocr_text,
-        "confidence": confidence,
-    }
-    return result

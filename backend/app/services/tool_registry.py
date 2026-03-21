@@ -94,12 +94,6 @@ def list_builtin_tool_metas() -> list[ToolMeta]:
             "enabled": True,
         },
         {
-            "name": "analyze_image",
-            "source": "builtin",
-            "description": "分析当前图片内容，适合回答图中是什么、图片里写了什么等问题。",
-            "enabled": True,
-        },
-        {
             "name": "ledger_text2sql",
             "source": "builtin",
             "description": "通过受保护的 SQL 流程执行自然语言账单增删改查。",
