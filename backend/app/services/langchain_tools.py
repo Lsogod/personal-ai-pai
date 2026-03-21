@@ -20,6 +20,7 @@ class ToolInvocationContext:
     user_id: int | None
     platform: str
     conversation_id: int | None
+    image_urls: list[str] | None = None
     audit_hook: AuditHook | None = None
 
 
@@ -165,6 +166,27 @@ def build_langchain_tools(
             )
 
         tools.append(analyze_receipt_tool)
+
+    if _enabled("analyze_image"):
+        @tool("analyze_image")
+        async def analyze_image_tool(question: str = "", image_index: int = 1) -> str:
+            """分析当前消息附带的图片，适合回答“图中是什么”“图片里写了什么”等问题。"""
+            image_refs = [str(item).strip() for item in (context.image_urls or []) if str(item).strip()]
+            if not image_refs:
+                return "当前消息没有可分析的图片。"
+            try:
+                idx = max(0, int(image_index) - 1)
+            except Exception:
+                idx = 0
+            image_ref = image_refs[idx] if idx < len(image_refs) else image_refs[0]
+            return await _run_tool(
+                context=context,
+                source="builtin",
+                name="analyze_image",
+                args={"image_ref": image_ref, "question": question},
+            )
+
+        tools.append(analyze_image_tool)
 
     if _enabled("ledger_text2sql"):
         @tool("ledger_text2sql")

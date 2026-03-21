@@ -16,9 +16,11 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.prebuilt import create_react_agent
+from sqlalchemy import select
 
 from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
+from app.models.message import Message
 from app.models.user import User
 from app.services.langchain_tools import ToolInvocationContext
 from app.services.ledger_pending import has_pending_ledger
@@ -38,6 +40,7 @@ TOOL_DISPLAY_NAMES: dict[str, str] = {
     "maps_weather": "查询天气",
     "mcp_list_tools": "查看外部工具",
     "mcp_call_tool": "调用外部工具",
+    "analyze_image": "分析图片",
     "analyze_receipt": "识别小票",
     "ledger_insert": "记账",
     "ledger_update": "更新账单",
@@ -74,6 +77,45 @@ def _log(msg: str) -> None:
     print(msg, flush=True)
 
 
+async def _load_recent_image_urls(
+    *,
+    session,
+    user_id: int,
+    conversation_id: int | None,
+    limit: int = 3,
+) -> list[str]:
+    if not conversation_id:
+        return []
+    rows = (
+        (
+            await session.execute(
+                select(Message)
+                .where(
+                    Message.user_id == user_id,
+                    Message.conversation_id == int(conversation_id),
+                )
+                .order_by(Message.id.desc())
+                .limit(20)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    image_urls: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        candidates = row.image_urls if isinstance(row.image_urls, list) else []
+        for item in candidates:
+            image_ref = str(item or "").strip()
+            if not image_ref or image_ref in seen:
+                continue
+            seen.add(image_ref)
+            image_urls.append(image_ref)
+            if len(image_urls) >= limit:
+                return image_urls
+    return image_urls
+
+
 # ---------------------------------------------------------------------------
 # System prompt
 # ---------------------------------------------------------------------------
@@ -84,10 +126,20 @@ def _build_system_prompt(
     context_text: str,
     skills: str,
     runtime_tools_summary: str,
+    image_count: int,
 ) -> str:
     nickname = str(user.nickname or "").strip() or "用户"
     ai_name = str(user.ai_name or "").strip() or "AI 助手"
     ai_emoji = str(user.ai_emoji or "").strip()
+
+    image_section = ""
+    if image_count > 0:
+        image_section = (
+            "## 当前可分析图片\n"
+            f"- 当前消息或最近上下文中有 {image_count} 张可分析图片。\n"
+            "- 如果用户在问“图中是什么”“图片里写了什么”“帮我看图/看截图”，调用 analyze_image。\n"
+            "- 如果用户要根据小票、发票、支付截图记账，优先调用 analyze_receipt，再决定是否 ledger_insert。\n\n"
+        )
 
     return (
         f"你是{nickname}的私人助理{ai_name} {ai_emoji}。\n"
@@ -98,6 +150,7 @@ def _build_system_prompt(
         "- 时间查询：调用 now_time。\n"
         "- 天气查询：优先 maps_weather；避免用 fetch_url 替代。\n"
         "- 外部信息/网页抓取：调用 fetch_url。\n"
+        "- 通用图片理解、识别截图内容、提取图片文字：调用 analyze_image。\n"
         "- 会话/记忆查询：调用 conversation_current / conversation_list / memory_list。\n"
         "- 当用户明确要求你记住某件事、某偏好、某规则、某长期约束时，调用 memory_save 直接写入长期记忆。\n"
         "- 当用户要求在现有记忆上补充信息时，先用 memory_list 找到目标，再调用 memory_append。\n"
@@ -122,6 +175,7 @@ def _build_system_prompt(
         "- 必须严格遵循用户请求的时间/数量范围。\n"
         "- 回答简洁、可执行、使用中文。\n\n"
 
+        f"{image_section}"
         f"## 当前可用工具\n{runtime_tools_summary}\n\n"
         f"## 会话上下文\n{context_text}\n\n"
         f"## 技能文档\n{skills}"
@@ -276,9 +330,19 @@ async def main_agent_node(state: GraphState) -> GraphState:
     conversation_id = state.get("conversation_id")
     message = state["message"]
     content = (message.content or "").strip()
+    current_image_urls = [str(item).strip() for item in (message.image_urls or []) if str(item).strip()]
+    recent_image_urls = await _load_recent_image_urls(
+        session=session,
+        user_id=user_id,
+        conversation_id=conversation_id,
+    )
+    image_urls = current_image_urls[:]
+    for image_ref in recent_image_urls:
+        if image_ref not in image_urls:
+            image_urls.append(image_ref)
     platform = message.platform or "unknown"
 
-    _log(f"[main_agent] start user={user_id} content={content[:80]!r}")
+    _log(f"[main_agent] start user={user_id} images={len(image_urls)} content={content[:80]!r}")
 
     # ── Short-circuit: pending ledger state (receipt OCR / preview confirm) ──
     if conversation_id and await has_pending_ledger(user_id, int(conversation_id)):
@@ -296,6 +360,7 @@ async def main_agent_node(state: GraphState) -> GraphState:
         user_id=user_id,
         platform=platform,
         conversation_id=conversation_id,
+        image_urls=image_urls,
         audit_hook=_audit_hook_factory(user_id, platform, conversation_id),
     )
     tools = build_node_langchain_tools(context=ctx, node_name="main_agent")
@@ -312,6 +377,7 @@ async def main_agent_node(state: GraphState) -> GraphState:
         context_text=context_text,
         skills=skills,
         runtime_tools_summary=runtime_tools_summary,
+        image_count=len(image_urls),
     )
 
     # ── Create & stream ReAct agent ──
