@@ -52,6 +52,7 @@ class VisionExtraction(BaseModel):
 
 
 class GenericImageAnswer(BaseModel):
+    image_kind: str = Field(default="other")
     answer: str = Field(default="")
     summary: str = Field(default="")
     ocr_text: str = Field(default="")
@@ -231,13 +232,14 @@ async def analyze_image(image_url: str, question: str = "") -> dict[str, Any]:
         content=(
             "你是通用视觉分析助手。你会收到一张图片和一个问题。"
             "请结合图片内容回答问题，并返回一个 JSON 对象。字段："
-            "answer(str), summary(str), ocr_text(str), confidence(float 0-1)。"
+            "image_kind(str), answer(str), summary(str), ocr_text(str), confidence(float 0-1)。"
             "规则："
-            "1) answer 要直接回答用户问题；"
-            "2) summary 用一句话概括图像主体；"
-            "3) ocr_text 提取图中最关键的可见文字，没有则留空；"
-            "4) 看不清或无法判断时，要明确说明不确定，并降低 confidence；"
-            "5) 不要输出 markdown，不要输出 JSON 以外的解释。"
+            "1) image_kind 仅可为 receipt, payment_screenshot, document, screenshot, photo, other 之一；"
+            "2) answer 要直接回答用户问题；"
+            "3) summary 用一句话概括图像主体；"
+            "4) ocr_text 提取图中最关键的可见文字，没有则留空；"
+            "5) 看不清或无法判断时，要明确说明不确定，并降低 confidence；"
+            "6) 不要输出 markdown，不要输出 JSON 以外的解释。"
         )
     )
     human = HumanMessage(
@@ -262,6 +264,9 @@ async def analyze_image(image_url: str, question: str = "") -> dict[str, Any]:
     if not data:
         return {"confidence": 0.0, "reason": "invalid_vision_json", "raw": ""}
 
+    image_kind = str(data.get("image_kind") or "other").strip().lower()
+    if image_kind not in {"receipt", "payment_screenshot", "document", "screenshot", "photo", "other"}:
+        image_kind = "other"
     answer = str(data.get("answer") or "").strip()
     summary = str(data.get("summary") or "").strip()
     ocr_text = str(data.get("ocr_text") or "").strip()
@@ -272,6 +277,7 @@ async def analyze_image(image_url: str, question: str = "") -> dict[str, Any]:
         confidence = 1.0
 
     result: dict[str, Any] = {
+        "image_kind": image_kind,
         "answer": answer or summary or "暂时无法判断图片内容。",
         "summary": summary,
         "ocr_text": ocr_text,

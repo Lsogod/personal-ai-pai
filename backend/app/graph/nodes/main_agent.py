@@ -77,23 +77,6 @@ def _log(msg: str) -> None:
     print(msg, flush=True)
 
 
-BOOKKEEPING_IMAGE_HINTS = (
-    "记账",
-    "入账",
-    "账单",
-    "小票",
-    "发票",
-    "支付截图",
-    "付款截图",
-    "消费截图",
-    "金额",
-    "花了",
-    "支出",
-    "收入",
-    "报销",
-)
-
-
 async def _load_recent_image_urls(
     *,
     session,
@@ -133,25 +116,26 @@ async def _load_recent_image_urls(
     return image_urls
 
 
-def _is_bookkeeping_image_request(content: str) -> bool:
-    text = str(content or "").strip().lower()
-    if not text:
-        return False
-    return any(token in text for token in BOOKKEEPING_IMAGE_HINTS)
-
-
-def _render_generic_image_reply(result: Any) -> str:
+def _render_image_analysis_context(result: Any) -> str:
     if isinstance(result, dict):
+        image_kind = str(result.get("image_kind") or "other").strip() or "other"
         answer = str(result.get("answer") or "").strip()
         summary = str(result.get("summary") or "").strip()
         ocr_text = str(result.get("ocr_text") or "").strip()
-        parts = [part for part in (answer, summary) if part]
+        confidence = result.get("confidence")
+        parts = [f"- 预分析类型：{image_kind}"]
+        if summary:
+            parts.append(f"- 预分析摘要：{summary}")
+        if answer:
+            parts.append(f"- 预分析结论：{answer}")
         if ocr_text:
-            parts.append(f"图片文字：{ocr_text}")
+            parts.append(f"- 预分析文字：{ocr_text}")
+        if confidence is not None:
+            parts.append(f"- 预分析置信度：{confidence}")
         if parts:
             return "\n".join(dict.fromkeys(parts))
     text = str(result or "").strip()
-    return text or "暂时无法识别这张图片。"
+    return f"- 预分析结果：{text}" if text else ""
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +149,7 @@ def _build_system_prompt(
     skills: str,
     runtime_tools_summary: str,
     image_count: int,
+    image_analysis_text: str,
 ) -> str:
     nickname = str(user.nickname or "").strip() or "用户"
     ai_name = str(user.ai_name or "").strip() or "AI 助手"
@@ -175,9 +160,12 @@ def _build_system_prompt(
         image_section = (
             "## 当前可分析图片\n"
             f"- 当前消息或最近上下文中有 {image_count} 张可分析图片。\n"
-            "- 如果用户在问“图中是什么”“图片里写了什么”“帮我看图/看截图”，调用 analyze_image。\n"
-            "- 如果用户要根据小票、发票、支付截图记账，优先调用 analyze_receipt，再决定是否 ledger_insert。\n\n"
+            "- 先结合下方图片预分析结果理解图片内容，再决定下一步操作。\n"
+            "- 如果用户要根据小票、发票、支付截图记账，优先调用 analyze_receipt，再决定是否 ledger_insert。\n"
+            "- 如果用户是在追问图片内容、图片文字、翻译图片文字、总结截图信息，优先基于预分析结果回答；只有信息不足时再调用 analyze_image。\n"
         )
+        if image_analysis_text:
+            image_section += f"\n## 图片预分析结果\n{image_analysis_text}\n\n"
 
     return (
         f"你是{nickname}的私人助理{ai_name} {ai_emoji}。\n"
@@ -197,6 +185,7 @@ def _build_system_prompt(
         "分类参考：餐饮/交通/购物/娱乐/医疗/教育/居家/通讯/社交/服饰/其他。\n"
         "- 账单查询/修改/删除：使用 ledger_list / ledger_update / ledger_delete / ledger_text2sql。\n"
         "- 小票/支付截图：调用 analyze_receipt 获取结构化数据后调用 ledger_insert。\n"
+        "- 若用户上传了图片，先利用图片预分析结果判断图片是什么、用户想做什么，再决定是直接回答、翻译/总结，还是继续调用记账等工具。\n"
         "- 创建提醒：先调用 now_time 获取当前时间，再计算绝对时间，调用 schedule_insert。"
         "trigger_time 格式：YYYY-MM-DD HH:MM:SS（服务器时区）。\n"
         "- 查看提醒：使用 schedule_list / schedule_list_recent / schedule_get_latest。\n"
@@ -382,6 +371,18 @@ async def main_agent_node(state: GraphState) -> GraphState:
 
     _log(f"[main_agent] start user={user_id} images={len(image_urls)} content={content[:80]!r}")
 
+    # ── Short-circuit: pending ledger state (receipt OCR / preview confirm) ──
+    if not current_image_urls and conversation_id and await has_pending_ledger(user_id, int(conversation_id)):
+        _log("[main_agent] short-circuit → ledger_pending")
+        return await _handle_ledger_pending(state)
+
+    # ── Short-circuit: pending schedule plan ──
+    if not current_image_urls and _has_pending_reminder_plan(state):
+        _log("[main_agent] short-circuit → schedule_pending")
+        return await _handle_schedule_pending(state)
+
+    # ── Build tools & context ──
+    t1 = time.monotonic()
     ctx = ToolInvocationContext(
         user_id=user_id,
         platform=platform,
@@ -389,9 +390,9 @@ async def main_agent_node(state: GraphState) -> GraphState:
         image_urls=image_urls,
         audit_hook=_audit_hook_factory(user_id, platform, conversation_id),
     )
-
-    if image_urls and not _is_bookkeeping_image_request(content):
-        _log("[main_agent] short-circuit → analyze_image")
+    image_analysis_text = ""
+    if image_urls:
+        _log("[main_agent] pre-analyze image")
         image_result = await invoke_node_tool_typed(
             context=ctx,
             node_name="main_agent",
@@ -401,20 +402,7 @@ async def main_agent_node(state: GraphState) -> GraphState:
                 "question": content or "请概括图中主要内容，并识别图中的关键文字。",
             },
         )
-        return {**state, "responses": [_render_generic_image_reply(image_result)]}
-
-    # ── Short-circuit: pending ledger state (receipt OCR / preview confirm) ──
-    if conversation_id and await has_pending_ledger(user_id, int(conversation_id)):
-        _log("[main_agent] short-circuit → ledger_pending")
-        return await _handle_ledger_pending(state)
-
-    # ── Short-circuit: pending schedule plan ──
-    if _has_pending_reminder_plan(state):
-        _log("[main_agent] short-circuit → schedule_pending")
-        return await _handle_schedule_pending(state)
-
-    # ── Build tools & context ──
-    t1 = time.monotonic()
+        image_analysis_text = _render_image_analysis_context(image_result)
     tools = build_node_langchain_tools(context=ctx, node_name="main_agent")
 
     context_text = render_conversation_context(state)
@@ -430,7 +418,10 @@ async def main_agent_node(state: GraphState) -> GraphState:
         skills=skills,
         runtime_tools_summary=runtime_tools_summary,
         image_count=len(image_urls),
+        image_analysis_text=image_analysis_text,
     )
+
+    effective_content = content or ("请根据图片内容继续处理用户请求。" if image_urls else "")
 
     # ── Create & stream ReAct agent ──
     agent = create_react_agent(
@@ -453,7 +444,7 @@ async def main_agent_node(state: GraphState) -> GraphState:
             {
                 "messages": [
                     SystemMessage(content=system_prompt),
-                    HumanMessage(content=content),
+                    HumanMessage(content=effective_content),
                 ]
             },
             config={"recursion_limit": 12},
