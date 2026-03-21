@@ -76,6 +76,23 @@ def _log(msg: str) -> None:
     print(msg, flush=True)
 
 
+BOOKKEEPING_IMAGE_HINTS = (
+    "记账",
+    "入账",
+    "账单",
+    "小票",
+    "发票",
+    "支付截图",
+    "付款截图",
+    "消费截图",
+    "金额",
+    "花了",
+    "支出",
+    "收入",
+    "报销",
+)
+
+
 async def _load_recent_image_urls(
     *,
     session,
@@ -113,6 +130,13 @@ async def _load_recent_image_urls(
             if len(image_urls) >= limit:
                 return image_urls
     return image_urls
+
+
+def _is_bookkeeping_image_request(content: str) -> bool:
+    text = str(content or "").strip().lower()
+    if not text:
+        return False
+    return any(token in text for token in BOOKKEEPING_IMAGE_HINTS)
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +365,13 @@ async def main_agent_node(state: GraphState) -> GraphState:
     platform = message.platform or "unknown"
 
     _log(f"[main_agent] start user={user_id} images={len(image_urls)} content={content[:80]!r}")
+
+    if image_urls and not _is_bookkeeping_image_request(content):
+        _log("[main_agent] image request rejected: non-bookkeeping intent")
+        return {
+            **state,
+            "responses": ["当前图片只支持记账识别。若要识别小票或支付截图，请直接说明“帮我记账”或“识别这张小票并记账”。"],
+        }
 
     # ── Short-circuit: pending ledger state (receipt OCR / preview confirm) ──
     if conversation_id and await has_pending_ledger(user_id, int(conversation_id)):
