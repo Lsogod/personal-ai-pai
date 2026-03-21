@@ -24,11 +24,34 @@ VALID_INTENTS = {
     "unknown",
 }
 
+BOOKKEEPING_IMAGE_HINTS = (
+    "记账",
+    "入账",
+    "账单",
+    "小票",
+    "发票",
+    "支付截图",
+    "付款截图",
+    "消费截图",
+    "金额",
+    "花了",
+    "支出",
+    "收入",
+    "报销",
+)
+
 
 class RouterIntentExtraction(BaseModel):
     route_intent: str = Field(default="unknown")
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     reason: str = Field(default="")
+
+
+def _is_bookkeeping_image_request(content: str) -> bool:
+    text = str(content or "").strip().lower()
+    if not text:
+        return False
+    return any(token in text for token in BOOKKEEPING_IMAGE_HINTS)
 
 
 async def _route_intent_with_llm(
@@ -97,6 +120,8 @@ async def router_node(state: GraphState) -> GraphState:
     message = state["message"]
     content = (message.content or "").strip()
     if not content and not message.image_urls:
+        return {**state, "intent": "chat_manager"}
+    if message.image_urls and not _is_bookkeeping_image_request(content):
         return {**state, "intent": "chat_manager"}
 
     has_pending = False

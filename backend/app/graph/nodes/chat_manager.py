@@ -27,6 +27,25 @@ VALID_CHAT_KINDS = {"general", "time", "external", "weather", "tooling", "unknow
 LLM_NODE_CLASSIFIER = "chat_manager_classifier"
 LLM_NODE_TOOL_AGENT = "chat_manager_tool_agent"
 LLM_NODE_FINAL = "chat_manager_final"
+BOOKKEEPING_IMAGE_HINTS = (
+    "记账",
+    "入账",
+    "账单",
+    "小票",
+    "发票",
+    "支付截图",
+    "付款截图",
+    "消费截图",
+    "金额",
+    "花了",
+    "支出",
+    "收入",
+    "报销",
+)
+NON_BOOKKEEPING_IMAGE_REPLY = (
+    "当前图片只支持记账识别。若要识别小票或支付截图，"
+    "请直接说明“帮我记账”或“识别这张小票并记账”。"
+)
 
 
 class ChatClassificationExtraction(BaseModel):
@@ -52,6 +71,13 @@ class ProfileIntentExtraction(BaseModel):
     ask_user_name: bool = Field(default=False)
     ask_ai_name: bool = Field(default=False)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+def _is_bookkeeping_image_request(content: str) -> bool:
+    text = str(content or "").strip().lower()
+    if not text:
+        return False
+    return any(token in text for token in BOOKKEEPING_IMAGE_HINTS)
 
 
 def _shorten_text(value: str, limit: int = 500) -> str:
@@ -576,6 +602,8 @@ async def chat_manager_node(state: GraphState) -> GraphState:
         return {**state, "responses": ["未找到用户信息。"]}
 
     content = (message.content or "").strip()
+    if message.image_urls and not _is_bookkeeping_image_request(content):
+        return {**state, "responses": [NON_BOOKKEEPING_IMAGE_REPLY]}
     platform = (message.platform or "unknown")
     conversation_id = state.get("conversation_id")
     context_text = render_conversation_context(state)
