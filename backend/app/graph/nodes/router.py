@@ -12,6 +12,7 @@ from app.graph.state import GraphState
 from app.core.config import get_settings
 from app.services.ledger_pending import has_pending_ledger
 from app.services.llm import get_llm
+from app.tools.vision import analyze_image
 
 
 VALID_INTENTS = {
@@ -24,34 +25,31 @@ VALID_INTENTS = {
     "unknown",
 }
 
-BOOKKEEPING_IMAGE_HINTS = (
-    "记账",
-    "入账",
-    "账单",
-    "小票",
-    "发票",
-    "支付截图",
-    "付款截图",
-    "消费截图",
-    "金额",
-    "花了",
-    "支出",
-    "收入",
-    "报销",
-)
-
-
 class RouterIntentExtraction(BaseModel):
     route_intent: str = Field(default="unknown")
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     reason: str = Field(default="")
 
-
-def _is_bookkeeping_image_request(content: str) -> bool:
-    text = str(content or "").strip().lower()
-    if not text:
-        return False
-    return any(token in text for token in BOOKKEEPING_IMAGE_HINTS)
+def _render_image_analysis_context(result: Any) -> str:
+    if isinstance(result, dict):
+        image_kind = str(result.get("image_kind") or "other").strip() or "other"
+        answer = str(result.get("answer") or "").strip()
+        summary = str(result.get("summary") or "").strip()
+        ocr_text = str(result.get("ocr_text") or "").strip()
+        confidence = result.get("confidence")
+        parts = [f"- 图片类型：{image_kind}"]
+        if summary:
+            parts.append(f"- 图片摘要：{summary}")
+        if answer:
+            parts.append(f"- 图片结论：{answer}")
+        if ocr_text:
+            parts.append(f"- 图片文字：{ocr_text}")
+        if confidence is not None:
+            parts.append(f"- 置信度：{confidence}")
+        if parts:
+            return "\n".join(parts)
+    text = str(result or "").strip()
+    return f"- 图片结果：{text}" if text else ""
 
 
 async def _route_intent_with_llm(
@@ -60,6 +58,7 @@ async def _route_intent_with_llm(
     has_image: bool,
     has_pending_ledger: bool,
     conversation_context: str,
+    image_analysis_text: str = "",
     pending_complex: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     llm = get_llm(node_name="router")
@@ -83,6 +82,8 @@ async def _route_intent_with_llm(
             "6) chat_manager: 通用问答、创作、信息查询（不直接执行账单/提醒写操作）。\n"
             "   用户身份/信息/档案相关也必须路由 chat_manager，"
             "例如“我叫什么”“你叫什么”“叫我xxx”“以后你叫xxx”“请输出我的用户档案”。\n"
+            "   当消息带图片时，必须结合图片预分析结果判断：若主要是看图、识别文字、解释截图、翻译图片内容，路由 chat_manager。\n"
+            "   若图片预分析显示是小票/支付截图，且用户需求是记账、报销、补录金额、入账，路由 ledger_manager。\n"
             "7) unknown: 仅在证据不足时使用。\n"
             "不要输出额外文本，不要输出多方案，只输出 JSON。"
         )
@@ -92,6 +93,7 @@ async def _route_intent_with_llm(
             f"has_image={str(has_image).lower()}\n"
             f"has_pending_ledger={str(has_pending_ledger).lower()}\n\n"
             f"pending_complex={json.dumps(pending_complex or {}, ensure_ascii=False)}\n\n"
+            f"图片预分析:\n{image_analysis_text or '（无）'}\n\n"
             f"会话上下文:\n{conversation_context}\n\n"
             f"用户消息:\n{content}"
         )
@@ -121,12 +123,23 @@ async def router_node(state: GraphState) -> GraphState:
     content = (message.content or "").strip()
     if not content and not message.image_urls:
         return {**state, "intent": "chat_manager"}
-    if message.image_urls and not _is_bookkeeping_image_request(content):
-        return {**state, "intent": "chat_manager"}
 
     has_pending = False
     if user_id > 0 and conversation_id > 0:
         has_pending = await has_pending_ledger(user_id, conversation_id)
+    current_image_urls = [str(item).strip() for item in (message.image_urls or []) if str(item).strip()]
+    image_analysis: dict[str, Any] | None = None
+    image_analysis_text = ""
+    if current_image_urls:
+        try:
+            image_analysis = await analyze_image(
+                current_image_urls[0],
+                question=content or "请概括图中主要内容，并识别图中的关键文字。",
+            )
+            image_analysis_text = _render_image_analysis_context(image_analysis)
+        except Exception:
+            image_analysis = None
+            image_analysis_text = ""
     context_text = render_conversation_context(
         state,
         max_messages=8,
@@ -141,6 +154,7 @@ async def router_node(state: GraphState) -> GraphState:
             has_image=bool(message.image_urls),
             has_pending_ledger=has_pending,
             conversation_context=context_text,
+            image_analysis_text=image_analysis_text,
             pending_complex=(dict(pending_complex) if isinstance(pending_complex, dict) else None),
         )
         intent = str(routed.get("route_intent") or "unknown")
@@ -148,8 +162,12 @@ async def router_node(state: GraphState) -> GraphState:
         intent = "unknown"
 
     next_state: GraphState = {**state, "intent": intent}
-    if isinstance(pending_complex, dict) and bool(pending_complex.get("active")) and intent != "complex_task":
+    if current_image_urls and image_analysis is not None:
         next_extra = dict(extra)
+        next_extra["image_analysis"] = image_analysis
+        next_state["extra"] = next_extra
+    if isinstance(pending_complex, dict) and bool(pending_complex.get("active")) and intent != "complex_task":
+        next_extra = dict(next_state.get("extra") or extra)
         next_extra["complex_task_pending"] = {"active": False, "reason": "", "topic": ""}
         next_state["extra"] = next_extra
     return next_state

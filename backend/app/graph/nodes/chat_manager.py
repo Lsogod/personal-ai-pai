@@ -8,10 +8,12 @@ from typing import Literal
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from app.db.session import AsyncSessionLocal
 from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
+from app.models.message import Message
 from app.models.user import User
 from app.services.audit import log_event
 from app.services.llm import get_llm
@@ -96,6 +98,67 @@ def _render_image_analysis_context(result: Any) -> str:
             return "\n".join(dict.fromkeys(parts))
     text = str(result or "").strip()
     return f"- 预分析结果：{text}" if text else ""
+
+
+async def _load_recent_image_urls(
+    *,
+    session: Any,
+    user_id: int,
+    conversation_id: int | None,
+    limit: int = 3,
+) -> list[str]:
+    if not conversation_id:
+        return []
+    rows = (
+        (
+            await session.execute(
+                select(Message)
+                .where(
+                    Message.user_id == user_id,
+                    Message.conversation_id == int(conversation_id),
+                )
+                .order_by(Message.id.desc())
+                .limit(20)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    image_urls: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        candidates = row.image_urls if isinstance(row.image_urls, list) else []
+        for item in candidates:
+            image_ref = str(item or "").strip()
+            if not image_ref or image_ref in seen:
+                continue
+            seen.add(image_ref)
+            image_urls.append(image_ref)
+            if len(image_urls) >= limit:
+                return image_urls
+    return image_urls
+
+
+def _should_use_recent_image_context(content: str) -> bool:
+    text = str(content or "").strip().lower()
+    if not text:
+        return True
+    return any(
+        token in text
+        for token in (
+            "图",
+            "图片",
+            "截图",
+            "这张",
+            "上图",
+            "看图",
+            "看下",
+            "内容",
+            "文字",
+            "翻译",
+            "识别",
+        )
+    )
 
 
 def _shorten_text(value: str, limit: int = 500) -> str:
@@ -623,24 +686,38 @@ async def chat_manager_node(state: GraphState) -> GraphState:
     platform = (message.platform or "unknown")
     conversation_id = state.get("conversation_id")
     current_image_urls = [str(item).strip() for item in (message.image_urls or []) if str(item).strip()]
+    recent_image_urls = await _load_recent_image_urls(
+        session=session,
+        user_id=int(user.id or 0),
+        conversation_id=conversation_id,
+    )
+    image_urls = current_image_urls[:]
+    for image_ref in recent_image_urls:
+        if image_ref not in image_urls:
+            image_urls.append(image_ref)
     context_text = render_conversation_context(state)
     effective_content = content
-    if current_image_urls and not _is_bookkeeping_image_request(content):
-        image_result = await invoke_node_tool_typed(
-            context=ToolInvocationContext(
-                user_id=user.id,
-                platform=platform,
-                conversation_id=conversation_id,
-                image_urls=current_image_urls,
-                audit_hook=_audit_tool_call_bridge(user.id, platform, conversation_id),
-            ),
-            node_name="chat_manager",
-            tool_name="analyze_image",
-            args={
-                "image_ref": current_image_urls[0],
-                "question": content or "请概括图中主要内容，并识别图中的关键文字。",
-            },
-        )
+    use_image_context = bool(current_image_urls) or (
+        bool(image_urls) and not _is_bookkeeping_image_request(content) and _should_use_recent_image_context(content)
+    )
+    if use_image_context:
+        image_result = (state.get("extra") or {}).get("image_analysis")
+        if not current_image_urls or not isinstance(image_result, dict):
+            image_result = await invoke_node_tool_typed(
+                context=ToolInvocationContext(
+                    user_id=user.id,
+                    platform=platform,
+                    conversation_id=conversation_id,
+                    image_urls=image_urls,
+                    audit_hook=_audit_tool_call_bridge(user.id, platform, conversation_id),
+                ),
+                node_name="chat_manager",
+                tool_name="analyze_image",
+                args={
+                    "image_ref": image_urls[0],
+                    "question": content or "请概括图中主要内容，并识别图中的关键文字。",
+                },
+            )
         image_analysis_text = _render_image_analysis_context(image_result)
         if image_analysis_text:
             context_text = (
