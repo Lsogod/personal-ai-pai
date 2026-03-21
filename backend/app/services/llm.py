@@ -97,9 +97,10 @@ def _extract_stream_text(chunk: Any) -> str:
 class TrackingChatOpenAI(ChatOpenAI):
     """带用量自动追踪的 ChatOpenAI 包装。
 
-    当前代码库的所有调用路径（直接 ainvoke + create_react_agent 内部）
-    最终都会经过 ainvoke，因此仅在 ainvoke 中做追踪即可。
-    同步 invoke 做兜底防护，agenerate 不覆写以避免双计。
+    覆写 ainvoke 和 agenerate 两条路径：
+    - ainvoke: 直接调用和 memory worker 等走此路径
+    - agenerate: create_react_agent + astream_events 内部走此路径
+    两者互不重复，各自独立追踪。
     """
 
     def __init__(self, *args, node_name: str = "unknown", **kwargs):
@@ -117,6 +118,32 @@ class TrackingChatOpenAI(ChatOpenAI):
         if not allowed_nodes:
             return False
         return self._node_name in allowed_nodes
+
+    def _enqueue(
+        self,
+        output: Any,
+        started: float,
+        *,
+        success: bool = True,
+        error: str = "",
+    ) -> None:
+        if success:
+            prompt_tokens, completion_tokens, total_tokens = _extract_token_usage(output)
+        else:
+            prompt_tokens = completion_tokens = total_tokens = 0
+        enqueue_llm_usage(
+            user_id=get_tool_user_id(),
+            platform=get_tool_platform() or "",
+            conversation_id=get_tool_conversation_id(),
+            node=self._node_name,
+            model=self._get_model_name(),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            success=success,
+            error=error,
+        )
 
     async def _ainvoke_with_stream(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
         streamer = get_llm_streamer()
@@ -137,7 +164,6 @@ class TrackingChatOpenAI(ChatOpenAI):
                 try:
                     full_output = full_output + chunk
                 except Exception:
-                    # Keep the latest chunk if provider object doesn't support `+`.
                     full_output = chunk
 
         if full_output is not None:
@@ -146,43 +172,53 @@ class TrackingChatOpenAI(ChatOpenAI):
 
     async def ainvoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
         started = time.perf_counter()
-        user_id = get_tool_user_id()
-        platform = get_tool_platform() or ""
-        conversation_id = get_tool_conversation_id()
-        model_name = self._get_model_name()
         try:
             if self._is_stream_enabled_for_current_call():
                 output = await self._ainvoke_with_stream(input, config=config, **kwargs)
             else:
                 output = await super().ainvoke(input, config=config, **kwargs)
-            prompt_tokens, completion_tokens, total_tokens = _extract_token_usage(output)
+            self._enqueue(output, started)
+            return output
+        except Exception as exc:
+            self._enqueue(None, started, success=False, error=str(exc))
+            raise
+
+    async def agenerate(self, messages: Any, stop: Any = None, callbacks: Any = None, **kwargs: Any) -> Any:
+        """覆写 agenerate 以追踪 create_react_agent 内部的 LLM 调用。"""
+        started = time.perf_counter()
+        try:
+            result = await super().agenerate(messages, stop=stop, callbacks=callbacks, **kwargs)
+            # agenerate returns LLMResult; extract token usage from llm_output
+            llm_output = getattr(result, "llm_output", None) or {}
+            token_usage = llm_output.get("token_usage", {}) if isinstance(llm_output, dict) else {}
+            prompt_tokens = _safe_int(token_usage.get("prompt_tokens"))
+            completion_tokens = _safe_int(token_usage.get("completion_tokens"))
+            total_tokens = _safe_int(token_usage.get("total_tokens"))
+            # Also try per-generation usage_metadata
+            if total_tokens <= 0:
+                for gen_list in getattr(result, "generations", []):
+                    for gen in gen_list:
+                        msg = getattr(gen, "message", None)
+                        if msg is not None:
+                            p, c, t = _extract_token_usage(msg)
+                            prompt_tokens = max(prompt_tokens, p)
+                            completion_tokens = max(completion_tokens, c)
+                            total_tokens = max(total_tokens, t)
             enqueue_llm_usage(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
+                user_id=get_tool_user_id(),
+                platform=get_tool_platform() or "",
+                conversation_id=get_tool_conversation_id(),
                 node=self._node_name,
-                model=model_name,
+                model=self._get_model_name(),
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 total_tokens=total_tokens,
                 latency_ms=int((time.perf_counter() - started) * 1000),
                 success=True,
             )
-            return output
+            return result
         except Exception as exc:
-            enqueue_llm_usage(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                node=self._node_name,
-                model=model_name,
-                prompt_tokens=0,
-                completion_tokens=0,
-                total_tokens=0,
-                latency_ms=int((time.perf_counter() - started) * 1000),
-                success=False,
-                error=str(exc),
-            )
+            self._enqueue(None, started, success=False, error=str(exc))
             raise
 
 

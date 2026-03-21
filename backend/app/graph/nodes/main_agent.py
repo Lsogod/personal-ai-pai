@@ -63,6 +63,13 @@ TOOL_DISPLAY_NAMES: dict[str, str] = {
 }
 
 
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except Exception:
+        return 0
+
+
 def _log(msg: str) -> None:
     print(msg, flush=True)
 
@@ -322,6 +329,7 @@ async def main_agent_node(state: GraphState) -> GraphState:
     streamed_text_parts: list[str] = []
     streamer = get_llm_streamer()
     pending_tool_calls: dict[str, str] = {}  # call_id → tool_name
+    _accumulated_tokens: dict[str, int] = {"prompt": 0, "completion": 0, "total": 0}
 
     try:
         async for event in agent.astream_events(
@@ -377,7 +385,24 @@ async def main_agent_node(state: GraphState) -> GraphState:
             elif kind == "on_chat_model_end":
                 data = event.get("data", {})
                 output = data.get("output", data) if isinstance(data, dict) else data
-                _log(f"[main_agent] on_chat_model_end: tool_calls={getattr(output, 'tool_calls', None)}, content_type={type(getattr(output, 'content', None)).__name__}, content_preview={str(getattr(output, 'content', ''))[:200]}")
+                # Extract token usage from each LLM turn
+                _usage_meta = getattr(output, "usage_metadata", None)
+                if isinstance(_usage_meta, dict):
+                    _accumulated_tokens["prompt"] += _safe_int(_usage_meta.get("input_tokens"))
+                    _accumulated_tokens["completion"] += _safe_int(_usage_meta.get("output_tokens"))
+                    _accumulated_tokens["total"] += _safe_int(_usage_meta.get("total_tokens"))
+                _resp_meta = getattr(output, "response_metadata", None)
+                if isinstance(_resp_meta, dict):
+                    for _ukey in ("token_usage", "usage"):
+                        _tu = _resp_meta.get(_ukey)
+                        if isinstance(_tu, dict):
+                            _p = _safe_int(_tu.get("prompt_tokens")) or _safe_int(_tu.get("input_tokens"))
+                            _c = _safe_int(_tu.get("completion_tokens")) or _safe_int(_tu.get("output_tokens"))
+                            _t = _safe_int(_tu.get("total_tokens"))
+                            if _t > 0:
+                                _accumulated_tokens["prompt"] = max(_accumulated_tokens["prompt"], _p)
+                                _accumulated_tokens["completion"] = max(_accumulated_tokens["completion"], _c)
+                                _accumulated_tokens["total"] = max(_accumulated_tokens["total"], _t)
                 msg_content = getattr(output, "content", None)
                 if msg_content is None and isinstance(output, dict):
                     msg_content = output.get("content")
@@ -413,7 +438,26 @@ async def main_agent_node(state: GraphState) -> GraphState:
             final_text = _extract_ai_text(result.get("messages") or [])
 
     t4 = time.monotonic()
-    _log(f"[main_agent] LLM agent: {(t4 - t3)*1000:.0f}ms")
+    agent_ms = int((t4 - t3) * 1000)
+    _log(f"[main_agent] LLM agent: {agent_ms}ms | tokens: prompt={_accumulated_tokens['prompt']} completion={_accumulated_tokens['completion']} total={_accumulated_tokens['total']}")
+
+    # Enqueue accumulated token usage from astream_events (fallback for when
+    # TrackingChatOpenAI.agenerate doesn't capture tokens in streaming mode)
+    if _accumulated_tokens["total"] > 0:
+        from app.services.usage import enqueue_llm_usage
+        from app.core.config import get_settings as _get_settings
+        enqueue_llm_usage(
+            user_id=user_id,
+            platform=platform,
+            conversation_id=conversation_id,
+            node="main_agent_stream",
+            model=_get_settings().openai_model,
+            prompt_tokens=_accumulated_tokens["prompt"],
+            completion_tokens=_accumulated_tokens["completion"],
+            total_tokens=_accumulated_tokens["total"],
+            latency_ms=agent_ms,
+            success=True,
+        )
 
     # Fallback: use streamed text if on_chat_model_end didn't capture
     if not final_text and streamed_text_parts:
