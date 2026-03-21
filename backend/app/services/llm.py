@@ -183,43 +183,10 @@ class TrackingChatOpenAI(ChatOpenAI):
             self._enqueue(None, started, success=False, error=str(exc))
             raise
 
-    async def agenerate(self, messages: Any, stop: Any = None, callbacks: Any = None, **kwargs: Any) -> Any:
-        """覆写 agenerate 以追踪 create_react_agent 内部的 LLM 调用。"""
-        started = time.perf_counter()
-        try:
-            result = await super().agenerate(messages, stop=stop, callbacks=callbacks, **kwargs)
-            # agenerate returns LLMResult; extract token usage from llm_output
-            llm_output = getattr(result, "llm_output", None) or {}
-            token_usage = llm_output.get("token_usage", {}) if isinstance(llm_output, dict) else {}
-            prompt_tokens = _safe_int(token_usage.get("prompt_tokens"))
-            completion_tokens = _safe_int(token_usage.get("completion_tokens"))
-            total_tokens = _safe_int(token_usage.get("total_tokens"))
-            # Also try per-generation usage_metadata
-            if total_tokens <= 0:
-                for gen_list in getattr(result, "generations", []):
-                    for gen in gen_list:
-                        msg = getattr(gen, "message", None)
-                        if msg is not None:
-                            p, c, t = _extract_token_usage(msg)
-                            prompt_tokens = max(prompt_tokens, p)
-                            completion_tokens = max(completion_tokens, c)
-                            total_tokens = max(total_tokens, t)
-            enqueue_llm_usage(
-                user_id=get_tool_user_id(),
-                platform=get_tool_platform() or "",
-                conversation_id=get_tool_conversation_id(),
-                node=self._node_name,
-                model=self._get_model_name(),
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-                latency_ms=int((time.perf_counter() - started) * 1000),
-                success=True,
-            )
-            return result
-        except Exception as exc:
-            self._enqueue(None, started, success=False, error=str(exc))
-            raise
+    # NOTE: agenerate is NOT overridden here. When create_react_agent uses
+    # astream_events, token tracking is handled by main_agent.py's
+    # on_chat_model_end event handler which accumulates usage_metadata across
+    # multi-turn tool calls. This avoids double-counting.
 
 
 def get_llm(model: str | None = None, node_name: str = "unknown") -> TrackingChatOpenAI:

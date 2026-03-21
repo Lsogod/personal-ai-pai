@@ -299,7 +299,6 @@ async def main_agent_node(state: GraphState) -> GraphState:
         audit_hook=_audit_hook_factory(user_id, platform, conversation_id),
     )
     tools = build_node_langchain_tools(context=ctx, node_name="main_agent")
-    _log(f"[main_agent] tools bound: {[getattr(t, 'name', '?') for t in tools]} ({len(tools)} total)")
 
     context_text = render_conversation_context(state)
     skills = await load_skills(session=session, user_id=user_id, query=content)
@@ -450,7 +449,7 @@ async def main_agent_node(state: GraphState) -> GraphState:
             user_id=user_id,
             platform=platform,
             conversation_id=conversation_id,
-            node="main_agent_stream",
+            node="main_agent",
             model=_get_settings().openai_model,
             prompt_tokens=_accumulated_tokens["prompt"],
             completion_tokens=_accumulated_tokens["completion"],
