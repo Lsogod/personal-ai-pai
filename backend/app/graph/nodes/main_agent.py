@@ -292,6 +292,7 @@ async def main_agent_node(state: GraphState) -> GraphState:
         audit_hook=_audit_hook_factory(user_id, platform, conversation_id),
     )
     tools = build_node_langchain_tools(context=ctx, node_name="main_agent")
+    _log(f"[main_agent] tools bound: {[getattr(t, 'name', '?') for t in tools]} ({len(tools)} total)")
 
     context_text = render_conversation_context(state)
     skills = await load_skills(session=session, user_id=user_id, query=content)
@@ -376,6 +377,7 @@ async def main_agent_node(state: GraphState) -> GraphState:
             elif kind == "on_chat_model_end":
                 data = event.get("data", {})
                 output = data.get("output", data) if isinstance(data, dict) else data
+                _log(f"[main_agent] on_chat_model_end: tool_calls={getattr(output, 'tool_calls', None)}, content_type={type(getattr(output, 'content', None)).__name__}, content_preview={str(getattr(output, 'content', ''))[:200]}")
                 msg_content = getattr(output, "content", None)
                 if msg_content is None and isinstance(output, dict):
                     msg_content = output.get("content")
