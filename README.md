@@ -13,6 +13,10 @@
 
 </div>
 
+> **🔀 分支说明**
+> - `main` — 多节点路由架构（Router → 专业领域节点），当前分支
+> - [`feat/single-agent`](../../tree/feat/single-agent) — **单 Agent + 丰富工具集架构**，消除 Router 串行 LLM 调用，简单对话仅需 1 次 LLM 调用即可响应，延迟大幅降低。详见该分支 README。
+
 ---
 
 ## 📐 系统架构
