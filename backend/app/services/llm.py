@@ -59,7 +59,22 @@ def _extract_token_usage(output: Any) -> tuple[int, int, int]:
     return prompt_tokens, completion_tokens, total_tokens
 
 
+def _is_reasoning_chunk(chunk: Any) -> bool:
+    """Check if this chunk contains reasoning/thinking content (e.g. GLM5)."""
+    # LangChain wraps additional_kwargs from the raw delta
+    additional = getattr(chunk, "additional_kwargs", None)
+    if isinstance(additional, dict) and additional.get("reasoning_content"):
+        return True
+    # Some providers put it directly on the chunk
+    if getattr(chunk, "reasoning_content", None):
+        return True
+    return False
+
+
 def _extract_stream_text(chunk: Any) -> str:
+    # Skip reasoning/thinking tokens – don't send to user
+    if _is_reasoning_chunk(chunk):
+        return ""
     content = getattr(chunk, "content", None)
     if isinstance(content, str):
         return content
@@ -103,6 +118,32 @@ class TrackingChatOpenAI(ChatOpenAI):
             return False
         return self._node_name in allowed_nodes
 
+    def _enqueue(
+        self,
+        output: Any,
+        started: float,
+        *,
+        success: bool = True,
+        error: str = "",
+    ) -> None:
+        if success:
+            prompt_tokens, completion_tokens, total_tokens = _extract_token_usage(output)
+        else:
+            prompt_tokens = completion_tokens = total_tokens = 0
+        enqueue_llm_usage(
+            user_id=get_tool_user_id(),
+            platform=get_tool_platform() or "",
+            conversation_id=get_tool_conversation_id(),
+            node=self._node_name,
+            model=self._get_model_name(),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            success=success,
+            error=error,
+        )
+
     async def _ainvoke_with_stream(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
         streamer = get_llm_streamer()
         if streamer is None:
@@ -122,7 +163,6 @@ class TrackingChatOpenAI(ChatOpenAI):
                 try:
                     full_output = full_output + chunk
                 except Exception:
-                    # Keep the latest chunk if provider object doesn't support `+`.
                     full_output = chunk
 
         if full_output is not None:
@@ -131,52 +171,28 @@ class TrackingChatOpenAI(ChatOpenAI):
 
     async def ainvoke(self, input: Any, config: Any = None, **kwargs: Any) -> Any:
         started = time.perf_counter()
-        user_id = get_tool_user_id()
-        platform = get_tool_platform() or ""
-        conversation_id = get_tool_conversation_id()
-        model_name = self._get_model_name()
         try:
             if self._is_stream_enabled_for_current_call():
                 output = await self._ainvoke_with_stream(input, config=config, **kwargs)
             else:
                 output = await super().ainvoke(input, config=config, **kwargs)
-            prompt_tokens, completion_tokens, total_tokens = _extract_token_usage(output)
-            enqueue_llm_usage(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                node=self._node_name,
-                model=model_name,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-                latency_ms=int((time.perf_counter() - started) * 1000),
-                success=True,
-            )
+            self._enqueue(output, started)
             return output
         except Exception as exc:
-            enqueue_llm_usage(
-                user_id=user_id,
-                platform=platform,
-                conversation_id=conversation_id,
-                node=self._node_name,
-                model=model_name,
-                prompt_tokens=0,
-                completion_tokens=0,
-                total_tokens=0,
-                latency_ms=int((time.perf_counter() - started) * 1000),
-                success=False,
-                error=str(exc),
-            )
+            self._enqueue(None, started, success=False, error=str(exc))
             raise
 
 
 def get_llm(model: str | None = None, node_name: str = "unknown") -> TrackingChatOpenAI:
     settings = get_settings()
+    resolved_model = model or settings.openai_model
+
     return TrackingChatOpenAI(
-        model=model or settings.openai_model,
+        model=resolved_model,
         api_key=settings.openai_api_key,
         base_url=settings.openai_base_url,
         temperature=0.2,
+        max_tokens=16384,
         node_name=node_name,
+        stream_usage=True,
     )

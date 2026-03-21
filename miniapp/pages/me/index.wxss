@@ -133,19 +133,19 @@
 }
 
 .menu-icon-purple {
-  background: #f3e8ff;
+  background: var(--c-icon-bg-purple);
 }
 
 .menu-icon-blue {
-  background: var(--c-primary-light);
+  background: var(--c-icon-bg-primary);
 }
 
 .menu-icon-orange {
-  background: #fff4e5;
+  background: var(--c-icon-bg-orange);
 }
 
 .menu-icon-green {
-  background: #e8fbf0;
+  background: var(--c-icon-bg-green);
 }
 
 .menu-label {

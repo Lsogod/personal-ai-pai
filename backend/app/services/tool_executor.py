@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, TypedDict
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -10,15 +10,18 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import delete, select
 
 from app.core.config import get_settings
+from app.models.conversation import Conversation
 from app.models.ledger import Ledger
+from app.models.memory import LongTermMemory
+from app.models.message import Message
 from app.models.reminder_delivery import ReminderDelivery
 from app.models.schedule import Schedule
 from app.models.user import User
 from app.services.admin_tools import is_tool_enabled
 from app.services.conversations import ensure_active_conversation, list_conversations
-from app.services.memory import list_long_term_memories
+from app.services.memory import find_active_long_term_memory, list_long_term_memories, upsert_long_term_memories
 from app.services.mcp_fetch import get_mcp_client_for_tool, get_mcp_fetch_client
-from app.services.runtime_context import get_scheduler, get_session
+from app.services.runtime_context import get_scheduler, get_session, get_tool_message_id
 from app.services.scheduler_tasks import send_reminder_job
 from app.services.tool_registry import (
     get_allowed_mcp_tool_names_for,
@@ -57,6 +60,16 @@ BUILTIN_TOOL_ALIAS: dict[str, str] = {
 }
 
 
+def _to_client_tz_iso(value: datetime | None, *, assume_utc: bool) -> str:
+    if value is None:
+        return ""
+    tz = ZoneInfo(get_settings().timezone)
+    if value.tzinfo is None:
+        source_tz = ZoneInfo("UTC") if assume_utc else tz
+        value = value.replace(tzinfo=source_tz)
+    return value.astimezone(tz).isoformat(timespec="seconds")
+
+
 def _render_now_time(timezone: str) -> str:
     tz = (timezone or "").strip() or "Asia/Shanghai"
     try:
@@ -79,6 +92,57 @@ def _render_mcp_tool_rows(rows: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+async def _mark_source_message_memory_processed(
+    *,
+    session,
+    user_id: int,
+    conversation_id: int | None,
+    source_message_id: int | None,
+) -> None:
+    try:
+        message_id = int(source_message_id or 0)
+    except Exception:
+        return
+    if message_id <= 0:
+        return
+    row = await session.get(Message, message_id)
+    if (
+        row is None
+        or int(row.user_id or 0) != int(user_id)
+        or str(row.role or "").strip().lower() != "user"
+    ):
+        return
+    if conversation_id is not None and int(row.conversation_id or 0) != int(conversation_id):
+        return
+    row.memory_status = "PROCESSED"
+    row.memory_processed_at = datetime.now(ZoneInfo("UTC"))
+    row.memory_error = None
+    session.add(row)
+
+    conv_id = int(row.conversation_id or 0)
+    if conv_id > 0:
+        conversation = await session.get(Conversation, conv_id)
+        if conversation is not None and int(conversation.user_id or 0) == int(user_id):
+            prev = int(conversation.memory_last_processed_message_id or 0)
+            if prev < message_id:
+                conversation.memory_last_processed_message_id = message_id
+            conversation.memory_extracted_at = datetime.now(ZoneInfo("UTC"))
+            session.add(conversation)
+    await session.commit()
+
+
+def _long_term_memory_to_payload(row: LongTermMemory) -> dict[str, Any]:
+    return {
+        "id": int(row.id or 0),
+        "memory_key": str(row.memory_key or ""),
+        "memory_type": str(row.memory_type or ""),
+        "content": str(row.content or ""),
+        "importance": int(row.importance or 3),
+        "confidence": round(float(row.confidence or 0.0), 3),
+        "updated_at": _to_client_tz_iso(getattr(row, "updated_at", None), assume_utc=True),
+    }
+
+
 def _try_parse_json_payload(text: str) -> Any | None:
     payload = (text or "").strip()
     if not payload:
@@ -97,11 +161,22 @@ def _resolve_user_id(value: Any) -> int:
     return user_id
 
 
-def _parse_datetime_arg(value: Any) -> datetime | None:
+def _normalize_datetime_text(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
+        return ""
+    return text.replace("T", " ").replace("/", "-")
+
+
+def _is_date_only_text(value: Any) -> bool:
+    normalized = _normalize_datetime_text(value)
+    return len(normalized) == 10 and normalized.count("-") == 2 and ":" not in normalized
+
+
+def _parse_local_naive_arg(value: Any) -> datetime | None:
+    normalized = _normalize_datetime_text(value)
+    if not normalized:
         return None
-    normalized = text.replace("T", " ").replace("/", "-")
     if normalized.endswith("Z"):
         normalized = normalized[:-1] + "+00:00"
     try:
@@ -114,6 +189,22 @@ def _parse_datetime_arg(value: Any) -> datetime | None:
     return dt.astimezone(local_tz).replace(tzinfo=None)
 
 
+def _parse_utc_naive_arg(value: Any) -> datetime | None:
+    normalized = _normalize_datetime_text(value)
+    if not normalized:
+        return None
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(normalized)
+    except Exception:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+    local_tz = ZoneInfo(get_settings().timezone)
+    return dt.replace(tzinfo=local_tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+
 def _ledger_to_payload(row: Ledger) -> dict[str, Any]:
     return {
         "id": int(row.id or 0),
@@ -123,7 +214,7 @@ def _ledger_to_payload(row: Ledger) -> dict[str, Any]:
         "category": str(row.category or ""),
         "item": str(row.item or ""),
         "image_url": str(row.image_url or ""),
-        "transaction_date": row.transaction_date.isoformat(sep=" ", timespec="seconds") if row.transaction_date else "",
+        "transaction_date": _to_client_tz_iso(row.transaction_date, assume_utc=True),
     }
 
 
@@ -134,7 +225,7 @@ def _schedule_to_payload(row: Schedule) -> dict[str, Any]:
         "job_id": str(row.job_id or ""),
         "content": str(row.content or ""),
         "status": str(row.status or ""),
-        "trigger_time": row.trigger_time.isoformat(sep=" ", timespec="seconds") if row.trigger_time else "",
+        "trigger_time": _to_client_tz_iso(row.trigger_time, assume_utc=False),
     }
 
 
@@ -144,11 +235,7 @@ def _conversation_to_payload(row: Any, active_id: int | None) -> dict[str, Any]:
         "id": row_id,
         "title": str(getattr(row, "title", "") or ""),
         "summary": str(getattr(row, "summary", "") or ""),
-        "last_message_at": (
-            getattr(row, "last_message_at").isoformat(sep=" ", timespec="seconds")
-            if getattr(row, "last_message_at", None) is not None
-            else ""
-        ),
+        "last_message_at": _to_client_tz_iso(getattr(row, "last_message_at", None), assume_utc=True),
         "active": bool(active_id and row_id == int(active_id)),
     }
 
@@ -363,7 +450,7 @@ async def execute_capability(
                     return _result(False, error="invalid amount")
                 category = str(params.get("category") or "其他").strip() or "其他"
                 item = str(params.get("item") or "消费").strip() or "消费"
-                transaction_date = _parse_datetime_arg(params.get("transaction_date")) or datetime.utcnow()
+                transaction_date = _parse_utc_naive_arg(params.get("transaction_date")) or datetime.utcnow()
                 image_url = str(params.get("image_url") or "").strip() or None
                 session = get_session()
                 row = await insert_ledger(
@@ -399,7 +486,7 @@ async def execute_capability(
                         return _result(False, error="invalid amount")
                 category = str(params.get("category") or "").strip() or None
                 item = str(params.get("item") or "").strip() or None
-                transaction_date = _parse_datetime_arg(params.get("transaction_date"))
+                transaction_date = _parse_utc_naive_arg(params.get("transaction_date"))
                 session = get_session()
                 row = await update_ledger(
                     session=session,
@@ -492,8 +579,12 @@ async def execute_capability(
                     if picked_ids:
                         stmt = stmt.where(Ledger.id.in_(picked_ids))
 
-                start_at = _parse_datetime_arg(params.get("start_at"))
-                end_at = _parse_datetime_arg(params.get("end_at"))
+                start_at_raw = params.get("start_at")
+                end_at_raw = params.get("end_at")
+                start_at = _parse_utc_naive_arg(start_at_raw)
+                end_at = _parse_utc_naive_arg(end_at_raw)
+                if end_at is not None and _is_date_only_text(end_at_raw):
+                    end_at += timedelta(days=1)
                 if start_at is not None:
                     stmt = stmt.where(Ledger.transaction_date >= start_at)
                 if end_at is not None:
@@ -576,6 +667,196 @@ async def execute_capability(
                     output_data=payload or [],
                 )
 
+            if tool_l == "memory_save":
+                uid = _resolve_user_id(params.get("user_id", user_id))
+                if uid <= 0:
+                    return _result(False, error="missing required arg: user_id")
+                content = str(params.get("content") or "").strip()
+                if not content:
+                    return _result(False, error="missing required arg: content")
+                memory_type = str(params.get("memory_type") or "fact").strip().lower() or "fact"
+                memory_key = str(params.get("key") or "").strip()
+                try:
+                    importance = int(params.get("importance") or 3)
+                except Exception:
+                    importance = 3
+                importance = max(1, min(5, importance))
+                try:
+                    confidence = float(params.get("confidence") or 1.0)
+                except Exception:
+                    confidence = 1.0
+                confidence = max(0.0, min(1.0, confidence))
+                try:
+                    ttl_days = int(params.get("ttl_days") or settings.long_term_memory_default_ttl_days)
+                except Exception:
+                    ttl_days = int(settings.long_term_memory_default_ttl_days)
+                ttl_days = max(1, ttl_days)
+
+                session = get_session()
+                source_message_id = _resolve_user_id(params.get("source_message_id") or get_tool_message_id())
+                processed = await upsert_long_term_memories(
+                    session=session,
+                    user_id=uid,
+                    conversation_id=conversation_id,
+                    source_message_id=(source_message_id or None),
+                    candidates=[
+                        {
+                            "op": "save",
+                            "memory_type": memory_type,
+                            "key": memory_key,
+                            "content": content,
+                            "importance": importance,
+                            "confidence": confidence,
+                            "ttl_days": ttl_days,
+                        }
+                    ],
+                    user_text=f"用户明确要求记住：{content}",
+                    bypass_refine=True,
+                )
+                if processed <= 0:
+                    return _result(False, error="memory not saved")
+                await _mark_source_message_memory_processed(
+                    session=session,
+                    user_id=uid,
+                    conversation_id=conversation_id,
+                    source_message_id=(source_message_id or None),
+                )
+                payload = {
+                    "status": "saved",
+                    "content": content,
+                    "memory_type": memory_type,
+                    "importance": importance,
+                    "confidence": confidence,
+                    "ttl_days": ttl_days,
+                    "source_message_id": source_message_id or None,
+                    "conversation_id": conversation_id,
+                }
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
+
+            if tool_l == "memory_append":
+                uid = _resolve_user_id(params.get("user_id", user_id))
+                if uid <= 0:
+                    return _result(False, error="missing required arg: user_id")
+                append_text = str(params.get("content") or "").strip()
+                if not append_text:
+                    return _result(False, error="missing required arg: content")
+                memory_id = _resolve_user_id(params.get("memory_id")) or None
+                memory_key = str(params.get("memory_key") or "").strip()
+                target_hint = str(params.get("target_hint") or "").strip()
+                memory_type = str(params.get("memory_type") or "").strip().lower()
+                separator = str(params.get("separator") or "；").strip() or "；"
+                session = get_session()
+                target = await find_active_long_term_memory(
+                    session=session,
+                    user_id=uid,
+                    memory_id=memory_id,
+                    memory_key=memory_key,
+                    content_hint=target_hint,
+                    memory_type=memory_type,
+                )
+                if target is None:
+                    return _result(False, error="target memory not found")
+
+                current_content = str(target.content or "").strip()
+                if append_text in current_content:
+                    source_message_id = _resolve_user_id(params.get("source_message_id") or get_tool_message_id()) or None
+                    await _mark_source_message_memory_processed(
+                        session=session,
+                        user_id=uid,
+                        conversation_id=conversation_id,
+                        source_message_id=source_message_id,
+                    )
+                    payload = {
+                        "status": "unchanged",
+                        "memory": _long_term_memory_to_payload(target),
+                    }
+                    return _result(
+                        True,
+                        output=json.dumps(payload, ensure_ascii=False),
+                        output_data=payload,
+                    )
+
+                target.content = f"{current_content}{separator}{append_text}" if current_content else append_text
+                importance_raw = params.get("importance")
+                if importance_raw is not None and str(importance_raw).strip() != "":
+                    try:
+                        target.importance = max(1, min(5, int(importance_raw)))
+                    except Exception:
+                        pass
+                confidence_raw = params.get("confidence")
+                if confidence_raw is not None and str(confidence_raw).strip() != "":
+                    try:
+                        target.confidence = max(0.0, min(1.0, float(confidence_raw)))
+                    except Exception:
+                        pass
+                ttl_days_raw = params.get("ttl_days")
+                if ttl_days_raw is not None and str(ttl_days_raw).strip() != "":
+                    try:
+                        ttl_days = max(1, int(ttl_days_raw))
+                        target.expires_at = datetime.now(ZoneInfo("UTC")) + timedelta(days=ttl_days)
+                    except Exception:
+                        pass
+                target.conversation_id = conversation_id
+                target.source_message_id = _resolve_user_id(params.get("source_message_id") or get_tool_message_id()) or None
+                target.updated_at = datetime.now(ZoneInfo("UTC"))
+                session.add(target)
+                await session.commit()
+                await session.refresh(target)
+                await _mark_source_message_memory_processed(
+                    session=session,
+                    user_id=uid,
+                    conversation_id=conversation_id,
+                    source_message_id=target.source_message_id,
+                )
+                payload = {
+                    "status": "appended",
+                    "memory": _long_term_memory_to_payload(target),
+                }
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
+
+            if tool_l == "memory_delete":
+                uid = _resolve_user_id(params.get("user_id", user_id))
+                if uid <= 0:
+                    return _result(False, error="missing required arg: user_id")
+                memory_id = _resolve_user_id(params.get("memory_id")) or None
+                memory_key = str(params.get("memory_key") or "").strip()
+                target_hint = str(params.get("target_hint") or "").strip()
+                memory_type = str(params.get("memory_type") or "").strip().lower()
+                session = get_session()
+                target = await find_active_long_term_memory(
+                    session=session,
+                    user_id=uid,
+                    memory_id=memory_id,
+                    memory_key=memory_key,
+                    content_hint=target_hint,
+                    memory_type=memory_type,
+                )
+                if target is None:
+                    return _result(False, error="target memory not found")
+                payload = _long_term_memory_to_payload(target)
+                source_message_id = _resolve_user_id(params.get("source_message_id") or get_tool_message_id()) or None
+                await session.delete(target)
+                await session.commit()
+                await _mark_source_message_memory_processed(
+                    session=session,
+                    user_id=uid,
+                    conversation_id=conversation_id,
+                    source_message_id=source_message_id,
+                )
+                return _result(
+                    True,
+                    output=json.dumps({"status": "deleted", "memory": payload}, ensure_ascii=False),
+                    output_data={"status": "deleted", "memory": payload},
+                )
+
             if tool_l == "schedule_insert":
                 uid = _resolve_user_id(params.get("user_id", user_id))
                 if uid <= 0:
@@ -583,9 +864,15 @@ async def execute_capability(
                 content = str(params.get("content") or "").strip()
                 if not content:
                     return _result(False, error="missing required arg: content")
-                trigger_time = _parse_datetime_arg(params.get("trigger_time"))
+                raw_trigger = str(params.get("trigger_time") or "").strip()
+                trigger_time = _parse_local_naive_arg(raw_trigger)
                 if trigger_time is None:
-                    return _result(False, error="missing or invalid arg: trigger_time")
+                    return _result(
+                        False,
+                        error=f"无法解析 trigger_time='{raw_trigger}'。"
+                              "请使用绝对时间格式（如 '2025-03-20 15:30:00'）"
+                              "或相对时间（如 '10秒后'、'5分钟后'、'明天下午3点'、'下周一上午10点'）重试。",
+                    )
                 status = str(params.get("status") or "PENDING").strip().upper() or "PENDING"
                 job_id = str(params.get("job_id") or "").strip() or str(uuid4())
                 session = get_session()
@@ -625,8 +912,16 @@ async def execute_capability(
                 content_value = str(params.get("content") or "").strip()
                 if content_value:
                     row.content = content_value
-                trigger_time = _parse_datetime_arg(params.get("trigger_time"))
-                if trigger_time is not None:
+                raw_trigger_upd = str(params.get("trigger_time") or "").strip()
+                if raw_trigger_upd:
+                    trigger_time = _parse_local_naive_arg(raw_trigger_upd)
+                    if trigger_time is None:
+                        return _result(
+                            False,
+                            error=f"无法解析 trigger_time='{raw_trigger_upd}'。"
+                                  "请使用绝对时间格式（如 '2025-03-20 15:30:00'）"
+                                  "或相对时间（如 '10秒后'、'5分钟后'、'明天下午3点'）重试。",
+                        )
                     row.trigger_time = trigger_time
                 status_value = str(params.get("status") or "").strip().upper()
                 if status_value:
@@ -673,6 +968,49 @@ async def execute_capability(
                     output_data=payload,
                 )
 
+            if tool_l == "schedule_get_latest":
+                uid = _resolve_user_id(params.get("user_id", user_id))
+                if uid <= 0:
+                    return _result(False, error="missing required arg: user_id")
+                session = get_session()
+                stmt = (
+                    select(Schedule)
+                    .where(Schedule.user_id == uid)
+                    .order_by(Schedule.id.desc())
+                    .limit(1)
+                )
+                result = await session.execute(stmt)
+                row = result.scalars().first()
+                if row is None:
+                    return _result(True, output="{}", output_data={})
+                payload = _schedule_to_payload(row)
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
+
+            if tool_l == "schedule_list_recent":
+                uid = _resolve_user_id(params.get("user_id", user_id))
+                if uid <= 0:
+                    return _result(False, error="missing required arg: user_id")
+                limit = max(1, min(100, int(params.get("limit") or 10)))
+                session = get_session()
+                stmt = (
+                    select(Schedule)
+                    .where(Schedule.user_id == uid)
+                    .order_by(Schedule.id.desc())
+                    .limit(limit)
+                )
+                result = await session.execute(stmt)
+                rows = list(result.scalars().all())
+                payload = [_schedule_to_payload(item) for item in rows]
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
+
             if tool_l == "schedule_list":
                 uid = _resolve_user_id(params.get("user_id", user_id))
                 if uid <= 0:
@@ -693,8 +1031,12 @@ async def execute_capability(
                     if picked_ids:
                         stmt = stmt.where(Schedule.id.in_(picked_ids))
 
-                start_at = _parse_datetime_arg(params.get("start_at"))
-                end_at = _parse_datetime_arg(params.get("end_at"))
+                start_at_raw = params.get("start_at")
+                end_at_raw = params.get("end_at")
+                start_at = _parse_local_naive_arg(start_at_raw)
+                end_at = _parse_local_naive_arg(end_at_raw)
+                if end_at is not None and _is_date_only_text(end_at_raw):
+                    end_at += timedelta(days=1)
                 if start_at is not None:
                     stmt = stmt.where(Schedule.trigger_time >= start_at)
                 if end_at is not None:

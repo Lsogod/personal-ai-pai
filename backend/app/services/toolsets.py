@@ -25,6 +25,9 @@ CONVERSATION_TOOL_NAMES: set[str] = {
     "conversation_current",
     "conversation_list",
     "memory_list",
+    "memory_save",
+    "memory_append",
+    "memory_delete",
 }
 
 LEDGER_TOOL_NAMES: set[str] = {
@@ -39,11 +42,17 @@ LEDGER_TOOL_NAMES: set[str] = {
 }
 
 SCHEDULE_TOOL_NAMES: set[str] = {
-    "ledger_list",
     "schedule_insert",
     "schedule_update",
     "schedule_delete",
+    "schedule_get_latest",
+    "schedule_list_recent",
     "schedule_list",
+}
+
+PROFILE_TOOL_NAMES: set[str] = {
+    "update_user_profile",
+    "query_user_profile",
 }
 
 # Node-scoped tool visibility. Nodes should consume tools from this registry

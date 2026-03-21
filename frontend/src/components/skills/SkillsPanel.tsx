@@ -13,6 +13,7 @@ import {
 } from "../../lib/api";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader } from "../ui/card";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Input } from "../ui/input";
 import { Zap, RefreshCw, Sparkles } from "../ui/icons";
 
@@ -50,6 +51,7 @@ export function SkillsPanel({ token }: SkillsPanelProps) {
   const [requestText, setRequestText] = useState("");
   const [draftPreview, setDraftPreview] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [disableConfirmOpen, setDisableConfirmOpen] = useState(false);
 
   const { data: skills = [] } = useQuery<SkillItem[]>({
     queryKey: ["skills"],
@@ -124,6 +126,7 @@ export function SkillsPanel({ token }: SkillsPanelProps) {
               <h2 className="text-sm font-semibold text-content">我的技能</h2>
             </div>
             <button
+              aria-label="刷新技能列表"
               onClick={() => queryClient.invalidateQueries({ queryKey: ["skills"] })}
               className="p-1.5 rounded-lg text-content-tertiary hover:text-content hover:bg-surface-hover transition-colors"
             >
@@ -231,7 +234,7 @@ export function SkillsPanel({ token }: SkillsPanelProps) {
               </Button>
               <Button
                 variant="danger"
-                onClick={() => disableMutation.mutate()}
+                onClick={() => setDisableConfirmOpen(true)}
                 disabled={!selected || selected.read_only || disableMutation.isPending}
               >
                 停用
@@ -262,6 +265,18 @@ export function SkillsPanel({ token }: SkillsPanelProps) {
           </div>
         </CardContent>
       </Card>
+      <ConfirmDialog
+        open={disableConfirmOpen}
+        title="停用技能"
+        message={`确定要停用技能「${selected?.slug || ""}」吗？停用后该技能将不再生效。`}
+        confirmText="停用"
+        variant="danger"
+        onConfirm={() => {
+          setDisableConfirmOpen(false);
+          disableMutation.mutate();
+        }}
+        onCancel={() => setDisableConfirmOpen(false)}
+      />
     </div>
   );
 }

@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_or_create_user
@@ -48,6 +48,8 @@ from app.services.runtime_context import (
     reset_tool_platform,
     set_tool_conversation_id,
     reset_tool_conversation_id,
+    set_tool_message_id,
+    reset_tool_message_id,
     set_llm_streamer,
     reset_llm_streamer,
     set_llm_stream_nodes,
@@ -64,6 +66,18 @@ _memory_tasks: set[asyncio.Task[Any]] = set()
 _memory_debounce_tasks: dict[tuple[int, int], asyncio.Task[Any]] = {}
 _memory_debounce_payloads: dict[tuple[int, int], dict[str, Any]] = {}
 REBIND_HINT_PATTERN = re.compile(r"(换绑|改绑|解绑|重新绑定|rebind|unbind|re-bind|un-bind)", re.IGNORECASE)
+MEMORY_STATUS_PENDING = "PENDING"
+MEMORY_STATUS_PROCESSED = "PROCESSED"
+MEMORY_STATUS_FAILED = "FAILED"
+MEMORY_STATUS_SKIPPED = "SKIPPED"
+MEMORY_DONE_STATUSES = {MEMORY_STATUS_PROCESSED, MEMORY_STATUS_SKIPPED}
+
+
+def _pending_memory_clause():
+    return or_(
+        Message.memory_status.is_(None),
+        Message.memory_status.in_([MEMORY_STATUS_PENDING, MEMORY_STATUS_FAILED]),
+    )
 
 
 def _today_start_utc_naive() -> datetime:
@@ -191,11 +205,24 @@ async def _mark_conversation_memory_processed(
 
     try:
         async with AsyncSessionLocal() as mark_session:
+            message = await mark_session.get(Message, message_id)
+            if (
+                message is None
+                or int(message.user_id or 0) != int(user_id)
+                or int(message.conversation_id or 0) != int(conversation_id)
+                or str(message.role or "").strip().lower() != "user"
+            ):
+                return
+            message.memory_status = MEMORY_STATUS_PROCESSED
+            message.memory_processed_at = datetime.now(timezone.utc)
+            message.memory_error = None
+            mark_session.add(message)
             conversation = await mark_session.get(Conversation, int(conversation_id))
             if conversation is None or int(conversation.user_id or 0) != int(user_id):
                 return
             prev = int(conversation.memory_last_processed_message_id or 0)
             if prev >= message_id and conversation.memory_extracted_at is not None:
+                await mark_session.commit()
                 return
             if prev < message_id:
                 conversation.memory_last_processed_message_id = message_id
@@ -209,6 +236,108 @@ async def _mark_conversation_memory_processed(
             conversation_id,
             user_message_id,
         )
+
+
+async def _mark_message_memory_failed(
+    *,
+    user_id: int,
+    conversation_id: int,
+    user_message_id: int | None,
+    error: str = "",
+) -> None:
+    if user_message_id is None:
+        return
+    try:
+        message_id = int(user_message_id)
+    except Exception:
+        return
+    if message_id <= 0:
+        return
+    try:
+        async with AsyncSessionLocal() as mark_session:
+            message = await mark_session.get(Message, message_id)
+            if (
+                message is None
+                or int(message.user_id or 0) != int(user_id)
+                or int(message.conversation_id or 0) != int(conversation_id)
+                or str(message.role or "").strip().lower() != "user"
+            ):
+                return
+            message.memory_status = MEMORY_STATUS_FAILED
+            message.memory_error = (error or "").strip()[:500] or None
+            mark_session.add(message)
+            await mark_session.commit()
+    except Exception:
+        logger.exception(
+            "mark message memory failed status failed: user_id=%s conversation_id=%s message_id=%s",
+            user_id,
+            conversation_id,
+            user_message_id,
+        )
+
+
+async def _mark_message_memory_skipped(
+    *,
+    user_id: int,
+    conversation_id: int,
+    user_message_id: int | None,
+) -> None:
+    if user_message_id is None:
+        return
+    try:
+        message_id = int(user_message_id)
+    except Exception:
+        return
+    if message_id <= 0:
+        return
+    try:
+        async with AsyncSessionLocal() as mark_session:
+            message = await mark_session.get(Message, message_id)
+            if (
+                message is None
+                or int(message.user_id or 0) != int(user_id)
+                or int(message.conversation_id or 0) != int(conversation_id)
+                or str(message.role or "").strip().lower() != "user"
+            ):
+                return
+            message.memory_status = MEMORY_STATUS_SKIPPED
+            message.memory_processed_at = datetime.now(timezone.utc)
+            message.memory_error = None
+            mark_session.add(message)
+            conversation = await mark_session.get(Conversation, int(conversation_id))
+            if conversation is not None and int(conversation.user_id or 0) == int(user_id):
+                prev = int(conversation.memory_last_processed_message_id or 0)
+                if prev < message_id:
+                    conversation.memory_last_processed_message_id = message_id
+                conversation.memory_extracted_at = datetime.now(timezone.utc)
+                mark_session.add(conversation)
+            await mark_session.commit()
+    except Exception:
+        logger.exception(
+            "mark message memory skipped failed: user_id=%s conversation_id=%s message_id=%s",
+            user_id,
+            conversation_id,
+            user_message_id,
+        )
+
+
+async def _has_pending_memory_messages(
+    *,
+    session: AsyncSession,
+    user_id: int,
+    conversation_id: int,
+) -> bool:
+    stmt = (
+        select(func.count(Message.id))
+        .where(
+            Message.user_id == int(user_id),
+            Message.conversation_id == int(conversation_id),
+            Message.role == "user",
+            _pending_memory_clause(),
+        )
+    )
+    pending_count = int((await session.execute(stmt)).scalar_one() or 0)
+    return pending_count > 0
 
 
 def _build_chat_debug_payload(graph_result: Any) -> dict[str, Any] | None:
@@ -280,16 +409,21 @@ async def _run_long_term_memory_pipeline(
     if user_message_id is not None:
         try:
             async with AsyncSessionLocal() as check_session:
-                conversation = await check_session.get(Conversation, int(conversation_id))
-                if conversation is not None and int(conversation.user_id or 0) == int(user_id):
-                    processed_id = int(conversation.memory_last_processed_message_id or 0)
-                    if processed_id >= int(user_message_id):
+                message = await check_session.get(Message, int(user_message_id))
+                if (
+                    message is not None
+                    and int(message.user_id or 0) == int(user_id)
+                    and int(message.conversation_id or 0) == int(conversation_id)
+                    and str(message.role or "").strip().lower() == "user"
+                ):
+                    status = str(message.memory_status or "").strip().upper()
+                    if status in MEMORY_DONE_STATUSES:
                         logger.info(
-                            "long-term memory pipeline skipped(already processed): user_id=%s conversation_id=%s message_id=%s processed_id=%s",
+                            "long-term memory pipeline skipped(already processed): user_id=%s conversation_id=%s message_id=%s status=%s",
                             user_id,
                             conversation_id,
                             user_message_id,
-                            processed_id,
+                            status,
                         )
                         return True
         except Exception:
@@ -327,9 +461,21 @@ async def _run_long_term_memory_pipeline(
             user_id,
             conversation_id,
         )
+        await _mark_message_memory_failed(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_message_id=user_message_id,
+            error="extract_timeout",
+        )
         return False
     except Exception:
         logger.exception("long-term memory extract failed: user_id=%s", user_id)
+        await _mark_message_memory_failed(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_message_id=user_message_id,
+            error="extract_failed",
+        )
         return False
 
     if not candidates:
@@ -379,9 +525,21 @@ async def _run_long_term_memory_pipeline(
             user_id,
             conversation_id,
         )
+        await _mark_message_memory_failed(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_message_id=user_message_id,
+            error="upsert_timeout",
+        )
         return False
     except Exception:
         logger.exception("long-term memory upsert failed: user_id=%s", user_id)
+        await _mark_message_memory_failed(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            user_message_id=user_message_id,
+            error="upsert_failed",
+        )
         return False
     return True
 
@@ -402,13 +560,6 @@ def _schedule_long_term_memory_pipeline(
     _memory_debounce_payloads[key] = {
         "user_id": int(user_id),
         "conversation_id": int(conversation_id),
-        "user_message_id": int(user_message_id) if user_message_id is not None else None,
-        "user_text": str(user_text or ""),
-        "assistant_outputs": [str(item) for item in (assistant_outputs or []) if str(item).strip()],
-        "conversation_summary": str(conversation_summary or ""),
-        "user_nickname": str(user_nickname or ""),
-        "user_ai_name": str(user_ai_name or ""),
-        "user_ai_emoji": str(user_ai_emoji or ""),
     }
     previous = _memory_debounce_tasks.get(key)
     if previous is not None and not previous.done():
@@ -426,24 +577,9 @@ async def _run_debounced_long_term_memory_pipeline(key: tuple[int, int]) -> None
         payload = dict(_memory_debounce_payloads.get(key) or {})
         if not payload:
             return
-        async with AsyncSessionLocal() as mem_session:
-            context_messages = await _load_context_messages(
-                session=mem_session,
-                user_id=int(payload.get("user_id") or 0),
-                conversation_id=int(payload.get("conversation_id") or 0),
-                limit=None,
-            )
-        await _run_long_term_memory_pipeline(
+        await _run_session_long_term_memory_pipeline(
             user_id=int(payload.get("user_id") or 0),
             conversation_id=int(payload.get("conversation_id") or 0),
-            user_message_id=payload.get("user_message_id"),
-            user_text=str(payload.get("user_text") or ""),
-            assistant_outputs=[str(item) for item in (payload.get("assistant_outputs") or []) if str(item).strip()],
-            conversation_summary=str(payload.get("conversation_summary") or ""),
-            conversation_context_messages=context_messages,
-            user_nickname=str(payload.get("user_nickname") or ""),
-            user_ai_name=str(payload.get("user_ai_name") or ""),
-            user_ai_emoji=str(payload.get("user_ai_emoji") or ""),
         )
     except asyncio.CancelledError:
         return
@@ -472,85 +608,94 @@ async def _run_session_long_term_memory_pipeline(*, user_id: int, conversation_i
             user = await mem_session.get(User, int(user_id))
             if user is None:
                 return
-            context_messages = await _load_context_messages(
-                session=mem_session,
-                user_id=int(user_id),
-                conversation_id=int(conversation_id),
-                limit=None,
-            )
-            if not context_messages:
-                logger.info(
-                    "session memory backfill skipped(empty context): user_id=%s conversation_id=%s",
-                    user_id,
-                    conversation_id,
-                )
-                return
-            last_user_stmt = (
+            msg_limit = max(1, int(get_settings().long_term_memory_scan_max_messages_per_conversation or 30))
+            pending_user_stmt = (
                 select(Message)
                 .where(
                     Message.user_id == int(user_id),
                     Message.conversation_id == int(conversation_id),
                     Message.role == "user",
+                    _pending_memory_clause(),
                 )
-                .order_by(Message.id.desc())
-                .limit(1)
+                .order_by(Message.id.asc())
+                .limit(msg_limit)
             )
-            last_user_row = (await mem_session.execute(last_user_stmt)).scalars().first()
-            if last_user_row is None:
+            pending_user_rows = list((await mem_session.execute(pending_user_stmt)).scalars().all())
+            if not pending_user_rows:
                 logger.info(
-                    "session memory backfill skipped(no user msg): user_id=%s conversation_id=%s",
+                    "session memory backfill skipped(no pending user msg): user_id=%s conversation_id=%s",
                     user_id,
                     conversation_id,
                 )
                 return
-            latest_user_message_id = int(last_user_row.id)
-            processed_id = int(conversation.memory_last_processed_message_id or 0)
-            if processed_id >= latest_user_message_id:
-                logger.info(
-                    "session memory backfill skipped(already processed): user_id=%s conversation_id=%s processed_id=%s latest_user_message_id=%s",
-                    user_id,
-                    conversation_id,
-                    processed_id,
-                    latest_user_message_id,
-                )
-                return
-            seed_user_text = str(last_user_row.content or "").strip()
-            if not seed_user_text:
-                logger.info(
-                    "session memory backfill skipped(empty user text): user_id=%s conversation_id=%s",
-                    user_id,
-                    conversation_id,
-                )
-                return
-
-            assistant_outputs: list[str] = []
-            for row in reversed(context_messages):
-                if str(row.get("role") or "").strip().lower() != "assistant":
+            completed_count = 0
+            skipped_count = 0
+            failed_count = 0
+            for row in pending_user_rows:
+                message_id = int(row.id or 0)
+                seed_user_text = str(row.content or "").strip()
+                if message_id <= 0:
                     continue
-                text = str(row.get("content") or "").strip()
-                if text:
-                    assistant_outputs.append(text)
-                if len(assistant_outputs) >= 6:
-                    break
+                if not seed_user_text or seed_user_text.startswith("/"):
+                    await _mark_message_memory_skipped(
+                        user_id=int(user_id),
+                        conversation_id=int(conversation_id),
+                        user_message_id=message_id,
+                    )
+                    skipped_count += 1
+                    continue
 
-            completed = await _run_long_term_memory_pipeline(
-                user_id=int(user_id),
-                conversation_id=int(conversation_id),
-                user_message_id=latest_user_message_id,
-                user_text=seed_user_text,
-                assistant_outputs=list(reversed(assistant_outputs)),
-                conversation_summary=str(conversation.summary or "").strip(),
-                conversation_context_messages=context_messages,
-                user_nickname=str(user.nickname or ""),
-                user_ai_name=str(user.ai_name or ""),
-                user_ai_emoji=str(user.ai_emoji or ""),
-            )
-            if completed:
-                logger.info(
-                    "session memory backfill marked extracted: user_id=%s conversation_id=%s",
-                    user_id,
-                    conversation_id,
+                context_messages = await _load_context_messages(
+                    session=mem_session,
+                    user_id=int(user_id),
+                    conversation_id=int(conversation_id),
+                    limit=None,
+                    max_message_id=message_id,
                 )
+                if len(context_messages) > msg_limit * 8:
+                    context_messages = context_messages[-(msg_limit * 8) :]
+
+                assistant_outputs: list[str] = []
+                for item in reversed(context_messages):
+                    if str(item.get("role") or "").strip().lower() != "assistant":
+                        continue
+                    text = str(item.get("content") or "").strip()
+                    if text:
+                        assistant_outputs.append(text)
+                    if len(assistant_outputs) >= 6:
+                        break
+
+                completed = await _run_long_term_memory_pipeline(
+                    user_id=int(user_id),
+                    conversation_id=int(conversation_id),
+                    user_message_id=message_id,
+                    user_text=seed_user_text,
+                    assistant_outputs=list(reversed(assistant_outputs)),
+                    conversation_summary=str(conversation.summary or "").strip(),
+                    conversation_context_messages=context_messages,
+                    user_nickname=str(user.nickname or ""),
+                    user_ai_name=str(user.ai_name or ""),
+                    user_ai_emoji=str(user.ai_emoji or ""),
+                )
+                if not completed:
+                    failed_count += 1
+                    logger.warning(
+                        "session memory backfill stopped on failure: user_id=%s conversation_id=%s message_id=%s",
+                        user_id,
+                        conversation_id,
+                        message_id,
+                    )
+                    break
+                completed_count += 1
+
+            logger.info(
+                "session memory backfill finished: user_id=%s conversation_id=%s completed=%s skipped=%s failed=%s",
+                user_id,
+                conversation_id,
+                completed_count,
+                skipped_count,
+                failed_count,
+            )
     except Exception:
         logger.exception(
             "session memory extract failed: user_id=%s conversation_id=%s",
@@ -594,14 +739,13 @@ async def scan_unprocessed_memory_messages(
             conversation_id = int(conversation.id or 0)
             if user_id <= 0 or conversation_id <= 0:
                 continue
-            processed_id = int(conversation.memory_last_processed_message_id or 0)
             msg_stmt = (
                 select(Message)
                 .where(
                     Message.user_id == user_id,
                     Message.conversation_id == conversation_id,
                     Message.role == "user",
-                    Message.id > processed_id,
+                    _pending_memory_clause(),
                 )
                 .order_by(Message.id.asc())
                 .limit(msg_limit)
@@ -647,7 +791,7 @@ async def scan_unprocessed_memory_messages(
                 if message_id <= 0:
                     continue
                 if not text or text.startswith("/"):
-                    await _mark_conversation_memory_processed(
+                    await _mark_message_memory_skipped(
                         user_id=user_id,
                         conversation_id=conversation_id,
                         user_message_id=message_id,
@@ -877,6 +1021,7 @@ async def handle_message(
         role="user",
         content=message.content,
         platform=platform,
+        memory_status=MEMORY_STATUS_PENDING,
     )
     session.add(user_message_row)
     await session.commit()
@@ -905,6 +1050,29 @@ async def handle_message(
         text = str(chunk or "")
         if not text:
             return
+
+        # Tool events use a special prefix and are sent as a separate WS type.
+        TOOL_EVENT_PREFIX = "\x00TOOL_EVENT:"
+        if text.startswith(TOOL_EVENT_PREFIX):
+            import json as _json
+
+            try:
+                tool_payload = _json.loads(text[len(TOOL_EVENT_PREFIX):])
+            except Exception:
+                return
+            miniapp_stream_used = True
+            await get_notification_hub().send_to_user(
+                user_id,
+                {
+                    "type": "tool_event",
+                    **tool_payload,
+                    "stream_id": miniapp_stream_id,
+                    "platform": platform,
+                    "conversation_id": conversation.id,
+                },
+            )
+            return
+
         miniapp_stream_chunks.append(text)
         miniapp_stream_used = True
         await get_notification_hub().send_to_user(
@@ -973,6 +1141,7 @@ async def handle_message(
             tool_user_token = set_tool_user_id(user_id)
             tool_platform_token = set_tool_platform(platform)
             tool_conv_token = set_tool_conversation_id(conversation.id)
+            tool_message_token = set_tool_message_id(int(user_message_row.id or 0) or None)
             stream_token = None
             stream_nodes_token = None
             if miniapp_stream_enabled:
@@ -1006,6 +1175,7 @@ async def handle_message(
                     reset_llm_stream_nodes(stream_nodes_token)
                 if stream_token is not None:
                     reset_llm_streamer(stream_token)
+                reset_tool_message_id(tool_message_token)
                 reset_tool_conversation_id(tool_conv_token)
                 reset_tool_platform(tool_platform_token)
                 reset_tool_user_id(tool_user_token)

@@ -167,6 +167,10 @@ Page({
     conversations: [],
     loadingConversations: false,
     pendingState: "",
+    toolSteps: [],
+    toolStepsExpanded: true,
+    toolStepsDone: false,
+    toolStepsDoneCount: 0,
     inputText: "",
     guideVisible: true,
     onboardingTitle: "",
@@ -180,7 +184,8 @@ Page({
     selectedImages: [],
     sending: false,
     wsOpen: false,
-    notifyCards: []
+    notifyCards: [],
+    loadingHistory: false
   },
 
   onLoad() {
@@ -303,6 +308,7 @@ Page({
 
   async loadInitial() {
     if (!this.data.authed) return;
+    this.setData({ loadingHistory: true });
     try {
       const [profile, history, stats] = await Promise.all([
         fetchProfile(),
@@ -321,6 +327,8 @@ Page({
       this.scrollToBottom(true);
     } catch (err) {
       wx.showToast({ title: err.message || "加载失败", icon: "none" });
+    } finally {
+      this.setData({ loadingHistory: false });
     }
   },
 
@@ -494,11 +502,12 @@ Page({
     if (text) {
       const current = messages[index];
       const nextContent = `${current.content || ""}${text}`;
+      // During streaming, use plain text node to avoid broken markdown rendering
       messages[index] = {
         ...current,
         content: nextContent,
         display_content: nextContent,
-        content_nodes: markdownToRichNodes(nextContent),
+        content_nodes: [{ type: "node", name: "span", attrs: { style: "white-space:pre-wrap;" }, children: [{ type: "text", text: nextContent }] }],
       };
     }
     this.setData({ messages }, () => this.scrollToBottom());
@@ -510,8 +519,15 @@ Page({
     const index = this._wsChunkStreams.get(sid);
     this._wsChunkStreams.delete(sid);
     if (!Number.isFinite(index)) return;
-    const msg = this.data.messages[index];
+    const messages = [...this.data.messages];
+    const msg = messages[index];
     if (msg && msg.content) {
+      // Stream finished – now render full markdown
+      messages[index] = {
+        ...msg,
+        content_nodes: markdownToRichNodes(msg.content),
+      };
+      this.setData({ messages });
       this._seenKeys.add(this.messageKey(msg));
     }
     this.clearPendingByAssistantSignal();
@@ -769,6 +785,41 @@ Page({
         return;
       }
 
+      if (payload.type === "tool_event") {
+        const tc = payload.tool_call || {};
+        const event = tc.status || payload.event || ""; // "start" or "done"
+        const toolName = tc.name || "";
+        const toolLabel = tc.label || toolName;
+        if (event === "start" || event === "tool_start") {
+          const toolSteps = [...(this.data.toolSteps || [])];
+          toolSteps.push({ name: toolLabel, status: "running" });
+          const doneCount = toolSteps.filter(s => s.status === "done").length;
+          this.setData({
+            toolSteps,
+            toolStepsDoneCount: doneCount,
+            toolStepsDone: false,
+            toolStepsExpanded: true,
+            pendingState: "",
+          });
+        } else if (event === "done" || event === "tool_end") {
+          const toolSteps = [...(this.data.toolSteps || [])];
+          const idx = toolSteps.findIndex(s => s.name === toolLabel && s.status === "running");
+          if (idx !== -1) {
+            toolSteps[idx] = { ...toolSteps[idx], status: "done" };
+          }
+          const doneCount = toolSteps.filter(s => s.status === "done").length;
+          const allDone = doneCount === toolSteps.length;
+          this.setData({
+            toolSteps,
+            toolStepsDoneCount: doneCount,
+            toolStepsDone: allDone,
+            toolStepsExpanded: !allDone,
+          });
+        }
+        this.scrollToBottom();
+        return;
+      }
+
       if (payload.type === "message_chunk") {
         const streamId = String(payload.stream_id || "").trim();
         if (!streamId) return;
@@ -832,6 +883,10 @@ Page({
     };
     const list = [row, ...this.data.notifyCards].slice(0, 4);
     this.setData({ notifyCards: list });
+  },
+
+  onToggleToolSteps() {
+    this.setData({ toolStepsExpanded: !this.data.toolStepsExpanded });
   },
 
   onDismissNotify(e) {
@@ -939,7 +994,7 @@ Page({
     this.queuePendingUserEcho(text || "[图片]");
 
     // Optimistic clear: avoid keeping sent text in input while waiting server response.
-    this.setData({ sending: true, inputText: "", selectedImages: [] });
+    this.setData({ sending: true, inputText: "", selectedImages: [], toolSteps: [], toolStepsExpanded: true, toolStepsDone: false, toolStepsDoneCount: 0 });
     this.setPendingState("thinking");
     try {
       const imageUrls = selectedImagesSnapshot.map((x) => x.dataUrl);

@@ -6,9 +6,14 @@
 
 包含页面：
 - `pages/login`：`wx.login` + 后端换取 JWT
-- `pages/chat`：聊天、多图上传（base64 data URL）、实时通知 WS、提醒悬浮卡片
+- `pages/home`：首页入口，快捷功能卡片
+- `pages/chat`：聊天、多图上传（base64 data URL）、实时通知 WS、工具步骤可视化、提醒悬浮卡片
+- `pages/ledger`：账单列表与筛选统计
 - `pages/calendar`：月视图账单/日程
-- `pages/me`：身份绑定、生成绑定码、消费绑定码、订阅提醒授权
+- `pages/me`：个人中心与账号设置
+  - `pages/me/binding`：跨平台身份绑定管理
+  - `pages/me/skills`：技能管理
+  - `pages/me/feedback`：问题反馈
 
 ## 2. 后端要求
 

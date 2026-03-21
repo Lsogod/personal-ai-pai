@@ -221,12 +221,19 @@ export async function apiRequest(
   return res.json();
 }
 
+export interface ToolCallEvent {
+  name: string;
+  label: string;
+  status: "start" | "done";
+}
+
 export async function streamSsePost(
   path: string,
   payload: unknown,
   token: string | null | undefined,
   onChunk: (chunk: string) => void,
-  onDone?: (payload: { debug?: unknown }) => void
+  onDone?: (payload: { debug?: unknown }) => void,
+  onToolCall?: (event: ToolCallEvent) => void,
 ) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json"
@@ -269,7 +276,7 @@ export async function streamSsePost(
     eventDataLines = [];
     if (!payloadText) return false;
     if (payloadText === "[DONE]") return true;
-    let payload: { chunk?: unknown; done?: unknown; error?: unknown; debug?: unknown } | null = null;
+    let payload: { chunk?: unknown; done?: unknown; error?: unknown; debug?: unknown; tool_call?: unknown } | null = null;
     try {
       payload = JSON.parse(payloadText) as {
         chunk?: unknown;
@@ -291,6 +298,11 @@ export async function streamSsePost(
     }
     if (typeof payload.error === "string" && payload.error.trim()) {
       throw new Error(payload.error);
+    }
+    if (payload.tool_call && onToolCall) {
+      const tc = payload.tool_call as ToolCallEvent;
+      onToolCall(tc);
+      return false;
     }
     if (typeof payload.chunk === "string" && payload.chunk) {
       onChunk(payload.chunk);

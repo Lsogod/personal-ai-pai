@@ -118,6 +118,13 @@
 
   <!-- Log stream -->
   <view class="log-list" wx:if="{{!guideVisible}}">
+    <!-- Loading skeleton -->
+    <view wx:if="{{loadingHistory && messages.length === 0}}" class="log-list">
+      <view class="skeleton-entry" wx:for="{{[1,2,3]}}" wx:key="*this">
+        <view class="skeleton-cmd"><view class="skeleton-line w60"></view></view>
+        <view class="skeleton-result"><view class="skeleton-line w80"></view><view class="skeleton-line w40"></view></view>
+      </view>
+    </view>
     <view
       wx:for="{{messages}}"
       wx:key="index"
@@ -148,6 +155,24 @@
       <!-- System result -->
       <view wx:else class="log-result-wrap">
         <view class="log-result card">
+          <!-- Tool steps: show on last assistant message -->
+          <view wx:if="{{toolSteps.length > 0 && index === messages.length - 1}}" class="tool-steps-wrap">
+            <view class="tool-steps-header" data-expanded="{{toolStepsExpanded}}" bindtap="onToggleToolSteps">
+              <text class="tool-steps-icon">⚡</text>
+              <text class="tool-steps-summary" wx:if="{{toolStepsDone}}">已完成 {{toolSteps.length}} 个步骤</text>
+              <text class="tool-steps-summary" wx:else>执行中 ({{toolStepsDoneCount}}/{{toolSteps.length}})</text>
+              <text class="tool-steps-arrow {{toolStepsExpanded ? 'expanded' : ''}}">›</text>
+            </view>
+            <view wx:if="{{toolStepsExpanded}}" class="tool-steps-list">
+              <view wx:for="{{toolSteps}}" wx:for-item="step" wx:for-index="stepIdx" wx:key="stepIdx" class="tool-step">
+                <view class="tool-step-icon {{step.status === 'running' ? 'spinning' : 'done'}}">
+                  <text wx:if="{{step.status === 'running'}}">⟳</text>
+                  <text wx:else>✓</text>
+                </view>
+                <text class="tool-step-name">{{step.name}}</text>
+              </view>
+            </view>
+          </view>
           <view wx:if="{{item.image_urls && item.image_urls.length > 0}}" class="log-result-images">
             <image
               wx:for="{{item.image_urls}}"
@@ -168,8 +193,8 @@
       </view>
     </view>
 
-    <!-- Pending -->
-    <view wx:if="{{pendingState}}" class="log-entry">
+    <!-- Pending (no tool steps — just thinking dots) -->
+    <view wx:if="{{pendingState && toolSteps.length === 0}}" class="log-entry">
       <view class="log-result-wrap">
         <view class="log-result card log-result-pending">
           <view class="typing-line">
@@ -220,8 +245,9 @@
           bindconfirm="onConfirmSend"
         />
       </view>
-      <view class="send-btn {{inputText || selectedImages.length > 0 ? 'active' : ''}}" bindtap="onSend">
-        <image class="icon-send" src="/assets/icons/send.svg" mode="aspectFit"/>
+      <view class="send-btn {{inputText || selectedImages.length > 0 ? 'active' : ''}} {{sending ? 'sending' : ''}}" bindtap="onSend">
+        <image wx:if="{{!sending}}" class="icon-send" src="/assets/icons/send.svg" mode="aspectFit"/>
+        <text wx:else class="icon-send" style="font-size:30rpx;color:#fff;">⟳</text>
       </view>
     </view>
   </view>

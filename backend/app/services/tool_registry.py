@@ -154,6 +154,24 @@ def list_builtin_tool_metas() -> list[ToolMeta]:
             "enabled": True,
         },
         {
+            "name": "memory_save",
+            "source": "builtin",
+            "description": "将用户明确要求记住的信息直接写入长期记忆。",
+            "enabled": True,
+        },
+        {
+            "name": "memory_append",
+            "source": "builtin",
+            "description": "向已有长期记忆追加信息。",
+            "enabled": True,
+        },
+        {
+            "name": "memory_delete",
+            "source": "builtin",
+            "description": "删除一条已有长期记忆。",
+            "enabled": True,
+        },
+        {
             "name": "schedule_insert",
             "source": "builtin",
             "description": "创建一条日程或提醒记录，并安排触发任务。",

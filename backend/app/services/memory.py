@@ -6,6 +6,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
@@ -31,6 +32,15 @@ SEMANTIC_DUPLICATE_THRESHOLD = 0.82
 SEMANTIC_MERGE_STRICT_THRESHOLD = 0.9
 
 logger = logging.getLogger(__name__)
+
+
+def _to_client_tz_iso(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    tz = ZoneInfo(get_settings().timezone)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(tz).isoformat(timespec="seconds")
 
 
 class MemoryCandidateExtraction(BaseModel):
@@ -96,6 +106,45 @@ async def _invoke_structured(
     if isinstance(result, dict):
         return schema.model_validate(result)
     return schema()
+
+
+def _fallback_refined_memory_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    settings = get_settings()
+    refined: list[dict[str, Any]] = []
+    min_confidence = float(settings.long_term_memory_min_confidence)
+    for raw in candidates:
+        if not isinstance(raw, dict):
+            continue
+        op = str(raw.get("op") or "save").strip().lower()
+        if op != "save":
+            continue
+        content = str(raw.get("content") or "").strip()
+        if not content:
+            continue
+        confidence_raw = raw.get("confidence")
+        if confidence_raw is None or str(confidence_raw).strip() == "":
+            confidence = max(min_confidence, 0.8)
+        else:
+            try:
+                confidence = float(confidence_raw)
+            except Exception:
+                confidence = max(min_confidence, 0.8)
+        confidence = max(0.0, min(1.0, confidence))
+        if confidence < min_confidence:
+            continue
+        refined.append(
+            {
+                "op": "save",
+                "merge_target_id": raw.get("merge_target_id"),
+                "memory_type": _normalize_memory_type(str(raw.get("memory_type") or "fact")),
+                "key": str(raw.get("key") or "").strip(),
+                "content": content,
+                "importance": raw.get("importance"),
+                "confidence": confidence,
+                "ttl_days": raw.get("ttl_days"),
+            }
+        )
+    return refined
 
 
 async def _infer_memory_key_via_llm(
@@ -513,7 +562,8 @@ async def _llm_refine_memory_candidates(
         )
         decisions = list(getattr(parsed, "decisions", []) or [])
     except Exception:
-        return []
+        logger.exception("memory refine failed; falling back to extracted candidates")
+        return _fallback_refined_memory_candidates(prepared)
 
     by_index: dict[int, dict[str, Any]] = {}
     for item in decisions:
@@ -542,7 +592,10 @@ async def _llm_refine_memory_candidates(
             "ttl_days": decision.get("ttl_days", raw.get("ttl_days")),
         }
         refined.append(merged)
-    return refined
+    if refined:
+        return refined
+    logger.warning("memory refine returned 0 kept candidates; falling back to extracted candidates")
+    return _fallback_refined_memory_candidates(prepared)
 
 
 async def upsert_long_term_memories(
@@ -556,6 +609,7 @@ async def upsert_long_term_memories(
     user_nickname: str = "",
     user_ai_name: str = "",
     user_ai_emoji: str = "",
+    bypass_refine: bool = False,
 ) -> int:
     settings = get_settings()
     if not settings.long_term_memory_enabled:
@@ -579,11 +633,15 @@ async def upsert_long_term_memories(
     existing_by_id = {int(row.id): row for row in existing_rows if row.id is not None}
     working_rows = list(existing_rows)
 
-    vetted = await _llm_refine_memory_candidates(
-        user_text=user_text,
-        candidates=candidates,
-        existing_rows=existing_rows,
-    )
+    prepared_candidates = _prepare_memory_candidates(candidates)
+    if bypass_refine:
+        vetted = prepared_candidates
+    else:
+        vetted = await _llm_refine_memory_candidates(
+            user_text=user_text,
+            candidates=candidates,
+            existing_rows=existing_rows,
+        )
     if not vetted:
         return 0
 
@@ -960,12 +1018,110 @@ async def list_long_term_memories(
                 "content": row.content,
                 "importance": int(row.importance or 3),
                 "confidence": round(float(row.confidence or 0.0), 3),
-                "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+                "updated_at": _to_client_tz_iso(row.updated_at),
             }
         )
 
     await session.commit()
     return result
+
+
+async def find_active_long_term_memory(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    memory_id: int | None = None,
+    memory_key: str = "",
+    content_hint: str = "",
+    memory_type: str = "",
+) -> LongTermMemory | None:
+    settings = get_settings()
+    if not settings.long_term_memory_enabled:
+        return None
+
+    now = datetime.now(timezone.utc)
+    normalized_type = _normalize_memory_type(memory_type) if str(memory_type or "").strip() else ""
+    if memory_id is not None:
+        try:
+            target_id = int(memory_id)
+        except Exception:
+            target_id = 0
+        if target_id > 0:
+            row = await session.get(LongTermMemory, target_id)
+            if (
+                row is not None
+                and int(row.user_id or 0) == int(user_id)
+                and (row.expires_at is None or row.expires_at > now)
+                and not _is_identity_memory_candidate(
+                    memory_type=str(row.memory_type or ""),
+                    memory_key=str(row.memory_key or ""),
+                    content=str(row.content or ""),
+                )
+            ):
+                return row
+
+    normalized_key = _normalize_key(memory_key)
+    if normalized_key:
+        stmt = select(LongTermMemory).where(
+            LongTermMemory.user_id == user_id,
+            LongTermMemory.memory_key == normalized_key,
+            or_(LongTermMemory.expires_at.is_(None), LongTermMemory.expires_at > now),
+        )
+        row = (await session.execute(stmt)).scalar_one_or_none()
+        if row is not None and not _is_identity_memory_candidate(
+            memory_type=str(row.memory_type or ""),
+            memory_key=str(row.memory_key or ""),
+            content=str(row.content or ""),
+        ):
+            return row
+
+    hint = str(content_hint or "").strip()
+    if not hint:
+        return None
+
+    scan_limit = max(20, int(settings.long_term_memory_retrieve_scan_limit or 80))
+    stmt = (
+        select(LongTermMemory)
+        .where(
+            LongTermMemory.user_id == user_id,
+            or_(LongTermMemory.expires_at.is_(None), LongTermMemory.expires_at > now),
+        )
+        .order_by(LongTermMemory.updated_at.desc(), LongTermMemory.id.desc())
+        .limit(scan_limit)
+    )
+    rows = list((await session.execute(stmt)).scalars().all())
+    filtered_rows: list[LongTermMemory] = []
+    for row in rows:
+        if _is_identity_memory_candidate(
+            memory_type=str(row.memory_type or ""),
+            memory_key=str(row.memory_key or ""),
+            content=str(row.content or ""),
+        ):
+            continue
+        if normalized_type and str(row.memory_type or "").strip().lower() != normalized_type:
+            continue
+        filtered_rows.append(row)
+
+    if not filtered_rows:
+        return None
+
+    hint_lower = hint.lower()
+    for row in filtered_rows:
+        if hint == str(row.content or "").strip():
+            return row
+        if hint_lower == str(row.memory_key or "").strip().lower():
+            return row
+
+    best_row: LongTermMemory | None = None
+    best_score = 0.0
+    for row in filtered_rows:
+        score = _semantic_similarity(hint, str(row.content or ""))
+        if score > best_score:
+            best_score = score
+            best_row = row
+    if best_row is None or best_score < SEMANTIC_DUPLICATE_THRESHOLD:
+        return None
+    return best_row
 
 
 async def retrieve_relevant_long_term_memories(

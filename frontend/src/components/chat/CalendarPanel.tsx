@@ -11,6 +11,7 @@ import {
   type CalendarScheduleItem,
 } from "../../lib/api";
 import { Button } from "../ui/button";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import { Input } from "../ui/input";
 import { Calendar, ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from "../ui/icons";
 
@@ -114,6 +115,8 @@ export function CalendarPanel({ token }: CalendarPanelProps) {
   const startDate = formatDate(firstDay(cursor));
   const endDate = formatDate(nextMonth(cursor));
   const [selectedDate, setSelectedDate] = useState<string>(formatDate(new Date()));
+
+  const [confirmDelete, setConfirmDelete] = useState<{ id: number } | null>(null);
 
   const [showForm, setShowForm] = useState(false);
   const [formMode, setFormMode] = useState<ScheduleFormMode>("add");
@@ -221,12 +224,14 @@ export function CalendarPanel({ token }: CalendarPanelProps) {
           <button
             onClick={() => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
             className="p-1.5 rounded-lg text-content-secondary hover:text-content hover:bg-surface-hover transition-colors"
+            aria-label="上一月"
           >
             <ChevronLeft size={16} />
           </button>
           <button
             onClick={() => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
             className="p-1.5 rounded-lg text-content-secondary hover:text-content hover:bg-surface-hover transition-colors"
+            aria-label="下一月"
           >
             <ChevronRight size={16} />
           </button>
@@ -278,7 +283,10 @@ export function CalendarPanel({ token }: CalendarPanelProps) {
       <div className="flex-1 min-h-0 flex flex-col border-t border-border pt-4 mt-2">
         <div className="px-2 mb-3 flex items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-content">
-            {selectedDate} 详情
+            {(() => {
+              const [y, m, d] = selectedDate.split("-");
+              return `${Number(y)}年${Number(m)}月${Number(d)}日`;
+            })()} 详情
           </h3>
           <Button size="sm" onClick={openCreate}>
             <Plus size={14} />
@@ -337,7 +345,7 @@ export function CalendarPanel({ token }: CalendarPanelProps) {
                           <p className="text-xs text-content-tertiary truncate">{item.category}</p>
                         </div>
                         <span className="text-sm font-bold text-content font-mono">
-                          -¥{item.amount.toFixed(2)}
+                          -¥{item.amount.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       </div>
                     ))}
@@ -379,11 +387,7 @@ export function CalendarPanel({ token }: CalendarPanelProps) {
                           <Button
                             size="sm"
                             variant="danger"
-                            onClick={() => {
-                              if (window.confirm("确认删除这条日程吗？")) {
-                                deleteMutation.mutate(item.id);
-                              }
-                            }}
+                            onClick={() => setConfirmDelete({ id: item.id })}
                           >
                             <Trash2 size={13} />
                             删除
@@ -398,6 +402,19 @@ export function CalendarPanel({ token }: CalendarPanelProps) {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title="删除日程"
+        message="确认删除这条日程吗？"
+        variant="danger"
+        confirmText="删除"
+        onConfirm={() => {
+          if (confirmDelete) deleteMutation.mutate(confirmDelete.id);
+          setConfirmDelete(null);
+        }}
+        onCancel={() => setConfirmDelete(null)}
+      />
     </div>
   );
 }
