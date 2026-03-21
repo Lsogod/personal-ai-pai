@@ -148,7 +148,7 @@
               bindtap="onPreviewBubbleImage"
             />
           </view>
-          <text class="log-cmd-text" user-select="true">{{item.content}}</text>
+          <text wx:if="{{item.display_content}}" class="log-cmd-text" user-select="true">{{item.display_content}}</text>
         </view>
         <text class="log-time">{{item.timeText}}</text>
       </view>

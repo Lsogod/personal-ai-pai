@@ -10,6 +10,7 @@ export interface ChatMessage {
   role: string;
   content: string;
   created_at: string;
+  image_urls?: string[];
 }
 
 export interface ToolStep {
@@ -44,6 +45,14 @@ interface SelectedImage {
 }
 
 const MAX_IMAGES = 6;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+function getMessageText(content: string, imageUrls?: string[]) {
+  if ((content || "").trim() === "[图片]" && Array.isArray(imageUrls) && imageUrls.length > 0) {
+    return "";
+  }
+  return content || "";
+}
 
 function normalizeMarkdown(content: string) {
   const raw = (content || "").replace(/\r\n/g, "\n");
@@ -186,7 +195,9 @@ function ToolStepsCard({ steps, isRunning }: { steps: ToolStep[]; isRunning: boo
 export function ChatWindow({ history, streamingReply, toolSteps = [], pending, onSend, profile }: ChatWindowProps) {
   const [content, setContent] = useState("");
   const [images, setImages] = useState<SelectedImage[]>([]);
+  const [attachError, setAttachError] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -235,10 +246,21 @@ export function ChatWindow({ history, streamingReply, toolSteps = [], pending, o
 
   async function attachImageFile(file: File) {
     if (!file.type.startsWith("image/")) return;
+    if (file.size > MAX_IMAGE_BYTES) {
+      setAttachError("单张图片不能超过 5MB");
+      return;
+    }
     const dataUrl = await fileToDataUrl(file).catch(() => "");
-    if (!dataUrl) return;
+    if (!dataUrl) {
+      setAttachError("图片读取失败");
+      return;
+    }
+    setAttachError("");
     setImages((prev) => {
-      if (prev.length >= MAX_IMAGES) return prev;
+      if (prev.length >= MAX_IMAGES) {
+        setAttachError(`最多上传 ${MAX_IMAGES} 张图片`);
+        return prev;
+      }
       return [
         ...prev,
         {
@@ -255,13 +277,15 @@ export function ChatWindow({ history, streamingReply, toolSteps = [], pending, o
     const trimmed = content.trim();
     const imageUrls = images.map((item) => item.dataUrl);
     if (!trimmed && imageUrls.length === 0) return;
+    const submittedContent = trimmed || "[图片]";
 
     setContent("");
     setImages([]);
+    setAttachError("");
     setIsDragOver(false);
 
     try {
-      await onSend(trimmed, imageUrls);
+      await onSend(submittedContent, imageUrls);
     } catch {
       setContent(trimmed);
       setImages(
@@ -281,6 +305,7 @@ export function ChatWindow({ history, streamingReply, toolSteps = [], pending, o
 
   function handleClearImages() {
     setImages([]);
+    setAttachError("");
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -291,6 +316,7 @@ export function ChatWindow({ history, streamingReply, toolSteps = [], pending, o
   }
 
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    setAttachError("");
     const files = Array.from(event.target.files || []);
     if (files.length === 0) return;
     for (const file of files) {
@@ -380,7 +406,7 @@ export function ChatWindow({ history, streamingReply, toolSteps = [], pending, o
   const isEmpty = allMessages.length === 0;
 
   return (
-    <div className="flex flex-col h-full rounded-2xl border border-border bg-surface-card overflow-hidden">
+    <div className="relative flex flex-col h-full rounded-2xl border border-border bg-surface-card overflow-hidden">
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 lg:p-6">
         {isEmpty ? (
           <div className="flex flex-col items-center justify-center h-full text-center py-20">
@@ -431,56 +457,82 @@ export function ChatWindow({ history, streamingReply, toolSteps = [], pending, o
                       ? "bg-bubble-ai text-content rounded-tl-md"
                       : "bg-bubble-user text-white rounded-tr-md"
                   }`}
-                >
-                  {msg.role === "assistant" ? (
+              >
+                {(() => {
+                  const messageImages = Array.isArray(msg.image_urls) ? msg.image_urls : [];
+                  const messageText = getMessageText(msg.content, messageImages);
+                  return (
                     <>
-                      {/* Tool steps card — show on streaming bubble OR last assistant message */}
-                      {toolSteps.length > 0 &&
-                        (msg.__streaming || (!pending && idx === allMessages.length - 1)) && (
-                        <ToolStepsCard steps={toolSteps} isRunning={pending} />
+                      {messageImages.length > 0 && (
+                        <div className="mb-2 grid grid-cols-2 gap-2">
+                          {messageImages.map((imgUrl, imgIdx) => (
+                            <button
+                              key={`${msg.created_at}-img-${imgIdx}`}
+                              type="button"
+                              onClick={() => setPreviewImage(imgUrl)}
+                              className="overflow-hidden rounded-xl border border-black/10 bg-black/5"
+                            >
+                              <img
+                                src={imgUrl}
+                                alt="聊天图片"
+                                className="h-28 w-full object-cover"
+                              />
+                            </button>
+                          ))}
+                        </div>
                       )}
-                      {msg.content ? (
-                        <div className="prose prose-sm max-w-none markdown-chat">
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm, remarkBreaks]}
-                            components={{
-                              a: ({ ...props }) => (
-                                <a {...props} target="_blank" rel="noreferrer noopener" />
-                              ),
-                              pre: ({ className, children }) => (
-                                <MarkdownPre className={className}>{children}</MarkdownPre>
-                              ),
-                              code: ({ inline, className, children, ...props }) => {
-                                if (inline) {
-                                  return (
-                                    <code {...props} className={className}>
-                                      {children}
-                                    </code>
-                                  );
-                                }
-                                return <code {...props} className={className}>{children}</code>;
-                              },
-                              table: ({ children }) => (
-                                <div className="markdown-table-wrap">
-                                  <table>{children}</table>
-                                </div>
-                              ),
-                            }}
-                          >
-                            {normalizeMarkdown(msg.content)}
-                          </ReactMarkdown>
-                        </div>
-                      ) : msg.__streaming && pending ? (
-                        <div className="flex gap-1 mt-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-content-tertiary animate-pulse-soft" style={{ animationDelay: "0ms" }} />
-                          <span className="w-1.5 h-1.5 rounded-full bg-content-tertiary animate-pulse-soft" style={{ animationDelay: "300ms" }} />
-                          <span className="w-1.5 h-1.5 rounded-full bg-content-tertiary animate-pulse-soft" style={{ animationDelay: "600ms" }} />
-                        </div>
-                      ) : null}
+                      {msg.role === "assistant" ? (
+                        <>
+                          {/* Tool steps card — show on streaming bubble OR last assistant message */}
+                          {toolSteps.length > 0 &&
+                            (msg.__streaming || (!pending && idx === allMessages.length - 1)) && (
+                            <ToolStepsCard steps={toolSteps} isRunning={pending} />
+                          )}
+                          {messageText ? (
+                            <div className="prose prose-sm max-w-none markdown-chat">
+                              <ReactMarkdown
+                                remarkPlugins={[remarkGfm, remarkBreaks]}
+                                components={{
+                                  a: ({ ...props }) => (
+                                    <a {...props} target="_blank" rel="noreferrer noopener" />
+                                  ),
+                                  pre: ({ className, children }) => (
+                                    <MarkdownPre className={className}>{children}</MarkdownPre>
+                                  ),
+                                  code: ({ inline, className, children, ...props }) => {
+                                    if (inline) {
+                                      return (
+                                        <code {...props} className={className}>
+                                          {children}
+                                        </code>
+                                      );
+                                    }
+                                    return <code {...props} className={className}>{children}</code>;
+                                  },
+                                  table: ({ children }) => (
+                                    <div className="markdown-table-wrap">
+                                      <table>{children}</table>
+                                    </div>
+                                  ),
+                                }}
+                              >
+                                {normalizeMarkdown(messageText)}
+                              </ReactMarkdown>
+                            </div>
+                          ) : msg.__streaming && pending ? (
+                            <div className="flex gap-1 mt-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-content-tertiary animate-pulse-soft" style={{ animationDelay: "0ms" }} />
+                              <span className="w-1.5 h-1.5 rounded-full bg-content-tertiary animate-pulse-soft" style={{ animationDelay: "300ms" }} />
+                              <span className="w-1.5 h-1.5 rounded-full bg-content-tertiary animate-pulse-soft" style={{ animationDelay: "600ms" }} />
+                            </div>
+                          ) : null}
+                        </>
+                      ) : (
+                        messageText ? <p className="whitespace-pre-wrap">{messageText}</p> : null
+                      )}
                     </>
-                  ) : (
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
-                  )}
+                  );
+                })()}
                   <p
                     className={`mt-1.5 text-[11px] ${
                       msg.role === "assistant" ? "text-content-tertiary" : "text-white/60"
@@ -555,6 +607,9 @@ export function ChatWindow({ history, streamingReply, toolSteps = [], pending, o
               </div>
             </div>
           )}
+          {attachError && (
+            <div className="mb-2 text-xs text-red-500">{attachError}</div>
+          )}
           <form onSubmit={handleSubmit}>
             <div
               ref={dropAreaRef}
@@ -607,6 +662,26 @@ export function ChatWindow({ history, streamingReply, toolSteps = [], pending, o
           </form>
         </div>
       </div>
+      {previewImage && (
+        <div
+          className="absolute inset-0 z-30 flex items-center justify-center bg-black/75 p-4"
+          onClick={() => setPreviewImage(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setPreviewImage(null)}
+            className="absolute right-4 top-4 rounded-full border border-white/20 bg-black/40 p-2 text-white"
+          >
+            <X size={18} />
+          </button>
+          <img
+            src={previewImage}
+            alt="预览图片"
+            className="max-h-full max-w-full rounded-2xl object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }

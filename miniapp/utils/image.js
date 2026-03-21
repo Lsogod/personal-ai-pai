@@ -1,3 +1,5 @@
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
 function extToMime(path) {
   const lower = (path || "").toLowerCase();
   if (lower.endsWith(".png")) return "image/png";
@@ -25,6 +27,17 @@ function filePathToDataUrl(filePath) {
       }
     });
   });
+}
+
+function estimateDataUrlBytes(value) {
+  const parts = String(value || "").split(",", 2);
+  if (parts.length !== 2) return 0;
+  const payload = String(parts[1] || "").trim();
+  if (!payload) return 0;
+  let padding = 0;
+  if (payload.endsWith("==")) padding = 2;
+  else if (payload.endsWith("=")) padding = 1;
+  return Math.max(0, Math.floor((payload.length * 3) / 4) - padding);
 }
 
 function collectCandidatePaths(chooseRes) {
@@ -82,6 +95,10 @@ async function pickImages(count = 6) {
   for (const path of candidatePaths) {
     try {
       const dataUrl = await filePathToDataUrl(path);
+      if (estimateDataUrlBytes(dataUrl) > MAX_IMAGE_BYTES) {
+        lastErr = new Error("单张图片不能超过 5MB");
+        continue;
+      }
       output.push({ path, dataUrl });
     } catch (err) {
       lastErr = err;

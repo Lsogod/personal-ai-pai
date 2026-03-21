@@ -86,14 +86,19 @@ function isTimeoutError(err) {
 function normalizeMessage(item) {
   const role = item.role === "assistant" ? "assistant" : "user";
   const content = item.content || "";
+  const imageUrls = Array.isArray(item.image_urls) ? item.image_urls : [];
+  const displayContent =
+    role === "user" && imageUrls.length > 0 && String(content).trim() === "[图片]"
+      ? ""
+      : content;
   return {
     role,
     content,
-    display_content: content,
+    display_content: displayContent,
     content_nodes: role === "assistant" ? markdownToRichNodes(content) : "",
     created_at: item.created_at || nowIso(),
     timeText: fmtTime(item.created_at || nowIso()),
-    image_urls: Array.isArray(item.image_urls) ? item.image_urls : []
+    image_urls: imageUrls
   };
 }
 
@@ -437,7 +442,7 @@ Page({
   },
 
   messageKey(msg) {
-    return `${msg.role}|${msg.created_at}|${msg.content}`;
+    return `${msg.role}|${msg.created_at}|${msg.content}|${(msg.image_urls || []).join("|")}`;
   },
 
   reminderEventKey(payload) {
@@ -873,7 +878,7 @@ Page({
         return;
       }
 
-      if (payload.type === "message" && payload.content) {
+      if (payload.type === "message" && (payload.content || (Array.isArray(payload.image_urls) && payload.image_urls.length > 0))) {
         const role = payload.role === "assistant" ? "assistant" : "user";
         if (role === "user" && this.consumePendingUserEcho(payload.content)) {
           return;
@@ -882,7 +887,12 @@ Page({
           this.setPendingState("");
           this.enqueueAssistantStream(payload.content, payload.created_at || nowIso());
         } else {
-          this.appendMessages([{ role, content: payload.content, created_at: payload.created_at || nowIso() }]);
+          this.appendMessages([{
+            role,
+            content: payload.content || "",
+            created_at: payload.created_at || nowIso(),
+            image_urls: Array.isArray(payload.image_urls) ? payload.image_urls : []
+          }]);
         }
         this.refreshStats();
       }
@@ -1016,24 +1026,23 @@ Page({
     const hasImages = selectedImagesSnapshot.length > 0;
     if (!text && !hasImages) return;
     this._sendingLock = true;
+    const submittedContent = text || "[图片]";
 
     const userMsg = {
       role: "user",
-      content: text || "[图片]",
+      content: submittedContent,
       created_at: nowIso(),
       image_urls: selectedImagesSnapshot.map((x) => x.path)
     };
     this.appendMessages([userMsg]);
-    const payloadText = text || "识别图片";
-    this.queuePendingUserEcho(payloadText);
-    this.queuePendingUserEcho(text || "[图片]");
+    this.queuePendingUserEcho(submittedContent);
 
     // Optimistic clear: avoid keeping sent text in input while waiting server response.
     this.setData({ sending: true, inputText: "", selectedImages: [], toolSteps: [], toolStepsExpanded: true, toolStepsDone: false, toolStepsDoneCount: 0 });
     this.setPendingState("thinking");
     try {
       const imageUrls = selectedImagesSnapshot.map((x) => x.dataUrl);
-      const res = await sendChat(payloadText, imageUrls);
+      const res = await sendChat(submittedContent, imageUrls);
       const responses = Array.isArray(res.responses) ? res.responses : [];
       if (!this.data.wsOpen && responses.length === 0) {
         this.setPendingState("");

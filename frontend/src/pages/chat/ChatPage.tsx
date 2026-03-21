@@ -229,7 +229,10 @@ export function ChatPage() {
             playReminderSound();
             void refreshSideData();
           }
-          if (payload?.type === "message" && payload?.content) {
+          if (
+            payload?.type === "message" &&
+            (payload?.content || (Array.isArray(payload?.image_urls) && payload.image_urls.length > 0))
+          ) {
             void refreshSideData();
           }
         } catch {

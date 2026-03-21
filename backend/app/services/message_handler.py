@@ -1010,6 +1010,7 @@ async def handle_message(
         detail={
             "message_id": message.message_id,
             "content": message.content,
+            "image_count": len(message.image_urls or []),
             "conversation_id": conversation.id,
         },
     )
@@ -1020,6 +1021,7 @@ async def handle_message(
         conversation_id=conversation.id,
         role="user",
         content=message.content,
+        image_urls=message.image_urls or [],
         platform=platform,
         memory_status=MEMORY_STATUS_PENDING,
     )
@@ -1032,6 +1034,7 @@ async def handle_message(
                 "type": "message",
                 "role": "user",
                 "content": message.content,
+                "image_urls": message.image_urls or [],
                 "platform": platform,
                 "conversation_id": conversation.id,
                 "created_at": _to_client_tz_iso(datetime.now(timezone.utc)),
