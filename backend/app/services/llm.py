@@ -233,4 +233,5 @@ def get_llm(model: str | None = None, node_name: str = "unknown") -> TrackingCha
         temperature=0.2,
         max_tokens=16384,
         node_name=node_name,
+        stream_usage=True,
     )
