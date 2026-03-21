@@ -1,4 +1,5 @@
 const { getToken } = require("../../utils/auth");
+const config = require("../../config");
 const { fetchCalendar, createLedger, updateLedger, deleteLedger, createSchedule, updateSchedule, deleteSchedule } = require("../../utils/http");
 const DISPLAY_TZ_OFFSET_MINUTES = 8 * 60; // Asia/Shanghai
 
@@ -340,7 +341,46 @@ Page({
       else { await updateSchedule(this.data.scheduleFormId, payload); wx.showToast({ title: "修改成功", icon: "success" }); }
       wx.hideKeyboard({ complete: () => {} });
       this.setData({ showScheduleForm: false }); this.loadMonth();
+      // 创建/修改提醒后检查订阅状态，未授权则弹出授权
+      this.requestReminderSubscribe();
     } catch (err) { wx.showToast({ title: err.message || "操作失败", icon: "none" }); }
+  },
+
+  /**
+   * 检查订阅授权状态，未授权时弹出授权弹窗。
+   */
+  requestReminderSubscribe() {
+    const tid = String(config.SUBSCRIBE_TEMPLATE_ID || "").trim();
+    if (!tid) return;
+    wx.getSetting({
+      withSubscriptions: true,
+      success: (settingRes) => {
+        const sub = (settingRes && settingRes.subscriptionsSetting) || {};
+        const items = sub.itemSettings || {};
+        if (items[tid] === "accept") return; // 已永久授权
+        if (items[tid] === "reject") {
+          wx.showModal({
+            title: "提醒推送已关闭",
+            content: "你之前选择了拒绝订阅提醒，请到小程序设置中重新开启。",
+            confirmText: "知道了",
+            showCancel: false,
+          });
+          return;
+        }
+        wx.requestSubscribeMessage({
+          tmplIds: [tid],
+          success: (res) => {
+            if (res && res[tid] !== "accept") {
+              wx.showToast({ title: "未同意订阅，提醒可能收不到", icon: "none" });
+            }
+          },
+          fail: () => {},
+        });
+      },
+      fail: () => {
+        wx.requestSubscribeMessage({ tmplIds: [tid], success: () => {}, fail: () => {} });
+      },
+    });
   },
   onDeleteSchedule(item) {
     if (!item) return;

@@ -670,23 +670,53 @@ Page({
     this.scrollToBottom();
   },
 
-  requestReminderSubscribe() {
+  /**
+   * 检查订阅授权状态，未授权时弹出授权弹窗。
+   * silent=true 时不显示 toast（用于自动触发场景）。
+   */
+  requestReminderSubscribe(silent) {
     const tid = String(config.SUBSCRIBE_TEMPLATE_ID || "").trim();
     if (!tid) {
-      wx.showToast({ title: "未配置订阅模板ID", icon: "none" });
+      if (!silent) wx.showToast({ title: "未配置订阅模板ID", icon: "none" });
       return;
     }
-    wx.requestSubscribeMessage({
-      tmplIds: [tid],
-      success: (res) => {
-        if (res && res[tid] === "accept") {
-          wx.showToast({ title: "提醒订阅授权成功", icon: "none" });
+    wx.getSetting({
+      withSubscriptions: true,
+      success: (settingRes) => {
+        const sub = (settingRes && settingRes.subscriptionsSetting) || {};
+        const items = sub.itemSettings || {};
+        // 已永久授权，无需再弹
+        if (items[tid] === "accept") return;
+        // 已永久拒绝，弹窗也无效，提示用户去设置
+        if (items[tid] === "reject") {
+          if (!silent) {
+            wx.showModal({
+              title: "提醒推送已关闭",
+              content: "你之前选择了拒绝订阅提醒，请到小程序设置中重新开启。",
+              confirmText: "知道了",
+              showCancel: false,
+            });
+          }
           return;
         }
-        wx.showToast({ title: "未同意订阅，离线提醒可能收不到", icon: "none" });
+        // 未做永久选择，弹出授权
+        wx.requestSubscribeMessage({
+          tmplIds: [tid],
+          success: (res) => {
+            if (res && res[tid] === "accept") {
+              if (!silent) wx.showToast({ title: "提醒订阅授权成功", icon: "none" });
+              return;
+            }
+            if (!silent) wx.showToast({ title: "未同意订阅，离线提醒可能收不到", icon: "none" });
+          },
+          fail: (err) => {
+            if (!silent) wx.showToast({ title: (err && err.errMsg) || "订阅请求失败", icon: "none" });
+          },
+        });
       },
-      fail: (err) => {
-        wx.showToast({ title: (err && err.errMsg) || "订阅请求失败", icon: "none" });
+      fail: () => {
+        // getSetting 失败，降级直接弹
+        wx.requestSubscribeMessage({ tmplIds: [tid], success: () => {}, fail: () => {} });
       },
     });
   },
@@ -815,6 +845,11 @@ Page({
             toolStepsDone: allDone,
             toolStepsExpanded: !allDone,
           });
+          // 通过对话创建提醒后，检查订阅状态，未授权则弹出授权
+          const tn = toolName.toLowerCase();
+          if (tn === "schedule_insert" || tn === "schedule_update") {
+            this.requestReminderSubscribe(true);
+          }
         }
         this.scrollToBottom();
         return;
