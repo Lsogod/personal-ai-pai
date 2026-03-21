@@ -19,7 +19,7 @@ from app.services.memory import deactivate_identity_memories_for_user
 from app.services.runtime_context import get_session
 from app.services.skills import load_skills
 from app.services.langchain_tools import ToolInvocationContext
-from app.services.toolsets import build_node_langchain_tools
+from app.services.toolsets import build_node_langchain_tools, invoke_node_tool_typed
 from app.services.tool_registry import list_runtime_tool_metas
 from app.services.usage import log_tool_usage
 
@@ -41,10 +41,6 @@ BOOKKEEPING_IMAGE_HINTS = (
     "支出",
     "收入",
     "报销",
-)
-NON_BOOKKEEPING_IMAGE_REPLY = (
-    "当前图片只支持记账识别。若要识别小票或支付截图，"
-    "请直接说明“帮我记账”或“识别这张小票并记账”。"
 )
 
 
@@ -78,6 +74,20 @@ def _is_bookkeeping_image_request(content: str) -> bool:
     if not text:
         return False
     return any(token in text for token in BOOKKEEPING_IMAGE_HINTS)
+
+
+def _render_generic_image_reply(result: Any) -> str:
+    if isinstance(result, dict):
+        answer = str(result.get("answer") or "").strip()
+        summary = str(result.get("summary") or "").strip()
+        ocr_text = str(result.get("ocr_text") or "").strip()
+        parts = [part for part in (answer, summary) if part]
+        if ocr_text:
+            parts.append(f"图片文字：{ocr_text}")
+        if parts:
+            return "\n".join(dict.fromkeys(parts))
+    text = str(result or "").strip()
+    return text or "暂时无法识别这张图片。"
 
 
 def _shorten_text(value: str, limit: int = 500) -> str:
@@ -602,10 +612,26 @@ async def chat_manager_node(state: GraphState) -> GraphState:
         return {**state, "responses": ["未找到用户信息。"]}
 
     content = (message.content or "").strip()
-    if message.image_urls and not _is_bookkeeping_image_request(content):
-        return {**state, "responses": [NON_BOOKKEEPING_IMAGE_REPLY]}
     platform = (message.platform or "unknown")
     conversation_id = state.get("conversation_id")
+    current_image_urls = [str(item).strip() for item in (message.image_urls or []) if str(item).strip()]
+    if current_image_urls and not _is_bookkeeping_image_request(content):
+        image_result = await invoke_node_tool_typed(
+            context=ToolInvocationContext(
+                user_id=user.id,
+                platform=platform,
+                conversation_id=conversation_id,
+                image_urls=current_image_urls,
+                audit_hook=_audit_tool_call_bridge(user.id, platform, conversation_id),
+            ),
+            node_name="chat_manager",
+            tool_name="analyze_image",
+            args={
+                "image_ref": current_image_urls[0],
+                "question": content or "请概括图中主要内容，并识别图中的关键文字。",
+            },
+        )
+        return {**state, "responses": [_render_generic_image_reply(image_result)]}
     context_text = render_conversation_context(state)
     profile_reply = await _try_handle_profile_intent(
         session=session,
