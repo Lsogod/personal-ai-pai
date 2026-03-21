@@ -15,6 +15,15 @@
 
 ---
 
+## 🚨 当前线上分支
+
+**当前生产环境 / 线上服务器实际运行的是 `feat/single-agent` 分支，不是 `main`。**
+
+- 线上部署现状：服务器上的 `backend` 和 `memory_worker` 当前均按 `feat/single-agent` 分支代码构建并运行。
+- 行为判断基线：如果线上表现与 `main` 存在差异，请优先以 `feat/single-agent` 的代码、日志和 README 说明为准。
+- `main` 的定位：保留 Router + 多节点架构的主干版本，用于并行演进、对照回归和逐步吸收稳定改动；它不是当前线上运行基线。
+- 切换条件：只有服务器显式检出 `main`、同步代码并重建容器后，线上才会从 `feat/single-agent` 切换到 `main`。
+
 ## 📐 系统架构
 
 <p align="center">
@@ -458,10 +467,17 @@ cp miniapp/config.local.example.js miniapp/config.local.js
 
 ## 🌿 分支说明
 
-| 分支 | 架构 | 说明 |
-|------|------|------|
-| **`main`** | 分领域节点（Router + 6 专业节点） | 稳定版本。LLM 先做意图分类，再路由到 Ledger/Schedule/Chat/Skill/Help/Complex 等专业节点处理 |
-| **`feat/single-agent`** ⬅ 当前 | 单 Agent（create_react_agent） | 实验版本。一个 ReAct Agent 拥有全部工具，自主决策调用，无需路由分类 |
+| 分支 | 架构 | 当前状态 | 说明 |
+|------|------|------|------|
+| **`main`** | 分领域节点（Router + 6 专业节点） | 本地主干 / 非线上运行 | LLM 先做意图分类，再路由到 Ledger/Schedule/Chat/Skill/Help/Complex 等专业节点处理 |
+| **`feat/single-agent`** | 单 Agent（create_react_agent） | **当前线上运行分支** | 一个 ReAct Agent 拥有全部工具，自主决策调用，无需路由分类；线上服务器当前就是按这个分支构建与运行 |
+
+### 当前线上部署说明
+- 当前线上代码基线：`feat/single-agent`
+- 当前线上后端架构：单 Agent 主链路，不再以 `main` 的 Router + 多节点实现作为生产基线
+- 当前线上问题排查顺序：先看 `feat/single-agent` 代码，再看服务器容器与日志，最后才回头对比 `main`
+- `main` 即使已经包含相同或相近能力，也只代表“代码已具备”，不代表“线上已切换”
+- 如果后续计划让 `main` 接管生产，请在 README 和部署记录中明确标记切换时间点，避免分支认知混乱
 
 ### 单 Agent 分支的优势
 - **更低延迟** — 省去 Router LLM 意图分类调用，直接进入 Agent 决策
