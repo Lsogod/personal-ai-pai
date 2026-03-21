@@ -11,7 +11,7 @@ const {
   sendChat,
   getWsUrl
 } = require("../../utils/http");
-const { pickImages } = require("../../utils/image");
+const { pickImages, resolveImageUrlsForDisplay } = require("../../utils/image");
 const { markdownToRichNodes } = require("../../utils/markdown");
 const DISPLAY_TZ_OFFSET_MINUTES = 8 * 60; // Asia/Shanghai
 
@@ -98,8 +98,15 @@ function normalizeMessage(item) {
     content_nodes: role === "assistant" ? markdownToRichNodes(content) : "",
     created_at: item.created_at || nowIso(),
     timeText: fmtTime(item.created_at || nowIso()),
-    image_urls: imageUrls
+    image_urls: imageUrls,
+    display_image_urls: imageUrls
   };
+}
+
+async function normalizeMessageAsync(item) {
+  const msg = normalizeMessage(item);
+  msg.display_image_urls = await resolveImageUrlsForDisplay(msg.image_urls);
+  return msg;
 }
 
 function normText(value) {
@@ -320,7 +327,7 @@ Page({
         fetchHistory(),
         fetchLedgerStats(30)
       ]);
-      const messages = (history || []).map(normalizeMessage);
+      const messages = await Promise.all((history || []).map(normalizeMessageAsync));
       this._seenKeys.clear();
       messages.forEach((m) => this._seenKeys.add(this.messageKey(m)));
       this.clearWsChunkStreams();
@@ -468,11 +475,11 @@ Page({
     return false;
   },
 
-  appendMessages(rows) {
+  async appendMessages(rows) {
     const newMsgs = [];
     let hasAssistant = false;
-    for (const row of rows) {
-      const msg = normalizeMessage(row);
+    const normalizedRows = await Promise.all((rows || []).map(normalizeMessageAsync));
+    for (const msg of normalizedRows) {
       if (msg.role === "assistant") hasAssistant = true;
       const key = this.messageKey(msg);
       if (this._seenKeys.has(key)) continue;
