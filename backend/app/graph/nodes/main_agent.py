@@ -27,7 +27,7 @@ from app.services.ledger_pending import has_pending_ledger
 from app.services.llm import get_llm
 from app.services.runtime_context import get_session, get_llm_streamer
 from app.services.skills import load_skills
-from app.services.toolsets import build_node_langchain_tools
+from app.services.toolsets import build_node_langchain_tools, invoke_node_tool_typed
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +77,23 @@ def _log(msg: str) -> None:
     print(msg, flush=True)
 
 
+BOOKKEEPING_IMAGE_HINTS = (
+    "记账",
+    "入账",
+    "账单",
+    "小票",
+    "发票",
+    "支付截图",
+    "付款截图",
+    "消费截图",
+    "金额",
+    "花了",
+    "支出",
+    "收入",
+    "报销",
+)
+
+
 async def _load_recent_image_urls(
     *,
     session,
@@ -114,6 +131,27 @@ async def _load_recent_image_urls(
             if len(image_urls) >= limit:
                 return image_urls
     return image_urls
+
+
+def _is_bookkeeping_image_request(content: str) -> bool:
+    text = str(content or "").strip().lower()
+    if not text:
+        return False
+    return any(token in text for token in BOOKKEEPING_IMAGE_HINTS)
+
+
+def _render_generic_image_reply(result: Any) -> str:
+    if isinstance(result, dict):
+        answer = str(result.get("answer") or "").strip()
+        summary = str(result.get("summary") or "").strip()
+        ocr_text = str(result.get("ocr_text") or "").strip()
+        parts = [part for part in (answer, summary) if part]
+        if ocr_text:
+            parts.append(f"图片文字：{ocr_text}")
+        if parts:
+            return "\n".join(dict.fromkeys(parts))
+    text = str(result or "").strip()
+    return text or "暂时无法识别这张图片。"
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +382,27 @@ async def main_agent_node(state: GraphState) -> GraphState:
 
     _log(f"[main_agent] start user={user_id} images={len(image_urls)} content={content[:80]!r}")
 
+    ctx = ToolInvocationContext(
+        user_id=user_id,
+        platform=platform,
+        conversation_id=conversation_id,
+        image_urls=image_urls,
+        audit_hook=_audit_hook_factory(user_id, platform, conversation_id),
+    )
+
+    if image_urls and not _is_bookkeeping_image_request(content):
+        _log("[main_agent] short-circuit → analyze_image")
+        image_result = await invoke_node_tool_typed(
+            context=ctx,
+            node_name="main_agent",
+            tool_name="analyze_image",
+            args={
+                "image_ref": image_urls[0],
+                "question": content or "请概括图中主要内容，并识别图中的关键文字。",
+            },
+        )
+        return {**state, "responses": [_render_generic_image_reply(image_result)]}
+
     # ── Short-circuit: pending ledger state (receipt OCR / preview confirm) ──
     if conversation_id and await has_pending_ledger(user_id, int(conversation_id)):
         _log("[main_agent] short-circuit → ledger_pending")
@@ -356,13 +415,6 @@ async def main_agent_node(state: GraphState) -> GraphState:
 
     # ── Build tools & context ──
     t1 = time.monotonic()
-    ctx = ToolInvocationContext(
-        user_id=user_id,
-        platform=platform,
-        conversation_id=conversation_id,
-        image_urls=image_urls,
-        audit_hook=_audit_hook_factory(user_id, platform, conversation_id),
-    )
     tools = build_node_langchain_tools(context=ctx, node_name="main_agent")
 
     context_text = render_conversation_context(state)
