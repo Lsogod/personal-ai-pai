@@ -76,18 +76,26 @@ def _is_bookkeeping_image_request(content: str) -> bool:
     return any(token in text for token in BOOKKEEPING_IMAGE_HINTS)
 
 
-def _render_generic_image_reply(result: Any) -> str:
+def _render_image_analysis_context(result: Any) -> str:
     if isinstance(result, dict):
+        image_kind = str(result.get("image_kind") or "other").strip() or "other"
         answer = str(result.get("answer") or "").strip()
         summary = str(result.get("summary") or "").strip()
         ocr_text = str(result.get("ocr_text") or "").strip()
-        parts = [part for part in (answer, summary) if part]
+        confidence = result.get("confidence")
+        parts = [f"- 预分析类型：{image_kind}"]
+        if summary:
+            parts.append(f"- 预分析摘要：{summary}")
+        if answer:
+            parts.append(f"- 预分析结论：{answer}")
         if ocr_text:
-            parts.append(f"图片文字：{ocr_text}")
+            parts.append(f"- 预分析文字：{ocr_text}")
+        if confidence is not None:
+            parts.append(f"- 预分析置信度：{confidence}")
         if parts:
             return "\n".join(dict.fromkeys(parts))
     text = str(result or "").strip()
-    return text or "暂时无法识别这张图片。"
+    return f"- 预分析结果：{text}" if text else ""
 
 
 def _shorten_text(value: str, limit: int = 500) -> str:
@@ -615,6 +623,8 @@ async def chat_manager_node(state: GraphState) -> GraphState:
     platform = (message.platform or "unknown")
     conversation_id = state.get("conversation_id")
     current_image_urls = [str(item).strip() for item in (message.image_urls or []) if str(item).strip()]
+    context_text = render_conversation_context(state)
+    effective_content = content
     if current_image_urls and not _is_bookkeeping_image_request(content):
         image_result = await invoke_node_tool_typed(
             context=ToolInvocationContext(
@@ -631,8 +641,15 @@ async def chat_manager_node(state: GraphState) -> GraphState:
                 "question": content or "请概括图中主要内容，并识别图中的关键文字。",
             },
         )
-        return {**state, "responses": [_render_generic_image_reply(image_result)]}
-    context_text = render_conversation_context(state)
+        image_analysis_text = _render_image_analysis_context(image_result)
+        if image_analysis_text:
+            context_text = (
+                f"{context_text}\n\n图片预分析结果:\n{image_analysis_text}"
+                if context_text.strip()
+                else f"图片预分析结果:\n{image_analysis_text}"
+            )
+        if not effective_content:
+            effective_content = "请根据图片内容继续处理用户请求。"
     profile_reply = await _try_handle_profile_intent(
         session=session,
         user=user,
@@ -645,7 +662,7 @@ async def chat_manager_node(state: GraphState) -> GraphState:
     skills = await load_skills(
         session=session,
         user_id=user.id,
-        query=content,
+        query=effective_content,
     )
     try:
         runtime_tool_rows = await list_runtime_tool_metas()
@@ -655,7 +672,7 @@ async def chat_manager_node(state: GraphState) -> GraphState:
 
     try:
         classification = await _classify_chat_request_with_llm(
-            content=content,
+            content=effective_content,
             context_text=context_text,
             runtime_tools=runtime_tools,
         )
@@ -677,7 +694,7 @@ async def chat_manager_node(state: GraphState) -> GraphState:
                 user=user,
                 platform=platform,
                 conversation_id=conversation_id,
-                content=content,
+                content=effective_content,
                 context_text=context_text,
                 skills=skills,
                 runtime_tools=runtime_tools,
@@ -698,6 +715,6 @@ async def chat_manager_node(state: GraphState) -> GraphState:
             f"技能文档:\n{skills}"
         )
     )
-    human = HumanMessage(content=content)
+    human = HumanMessage(content=effective_content)
     response = await llm.ainvoke([system, human])
     return {**state, "responses": [str(response.content)]}
