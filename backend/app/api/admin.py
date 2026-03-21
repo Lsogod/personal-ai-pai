@@ -853,6 +853,7 @@ async def admin_conversation_messages(
                 "role": row.role,
                 "platform": row.platform,
                 "content": row.content,
+                "image_urls": row.image_urls or [],
                 "created_at": row.created_at.isoformat(),
             }
             for row in rows

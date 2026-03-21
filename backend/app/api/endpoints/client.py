@@ -188,6 +188,12 @@ def _to_client_tz_iso(value: datetime | None) -> str:
     return value.astimezone(tz).isoformat(timespec="seconds")
 
 
+def _normalize_image_urls(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
 def _utc_naive_to_client_tz(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -696,6 +702,7 @@ async def chat_history(
             "role": msg.role,
             "content": msg.content,
             "created_at": _to_client_tz_iso(msg.created_at),
+            "image_urls": _normalize_image_urls(msg.image_urls),
         }
         for msg in messages
     ]

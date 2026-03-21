@@ -39,6 +39,8 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_message_limit INTEGER DEFAULT 0"))
             await conn.execute(text("ALTER TABLE users ALTER COLUMN monthly_message_limit SET DEFAULT 0"))
             await conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS conversation_id INTEGER"))
+            await conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS image_urls JSON"))
+            await conn.execute(text("UPDATE messages SET image_urls = '[]' WHERE image_urls IS NULL"))
             await conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS memory_status VARCHAR"))
             await conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS memory_processed_at TIMESTAMPTZ"))
             await conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS memory_error VARCHAR"))

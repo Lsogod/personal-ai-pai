@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Column, DateTime
+from sqlalchemy import JSON, Column, DateTime
 from sqlmodel import Field, SQLModel
 
 
@@ -13,6 +13,7 @@ class Message(SQLModel, table=True):
     conversation_id: Optional[int] = Field(default=None, foreign_key="conversations.id", index=True)
     role: str = Field(description="user/assistant/system")
     content: str = Field(default="")
+    image_urls: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     platform: str = Field(default="")
     memory_status: Optional[str] = Field(default=None, index=True)
     memory_processed_at: Optional[datetime] = Field(
