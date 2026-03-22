@@ -4,7 +4,7 @@ import asyncio
 import json
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.graph.context import render_conversation_context

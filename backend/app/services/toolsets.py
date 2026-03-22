@@ -76,7 +76,6 @@ def get_node_tool_names(node_name: str) -> set[str]:
 
 def build_node_langchain_tools(
     *,
-    context: ToolInvocationContext,
     node_name: str,
     extra_tool_names: Iterable[str] | None = None,
 ) -> list[BaseTool]:
@@ -84,7 +83,6 @@ def build_node_langchain_tools(
     if extra_tool_names:
         enabled.update(str(item).strip().lower() for item in extra_tool_names if str(item).strip())
     return build_langchain_tools(
-        context=context,
         enabled_tool_names=enabled,
     )
 
@@ -106,14 +104,18 @@ async def invoke_node_tool(
     tool_name: str,
     args: dict | None = None,
 ) -> str:
-    tools = build_node_langchain_tools(
+    result = await invoke_node_tool_typed(
         context=context,
         node_name=node_name,
+        tool_name=tool_name,
+        args=args,
     )
-    selected = find_tool_by_name(tools, tool_name)
-    if selected is None:
-        return f"tool `{tool_name}` not available"
-    return str(await selected.ainvoke(dict(args or {})))
+    if isinstance(result, str):
+        return result
+    try:
+        return json.dumps(result, ensure_ascii=False)
+    except Exception:
+        return str(result)
 
 
 def _resolve_tool_source(tool_name: str) -> str:

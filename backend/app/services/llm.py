@@ -97,7 +97,7 @@ def _extract_stream_text(chunk: Any) -> str:
 class TrackingChatOpenAI(ChatOpenAI):
     """带用量自动追踪的 ChatOpenAI 包装。
 
-    当前代码库的所有调用路径（直接 ainvoke + create_react_agent 内部）
+    当前代码库的所有调用路径（直接 ainvoke + create_agent 内部）
     最终都会经过 ainvoke，因此仅在 ainvoke 中做追踪即可。
     同步 invoke 做兜底防护，agenerate 不覆写以避免双计。
     """

@@ -10,8 +10,8 @@ from datetime import date, datetime, timedelta
 from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
+from langchain.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, ValidationError
 
 from app.core.config import get_settings
@@ -1075,20 +1075,7 @@ async def _run_complex_subagent(
         for item in runtime_tools
         if str(item.get("name") or "").strip()
     }
-    tools = build_langchain_tools(
-        context=ToolInvocationContext(
-            user_id=int(state.get("user_id") or 0) or None,
-            platform=str(message.platform or "unknown"),
-            conversation_id=int(state.get("conversation_id") or 0) or None,
-            audit_hook=None,
-        ),
-        enabled_tool_names=enabled_tool_names,
-    )
-    agent = create_react_agent(
-        model=get_llm(node_name="complex_task_agent"),
-        tools=tools,
-        name=f"complex_task_agent_{int(state.get('user_id') or 0)}_{int(state.get('conversation_id') or 0)}",
-    )
+    tools = build_langchain_tools(enabled_tool_names=enabled_tool_names)
     prompt = (
         "你是复杂任务执行代理。根据用户请求自主选择工具并完成任务。\n"
         "要求：\n"
@@ -1105,13 +1092,24 @@ async def _run_complex_subagent(
         f"规划摘要:\n{plan_summary}\n\n"
         f"会话上下文:\n{conversation_context}"
     )
+    ctx = ToolInvocationContext(
+        user_id=int(state.get("user_id") or 0) or None,
+        platform=str(message.platform or "unknown"),
+        conversation_id=int(state.get("conversation_id") or 0) or None,
+        audit_hook=None,
+    )
+    agent = create_agent(
+        model=get_llm(node_name="complex_task_agent"),
+        tools=tools,
+        system_prompt=prompt,
+        context_schema=ToolInvocationContext,
+        name=f"complex_task_agent_{int(state.get('user_id') or 0)}_{int(state.get('conversation_id') or 0)}",
+    )
     result = await agent.ainvoke(
         {
-            "messages": [
-                SystemMessage(content=prompt),
-                HumanMessage(content=content),
-            ]
+            "messages": [{"role": "user", "content": content}]
         },
+        context=ctx,
         config={"recursion_limit": max(4, int(get_settings().complex_task_agent_recursion_limit or 8))},
     )
     return _extract_agent_answer_and_trace(result)

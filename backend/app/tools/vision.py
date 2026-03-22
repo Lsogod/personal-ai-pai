@@ -5,7 +5,7 @@ import mimetypes
 from typing import Any
 
 import httpx
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.services.llm import get_llm

@@ -5,8 +5,8 @@ import time
 from typing import Any
 from typing import Literal
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
+from langchain.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -480,15 +480,7 @@ def _build_chat_tools(
     platform: str,
     conversation_id: int | None,
 ) -> list:
-    return build_node_langchain_tools(
-        context=ToolInvocationContext(
-            user_id=user_id,
-            platform=platform,
-            conversation_id=conversation_id,
-            audit_hook=_audit_tool_call_bridge(user_id, platform, conversation_id),
-        ),
-        node_name="chat_manager",
-    )
+    return build_node_langchain_tools(node_name="chat_manager")
 
 
 def _audit_tool_call_bridge(
@@ -611,15 +603,6 @@ async def _run_tool_agent(
     skills: str,
     runtime_tools: str,
 ) -> tuple[str, int]:
-    agent = create_react_agent(
-        model=get_llm(node_name=LLM_NODE_TOOL_AGENT),
-        tools=_build_chat_tools(
-            user_id=user.id,
-            platform=platform,
-            conversation_id=conversation_id,
-        ),
-        name=f"chat_tool_agent_{user.id}_{conversation_id or 0}",
-    )
     system_prompt = (
         f"你是{user.nickname}的私人助理{user.ai_name} {user.ai_emoji}。"
         "你必须结合会话上下文连续对话，不要声称自己无法回忆当前会话。\n"
@@ -647,13 +630,28 @@ async def _run_tool_agent(
         f"会话上下文:\n{context_text}\n\n"
         f"技能文档:\n{skills}"
     )
+    ctx = ToolInvocationContext(
+        user_id=user.id,
+        platform=platform,
+        conversation_id=conversation_id,
+        audit_hook=_audit_tool_call_bridge(user.id, platform, conversation_id),
+    )
+    agent = create_agent(
+        model=get_llm(node_name=LLM_NODE_TOOL_AGENT),
+        tools=_build_chat_tools(
+            user_id=user.id,
+            platform=platform,
+            conversation_id=conversation_id,
+        ),
+        system_prompt=system_prompt,
+        context_schema=ToolInvocationContext,
+        name=f"chat_tool_agent_{user.id}_{conversation_id or 0}",
+    )
     result = await agent.ainvoke(
         {
-            "messages": [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=content),
-            ]
+            "messages": [{"role": "user", "content": content}]
         },
+        context=ctx,
         config={"recursion_limit": 8},
     )
     if isinstance(result, dict):

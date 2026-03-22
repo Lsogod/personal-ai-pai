@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain.messages import HumanMessage, SystemMessage
 
 from app.graph.context import render_conversation_context
 from app.graph.nodes.chat_manager import _try_handle_profile_intent

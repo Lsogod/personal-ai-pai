@@ -1,7 +1,7 @@
 import re
 from typing import Literal
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.graph.context import render_conversation_context
