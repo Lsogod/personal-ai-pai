@@ -34,7 +34,7 @@ class AgentToolContext:
     image_urls: list[str] | None = None
 
 
-def _resolve_runtime_context(runtime: ToolRuntime[AgentToolContext] | None) -> AgentToolContext:
+def _resolve_runtime_context(runtime: ToolRuntime[AgentToolContext]) -> AgentToolContext:
     context = getattr(runtime, "context", None)
     if isinstance(context, AgentToolContext):
         return context
@@ -43,7 +43,7 @@ def _resolve_runtime_context(runtime: ToolRuntime[AgentToolContext] | None) -> A
 
 async def _run_tool(
     *,
-    runtime: ToolRuntime[AgentToolContext] | None,
+    runtime: ToolRuntime[AgentToolContext],
     source: str,
     name: str,
     args: dict[str, Any],
@@ -86,7 +86,8 @@ def build_langchain_tools(
         @tool("now_time")
         async def now_time_tool(
             timezone: str = "Asia/Shanghai",
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """按时区名称返回当前本地时间，例如：Asia/Shanghai。"""
             return await _run_tool(
@@ -105,7 +106,8 @@ def build_langchain_tools(
             max_length: int = 5000,
             start_index: int = 0,
             raw: bool = False,
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """抓取网页或 JSON 内容。"""
             return await _run_tool(
@@ -125,7 +127,7 @@ def build_langchain_tools(
     if _enabled("mcp_list_tools"):
         @tool("mcp_list_tools")
         async def mcp_list_tools_tool(
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """列出当前可用的外部工具。"""
             return await _run_tool(
@@ -142,7 +144,8 @@ def build_langchain_tools(
         async def mcp_call_tool_tool(
             tool_name: str,
             arguments_json: str = "{}",
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """按名称调用外部工具，并传入 JSON 参数。"""
             name = (tool_name or "").strip()
@@ -167,7 +170,8 @@ def build_langchain_tools(
         async def maps_weather_tool(
             city: str = "",
             adcode: str = "",
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """按城市名或 adcode 查询天气。"""
             payload: dict[str, Any] = {}
@@ -190,7 +194,8 @@ def build_langchain_tools(
         @tool("analyze_receipt")
         async def analyze_receipt_tool(
             image_ref: str,
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """分析小票或支付图片，并返回结构化提取 JSON。"""
             return await _run_tool(
@@ -207,7 +212,8 @@ def build_langchain_tools(
         async def analyze_image_tool(
             question: str = "",
             image_index: int = 1,
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """分析当前消息附带的图片，适合回答“图中是什么”“图片里写了什么”等问题。"""
             context = _resolve_runtime_context(runtime)
@@ -233,7 +239,8 @@ def build_langchain_tools(
         async def ledger_text2sql_tool(
             message: str,
             conversation_context: str = "",
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """通过安全的 text2sql 流程执行自然语言账单增删改查。"""
             return await _run_tool(
@@ -256,7 +263,8 @@ def build_langchain_tools(
             item: str,
             transaction_date: str = "",
             image_url: str = "",
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """插入一条账单记录，并返回 JSON 行数据。"""
             return await _run_tool(
@@ -282,7 +290,8 @@ def build_langchain_tools(
             category: str = "",
             item: str = "",
             transaction_date: str = "",
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """更新一条账单记录，并返回 JSON 行数据。"""
             return await _run_tool(
@@ -304,7 +313,8 @@ def build_langchain_tools(
         @tool("ledger_delete")
         async def ledger_delete_tool(
             ledger_id: int,
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """删除一条账单记录，并返回被删除的 JSON 行数据。"""
             return await _run_tool(
@@ -319,7 +329,7 @@ def build_langchain_tools(
     if _enabled("ledger_get_latest"):
         @tool("ledger_get_latest")
         async def ledger_get_latest_tool(
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """返回最新一条账单的 JSON；如果没有则返回空 JSON。"""
             return await _run_tool(
@@ -335,7 +345,8 @@ def build_langchain_tools(
         @tool("ledger_list_recent")
         async def ledger_list_recent_tool(
             limit: int = 10,
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """返回最近账单记录的 JSON 列表。"""
             return await _run_tool(
@@ -357,7 +368,8 @@ def build_langchain_tools(
             item_like: str = "",
             order: str = "desc",
             ledger_ids: list[int] | None = None,
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """按可选的 id、日期、分类、摘要条件列出账单，并返回 JSON 列表。"""
             safe_ids: list[int] = []
@@ -386,7 +398,7 @@ def build_langchain_tools(
     if _enabled("conversation_current"):
         @tool("conversation_current")
         async def conversation_current_tool(
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """返回当前激活会话的 JSON 对象。"""
             return await _run_tool(
@@ -402,7 +414,8 @@ def build_langchain_tools(
         @tool("conversation_list")
         async def conversation_list_tool(
             limit: int = 20,
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """返回带有激活标记的会话 JSON 数组。"""
             return await _run_tool(
@@ -418,7 +431,8 @@ def build_langchain_tools(
         @tool("memory_list")
         async def memory_list_tool(
             limit: int = 120,
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """返回长期记忆的 JSON 数组。"""
             return await _run_tool(
@@ -439,7 +453,8 @@ def build_langchain_tools(
             confidence: float = 1.0,
             ttl_days: int = 180,
             key: str = "",
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """将用户明确要求记住的信息写入长期记忆，并返回 JSON 结果。"""
             return await _run_tool(
@@ -470,7 +485,8 @@ def build_langchain_tools(
             importance: int | None = None,
             confidence: float | None = None,
             ttl_days: int | None = None,
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """向一条已有长期记忆追加内容，并返回 JSON 结果。"""
             return await _run_tool(
@@ -499,7 +515,8 @@ def build_langchain_tools(
             memory_key: str = "",
             target_hint: str = "",
             memory_type: str = "",
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """删除一条已有长期记忆，并返回 JSON 结果。"""
             return await _run_tool(
@@ -519,7 +536,7 @@ def build_langchain_tools(
     if _enabled("schedule_get_latest"):
         @tool("schedule_get_latest")
         async def schedule_get_latest_tool(
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """返回最新一条日程提醒的 JSON；如果没有则返回空 JSON。"""
             return await _run_tool(
@@ -535,7 +552,8 @@ def build_langchain_tools(
         @tool("schedule_list_recent")
         async def schedule_list_recent_tool(
             limit: int = 10,
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """返回最近日程提醒记录的 JSON 列表。"""
             return await _run_tool(
@@ -554,7 +572,8 @@ def build_langchain_tools(
             trigger_time: str,
             status: str = "PENDING",
             job_id: str = "",
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """创建一条日程提醒，并返回 JSON 行数据。trigger_time 格式：YYYY-MM-DD HH:MM:SS。"""
             return await _run_tool(
@@ -578,7 +597,8 @@ def build_langchain_tools(
             content: str = "",
             trigger_time: str = "",
             status: str = "",
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """更新一条日程提醒，并返回 JSON 行数据。"""
             return await _run_tool(
@@ -599,7 +619,8 @@ def build_langchain_tools(
         @tool("schedule_delete")
         async def schedule_delete_tool(
             schedule_id: int,
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """删除一条日程提醒，并返回被删除的 JSON 行数据。"""
             return await _run_tool(
@@ -621,7 +642,8 @@ def build_langchain_tools(
             content_like: str = "",
             order: str = "asc",
             schedule_ids: list[int] | None = None,
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """按可选状态和时间窗口列出日程，并返回 JSON 列表。"""
             safe_ids: list[int] = []
@@ -653,7 +675,8 @@ def build_langchain_tools(
             nickname: str = "",
             ai_name: str = "",
             ai_emoji: str = "",
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """更新用户档案。可设置用户昵称(nickname)、AI助手名称(ai_name)、AI助手表情(ai_emoji)。仅传入需要修改的字段。"""
             from app.db.session import AsyncSessionLocal
@@ -696,7 +719,7 @@ def build_langchain_tools(
     if _enabled("query_user_profile"):
         @tool("query_user_profile")
         async def query_user_profile_tool(
-            runtime: ToolRuntime[AgentToolContext] | None = None,
+            runtime: ToolRuntime[AgentToolContext],
         ) -> str:
             """查询当前用户的完整档案信息（昵称、助手名称、表情、平台、邮箱等）。"""
             from app.db.session import AsyncSessionLocal
