@@ -18,9 +18,9 @@ from app.models.user import User
 from app.services.audit import log_event
 from app.services.llm import get_llm
 from app.services.memory import deactivate_identity_memories_for_user
-from app.services.runtime_context import get_session
+from app.services.runtime_context import get_session, reset_tool_audit_hook, set_tool_audit_hook
 from app.services.skills import load_skills
-from app.services.langchain_tools import ToolInvocationContext
+from app.services.langchain_tools import AgentToolContext, ToolInvocationContext
 from app.services.toolsets import build_node_langchain_tools, invoke_node_tool_typed
 from app.services.tool_registry import list_runtime_tool_metas
 from app.services.usage import log_tool_usage
@@ -630,11 +630,11 @@ async def _run_tool_agent(
         f"会话上下文:\n{context_text}\n\n"
         f"技能文档:\n{skills}"
     )
-    ctx = ToolInvocationContext(
+    audit_hook = _audit_tool_call_bridge(user.id, platform, conversation_id)
+    ctx = AgentToolContext(
         user_id=user.id,
         platform=platform,
         conversation_id=conversation_id,
-        audit_hook=_audit_tool_call_bridge(user.id, platform, conversation_id),
     )
     agent = create_agent(
         model=get_llm(node_name=LLM_NODE_TOOL_AGENT),
@@ -644,16 +644,20 @@ async def _run_tool_agent(
             conversation_id=conversation_id,
         ),
         system_prompt=system_prompt,
-        context_schema=ToolInvocationContext,
+        context_schema=AgentToolContext,
         name=f"chat_tool_agent_{user.id}_{conversation_id or 0}",
     )
-    result = await agent.ainvoke(
-        {
-            "messages": [{"role": "user", "content": content}]
-        },
-        context=ctx,
-        config={"recursion_limit": 8},
-    )
+    audit_hook_token = set_tool_audit_hook(audit_hook)
+    try:
+        result = await agent.ainvoke(
+            {
+                "messages": [{"role": "user", "content": content}]
+            },
+            context=ctx,
+            config={"recursion_limit": 8},
+        )
+    finally:
+        reset_tool_audit_hook(audit_hook_token)
     if isinstance(result, dict):
         messages = result.get("messages") or []
         text = _extract_ai_text_from_messages(messages)

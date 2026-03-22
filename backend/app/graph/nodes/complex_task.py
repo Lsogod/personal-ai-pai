@@ -27,7 +27,7 @@ from app.models.user import User
 from app.schemas.unified import UnifiedMessage
 from app.services.audit import log_event
 from app.services.llm import get_llm
-from app.services.langchain_tools import ToolInvocationContext, build_langchain_tools
+from app.services.langchain_tools import AgentToolContext, ToolInvocationContext, build_langchain_tools
 from app.services.runtime_context import get_session
 from app.services.tool_executor import execute_capability_with_usage
 from app.services.tool_registry import list_runtime_tool_metas
@@ -1092,17 +1092,16 @@ async def _run_complex_subagent(
         f"规划摘要:\n{plan_summary}\n\n"
         f"会话上下文:\n{conversation_context}"
     )
-    ctx = ToolInvocationContext(
+    ctx = AgentToolContext(
         user_id=int(state.get("user_id") or 0) or None,
         platform=str(message.platform or "unknown"),
         conversation_id=int(state.get("conversation_id") or 0) or None,
-        audit_hook=None,
     )
     agent = create_agent(
         model=get_llm(node_name="complex_task_agent"),
         tools=tools,
         system_prompt=prompt,
-        context_schema=ToolInvocationContext,
+        context_schema=AgentToolContext,
         name=f"complex_task_agent_{int(state.get('user_id') or 0)}_{int(state.get('conversation_id') or 0)}",
     )
     result = await agent.ainvoke(

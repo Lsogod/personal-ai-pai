@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextvars import ContextVar
-from typing import Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,12 @@ _llm_streamer_ctx: ContextVar[Optional[Callable[[str], Awaitable[None]]]] = Cont
 )
 _llm_stream_nodes_ctx: ContextVar[Optional[tuple[str, ...]]] = ContextVar(
     "pai_llm_stream_nodes_ctx",
+    default=None,
+)
+_tool_audit_hook_ctx: ContextVar[
+    Optional[Callable[[str, str, dict[str, Any], bool, int, str, str], Awaitable[None]]]
+] = ContextVar(
+    "pai_tool_audit_hook_ctx",
     default=None,
 )
 
@@ -155,3 +161,17 @@ def get_llm_stream_nodes() -> set[str] | None:
     if not value:
         return None
     return set(value)
+
+
+def set_tool_audit_hook(
+    hook: Callable[[str, str, dict[str, Any], bool, int, str, str], Awaitable[None]] | None
+):
+    return _tool_audit_hook_ctx.set(hook)
+
+
+def reset_tool_audit_hook(token) -> None:
+    _tool_audit_hook_ctx.reset(token)
+
+
+def get_tool_audit_hook() -> Callable[[str, str, dict[str, Any], bool, int, str, str], Awaitable[None]] | None:
+    return _tool_audit_hook_ctx.get()
