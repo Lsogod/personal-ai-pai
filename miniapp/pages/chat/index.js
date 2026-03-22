@@ -13,6 +13,11 @@ const {
 } = require("../../utils/http");
 const { pickImages, resolveImageUrlsForDisplay } = require("../../utils/image");
 const { markdownToRichNodes } = require("../../utils/markdown");
+const {
+  getSubscribeStatus,
+  markSubscribeAccepted,
+  clearSubscribeAccepted,
+} = require("../../utils/subscribe");
 const DISPLAY_TZ_OFFSET_MINUTES = 8 * 60; // Asia/Shanghai
 
 /**
@@ -186,6 +191,9 @@ Page({
     authed: false,
     profile: null,
     stats: { total: 0, count: 0 },
+    subscribeStatus: "checking",
+    subscribeStatusText: "检查中",
+    subscribeStatusHint: "正在读取提醒订阅状态",
     messages: [],
     sidebarOpen: false,
     conversations: [],
@@ -209,7 +217,8 @@ Page({
     sending: false,
     wsOpen: false,
     notifyCards: [],
-    loadingHistory: false
+    loadingHistory: false,
+    inputFocused: false
   },
 
   onLoad() {
@@ -233,6 +242,7 @@ Page({
   onShow() {
     const authed = this.syncAuthState();
     if (authed) {
+      this.refreshSubscribeStatus();
       this.loadInitial();
       this.loadConversations();
       this.connectSocket();
@@ -244,6 +254,9 @@ Page({
     this.setData({
       profile: { ai_name: "PAI", ai_emoji: "" },
       stats: { total: 0, count: 0 },
+      subscribeStatus: "checking",
+      subscribeStatusText: "检查中",
+      subscribeStatusHint: "登录后可查看提醒订阅状态",
       messages: [],
       sidebarOpen: false,
       conversations: [],
@@ -274,6 +287,7 @@ Page({
     this.clearWsChunkStreams();
     this.clearScrollRetry();
     this.clearPendingReplyTimer();
+
   },
 
   onUnload() {
@@ -282,6 +296,7 @@ Page({
     this.clearWsChunkStreams();
     this.clearScrollRetry();
     this.clearPendingReplyTimer();
+
   },
 
   syncAuthState() {
@@ -718,17 +733,43 @@ Page({
     const tid = String(config.SUBSCRIBE_TEMPLATE_ID || "").trim();
     if (!tid) {
       if (!silent) wx.showToast({ title: "未配置订阅模板ID", icon: "none" });
+      this.refreshSubscribeStatus();
       return;
     }
+    const refreshStatus = () => this.refreshSubscribeStatus();
+    const requestSubscribe = () => {
+      wx.requestSubscribeMessage({
+        tmplIds: [tid],
+        success: (res) => {
+          if (res && res[tid] === "accept") {
+            markSubscribeAccepted(tid);
+            refreshStatus();
+            if (!silent) wx.showToast({ title: "提醒订阅授权成功", icon: "none" });
+            return;
+          }
+          clearSubscribeAccepted(tid);
+          refreshStatus();
+          if (!silent) wx.showToast({ title: "未同意订阅，离线提醒可能收不到", icon: "none" });
+        },
+        fail: (err) => {
+          refreshStatus();
+          if (!silent) wx.showToast({ title: (err && err.errMsg) || "订阅请求失败", icon: "none" });
+        },
+      });
+    };
     wx.getSetting({
       withSubscriptions: true,
       success: (settingRes) => {
         const sub = (settingRes && settingRes.subscriptionsSetting) || {};
         const items = sub.itemSettings || {};
-        // 已永久授权，无需再弹
-        if (items[tid] === "accept") return;
-        // 已永久拒绝，弹窗也无效，提示用户去设置
+        if (items[tid] === "accept") {
+          markSubscribeAccepted(tid);
+          refreshStatus();
+          return;
+        }
         if (items[tid] === "reject") {
+          clearSubscribeAccepted(tid);
+          refreshStatus();
           if (!silent) {
             wx.showModal({
               title: "提醒推送已关闭",
@@ -739,25 +780,21 @@ Page({
           }
           return;
         }
-        // 未做永久选择，弹出授权
-        wx.requestSubscribeMessage({
-          tmplIds: [tid],
-          success: (res) => {
-            if (res && res[tid] === "accept") {
-              if (!silent) wx.showToast({ title: "提醒订阅授权成功", icon: "none" });
-              return;
-            }
-            if (!silent) wx.showToast({ title: "未同意订阅，离线提醒可能收不到", icon: "none" });
-          },
-          fail: (err) => {
-            if (!silent) wx.showToast({ title: (err && err.errMsg) || "订阅请求失败", icon: "none" });
-          },
-        });
+        requestSubscribe();
       },
-      fail: () => {
-        // getSetting 失败，降级直接弹
-        wx.requestSubscribeMessage({ tmplIds: [tid], success: () => {}, fail: () => {} });
+      fail: (err) => {
+        requestSubscribe();
       },
+    });
+  },
+
+  async refreshSubscribeStatus() {
+    const tid = String(config.SUBSCRIBE_TEMPLATE_ID || "").trim();
+    const status = await getSubscribeStatus(tid, !!this.data.authed);
+    this.setData({
+      subscribeStatus: status.status,
+      subscribeStatusText: status.text,
+      subscribeStatusHint: status.hint,
     });
   },
 
@@ -765,6 +802,9 @@ Page({
     const now = Date.now();
     if (now - this._subscribePromptAt < 5000) return;
     this._subscribePromptAt = now;
+    const tid = String(config.SUBSCRIBE_TEMPLATE_ID || "").trim();
+    clearSubscribeAccepted(tid);
+    this.refreshSubscribeStatus();
     const reason = String((payload && payload.reason) || "").trim();
     const content = String((payload && payload.content) || "").trim() || "提醒订阅已失效，请重新授权。";
     const text = reason ? `${content}\n原因：${reason}` : content;
@@ -1046,7 +1086,15 @@ Page({
 
   onPreviewBubbleImage(e) {
     const current = e.currentTarget.dataset.src;
-    wx.previewImage({ current, urls: [current] }); // Simple preview
+    wx.previewImage({ current, urls: [current] });
+  },
+
+  onInputFocus() {
+    this.setData({ inputFocused: true });
+  },
+
+  onInputBlur() {
+    this.setData({ inputFocused: false });
   },
 
   async onSend() {

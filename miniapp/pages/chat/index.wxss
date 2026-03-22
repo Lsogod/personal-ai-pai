@@ -136,13 +136,58 @@
 .history-btn-text { display: flex; align-items: center; gap: 8rpx; font-size: 24rpx; font-weight: 600; color: var(--c-text-2); }
 .history-btn-icon { width: 22rpx; height: 22rpx; }
 
-.header-sub { display: flex; align-items: center; justify-content: space-between; margin-top: 12rpx; }
+.header-sub { display: flex; align-items: center; justify-content: space-between; margin-top: 12rpx; gap: 12rpx; }
+.header-meta { display: flex; align-items: center; gap: 12rpx; min-width: 0; flex-wrap: wrap; }
 .header-caption { font-size: 22rpx; color: var(--c-text-3); }
 .header-stats { display: flex; gap: 10rpx; }
 .stat-pill {
   font-size: 21rpx; font-weight: 600; color: var(--c-text-2);
   background: var(--c-bg); padding: 6rpx 14rpx;
   border-radius: var(--r-full);
+}
+
+.header-subscribe {
+  display: flex;
+  gap: 8rpx;
+  align-items: center;
+  min-width: 0;
+  padding: 6rpx 10rpx;
+  border-radius: var(--r-full);
+  background: var(--c-bg);
+}
+
+.header-subscribe-label {
+  font-size: 21rpx;
+  font-weight: 600;
+  color: var(--c-text-3);
+}
+
+.subscribe-status-badge {
+  flex-shrink: 0;
+  padding: 6rpx 12rpx;
+  border-radius: 999rpx;
+  font-size: 20rpx;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.status-accept {
+  background: rgba(16, 185, 129, 0.14);
+  color: #059669;
+}
+
+.status-reject,
+.status-ban {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
+
+.status-unset,
+.status-checking,
+.status-unknown,
+.status-unconfigured {
+  background: rgba(59, 130, 246, 0.12);
+  color: #2563eb;
 }
 
 .guest-bar {
@@ -177,7 +222,7 @@
 }
 
 /* ── Log Stream ── */
-.log-list { padding: 20rpx 28rpx; padding-bottom: 200rpx; }
+.log-list { padding: 20rpx 28rpx; padding-bottom: 160rpx; }
 .log-entry { margin-bottom: 20rpx; }
 
 .log-cmd {
@@ -219,64 +264,97 @@
 /* ── Composer ── */
 .composer {
   position: fixed; left: 0; right: 0; bottom: 0;
-  background: rgba(255,255,255,0.96); backdrop-filter: blur(20px);
+  padding: 0;
+  z-index: 200;
+  background: var(--c-surface);
   border-top: 1rpx solid var(--c-border-light);
-  padding: 10rpx 20rpx calc(10rpx + env(safe-area-inset-bottom)); z-index: 200;
 }
 
-.preview-area { padding-bottom: 16rpx; }
+/* The unified box wrapping everything */
+.composer-box {
+  margin: 0 10rpx 6rpx;
+  background: #ffffff;
+  border-radius: 24rpx;
+  border: 1rpx solid #d8dce6;
+  padding: 0;
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.composer-box.focused {
+  border-color: var(--c-primary);
+  box-shadow: 0 0 0 3rpx rgba(79,110,247,0.08);
+}
+
+/* Image previews — inside box */
+.preview-area { padding: 10rpx 14rpx 0; }
 .preview-list { width: 100%; white-space: nowrap; }
-.preview-inner { display: inline-flex; gap: 14rpx; }
+.preview-inner { display: inline-flex; gap: 12rpx; }
 .preview-item { position: relative; }
-.preview-image { width: 112rpx; height: 112rpx; border-radius: var(--r-md); border: 1rpx solid var(--c-border-light); }
-.preview-remove {
-  position: absolute; top: -10rpx; right: -10rpx;
-  width: 36rpx; height: 36rpx; background: rgba(0,0,0,0.55);
-  border-radius: 50%; color: #fff; display: flex; align-items: center; justify-content: center;
-}
-.remove-x { font-size: 28rpx; line-height: 1; margin-top: -2rpx; }
-
-.input-area { display: flex; align-items: flex-end; gap: 10rpx; }
-.img-btn {
-  width: 76rpx; height: 76rpx; border-radius: 50%;
-  background: var(--c-bg); display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}
-.img-btn:active { background: var(--c-border); }
-.icon-img { width: 40rpx; height: 40rpx; }
-
-.input-wrap {
-  flex: 1; min-width: 0;
-  background: var(--c-bg); border-radius: 32rpx;
-  padding: 12rpx 22rpx; min-height: 64rpx;
+.preview-image {
+  width: 88rpx; height: 88rpx; border-radius: 12rpx;
   border: 1rpx solid var(--c-border-light);
+}
+.preview-remove {
+  position: absolute; top: -8rpx; right: -8rpx;
+  width: 32rpx; height: 32rpx; background: rgba(0,0,0,0.55);
+  border-radius: 50%; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+}
+.remove-x { font-size: 24rpx; line-height: 1; margin-top: -2rpx; }
+
+/* Input area — inside box */
+.composer-input-area {
+  padding: 12rpx 16rpx 0;
+}
+.composer-input {
+  width: 100%; font-size: 28rpx; line-height: 1.6;
+  color: var(--c-text); padding: 0; margin: 0;
+  min-height: 38rpx; max-height: 180rpx;
   box-sizing: border-box;
 }
-.input-box {
-  width: 100%; font-size: 28rpx; line-height: 1.45;
-  color: var(--c-text); padding: 0; margin: 0;
-  min-height: 36rpx; max-height: 160rpx;
-}
 
-.send-btn {
-  width: 76rpx; height: 76rpx; border-radius: 50%;
-  background: var(--c-border); display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; transition: all 0.18s;
+/* Bottom toolbar: tools left, send right */
+.composer-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6rpx 14rpx 8rpx;
 }
-.send-btn:active { transform: scale(0.92); }
-.send-btn.active {
+.composer-tools {
+  display: flex; flex-direction: row; gap: 2rpx;
+  align-items: center;
+}
+.tool-btn {
+  width: 56rpx; height: 56rpx; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.tool-btn:active { background: var(--c-border-light); transform: scale(0.9); }
+.tool-icon { width: 34rpx; height: 34rpx; opacity: 0.45; transition: opacity 0.15s; }
+.tool-btn:active .tool-icon { opacity: 0.8; }
+
+/* Send button */
+.composer-send {
+  width: 60rpx; height: 60rpx; border-radius: 50%;
+  background: var(--c-border-light);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: all 0.2s cubic-bezier(.4,0,.2,1);
+}
+.composer-send:active { transform: scale(0.88); }
+.composer-send.active {
   background: linear-gradient(135deg, var(--c-primary) 0%, var(--c-primary-dark) 100%);
-  box-shadow: 0 4rpx 16rpx rgba(79,110,247,0.3);
+  box-shadow: 0 4rpx 16rpx rgba(79,110,247,0.25);
 }
-.send-btn.sending {
-  background: var(--c-primary);
-  opacity: 0.7;
-  pointer-events: none;
+.composer-send.sending {
+  background: var(--c-primary); opacity: 0.65; pointer-events: none;
 }
-.send-btn.sending .icon-send {
-  animation: spin 1s linear infinite;
+.send-icon { width: 28rpx; height: 28rpx; }
+
+.send-spinner {
+  width: 24rpx; height: 24rpx;
+  border: 3rpx solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
 }
-.icon-send { width: 34rpx; height: 34rpx; }
 
 .guide-board {
   margin: 16rpx 24rpx 8rpx;
@@ -454,7 +532,13 @@
 }
 .tool-step-icon.spinning {
   color: var(--c-primary);
-  animation: spin 1s linear infinite;
+}
+.tool-spinner {
+  width: 20rpx; height: 20rpx;
+  border: 3rpx solid var(--c-border);
+  border-top-color: var(--c-primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
 }
 .tool-step-icon.done {
   color: var(--c-accent);

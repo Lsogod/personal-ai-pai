@@ -114,6 +114,8 @@
   gap: 16rpx;
 }
 
+/* (removed menu-row-multi — subscribe row now uses standard menu-row) */
+
 .menu-row:active {
   background: var(--c-bg);
 }
@@ -153,6 +155,49 @@
   font-size: 30rpx;
   font-weight: 600;
   color: var(--c-text);
+}
+
+.menu-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+.menu-title-line {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  min-width: 0;
+}
+
+.status-badge {
+  flex-shrink: 0;
+  padding: 6rpx 14rpx;
+  border-radius: 999rpx;
+  font-size: 20rpx;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.status-accept {
+  background: rgba(16, 185, 129, 0.14);
+  color: #059669;
+}
+
+.status-reject,
+.status-ban {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
+
+.status-unset,
+.status-checking,
+.status-unknown,
+.status-unconfigured {
+  background: rgba(59, 130, 246, 0.12);
+  color: #2563eb;
 }
 
 .menu-chevron {
