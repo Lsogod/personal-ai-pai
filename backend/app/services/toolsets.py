@@ -74,7 +74,7 @@ MAIN_AGENT_TOOL_NAMES: set[str] = (
 # instead of embedding ad-hoc tool name sets in node files.
 NODE_TOOL_NAMES: dict[str, set[str]] = {
     "main_agent": MAIN_AGENT_TOOL_NAMES,
-    "chat_manager": SHARED_TOOL_NAMES | MCP_TOOL_NAMES | CONVERSATION_TOOL_NAMES,
+    # Short-circuit nodes (pending state handling in main_agent)
     "schedule_manager": SHARED_TOOL_NAMES | MCP_TOOL_NAMES | SCHEDULE_TOOL_NAMES,
     "ledger_manager": LEDGER_TOOL_NAMES,
 }

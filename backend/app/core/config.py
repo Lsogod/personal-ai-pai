@@ -66,18 +66,8 @@ class Settings(BaseSettings):
     # Comma-separated MCP tool allowlist for maps_* tools. Empty means allow all.
     mcp_maps_allowed_tool_names: str = "maps_weather"
     runtime_tool_cache_ttl_sec: int = 300
-    # complex_task DAG executor controls
-    complex_task_max_parallel: int = 4
-    complex_task_dependency_wait_cycles: int = 1
-    complex_task_dependency_wait_ms: int = 120
-    complex_task_tool_call_limit: int = 8
-    complex_task_tool_per_action_limit: int = 4
-    complex_task_agent_recursion_limit: int = 8
-    complex_task_plan_timeout_sec: int = 5
-    complex_task_followup_timeout_sec: int = 8
 
     rebind_intent_timeout_sec: int = 2
-    router_intent_timeout_sec: int = 10
     preload_runtime_tools_on_startup: bool = False
     preload_graph_on_startup: bool = False
 

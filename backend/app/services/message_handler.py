@@ -349,28 +349,6 @@ def _build_chat_debug_payload(graph_result: Any) -> dict[str, Any] | None:
     if intent:
         payload["route_intent"] = intent
 
-    extra = graph_result.get("extra")
-    if isinstance(extra, dict):
-        complex_task = extra.get("complex_task")
-        if isinstance(complex_task, dict):
-            block: dict[str, Any] = {}
-            for key in [
-                "reason",
-                "completed",
-                "outcome_reason",
-                "fallback_mode",
-                "fallback_node_action",
-                "tool_calls_total",
-            ]:
-                if key in complex_task:
-                    block[key] = complex_task.get(key)
-            if block:
-                payload["complex_task"] = block
-
-        pending = extra.get("complex_task_pending")
-        if isinstance(pending, dict):
-            payload["complex_task_pending"] = pending
-
     return payload or None
 
 
