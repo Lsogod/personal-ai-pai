@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Single ReAct agent node that replaces the Router + chat_manager pipeline.
+"""Single agent node that replaces the Router + chat_manager pipeline.
 
 The main agent has access to ALL tools (ledger, schedule, profile, MCP,
 conversation, memory) and decides autonomously which tools to call.
@@ -14,8 +14,8 @@ import logging
 import time
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
+from langchain.messages import AIMessage
 from sqlalchemy import select
 
 from app.graph.context import render_conversation_context
@@ -403,7 +403,7 @@ async def main_agent_node(state: GraphState) -> GraphState:
             },
         )
         image_analysis_text = _render_image_analysis_context(image_result)
-    tools = build_node_langchain_tools(context=ctx, node_name="main_agent")
+    tools = build_node_langchain_tools(node_name="main_agent")
 
     context_text = render_conversation_context(state)
     skills = await load_skills(session=session, user_id=user_id, query=content)
@@ -423,10 +423,12 @@ async def main_agent_node(state: GraphState) -> GraphState:
 
     effective_content = content or ("请根据图片内容继续处理用户请求。" if image_urls else "")
 
-    # ── Create & stream ReAct agent ──
-    agent = create_react_agent(
+    # ── Create & stream agent ──
+    agent = create_agent(
         model=get_llm(node_name=LLM_NODE_NAME),
         tools=tools,
+        system_prompt=system_prompt,
+        context_schema=ToolInvocationContext,
         name=f"main_agent_{user_id}_{conversation_id or 0}",
     )
 
@@ -442,11 +444,9 @@ async def main_agent_node(state: GraphState) -> GraphState:
     try:
         async for event in agent.astream_events(
             {
-                "messages": [
-                    SystemMessage(content=system_prompt),
-                    HumanMessage(content=effective_content),
-                ]
+                "messages": [{"role": "user", "content": effective_content}],
             },
+            context=ctx,
             config={"recursion_limit": 12},
             version="v2",
         ):
@@ -535,11 +535,9 @@ async def main_agent_node(state: GraphState) -> GraphState:
         # Fallback: try ainvoke
         result = await agent.ainvoke(
             {
-                "messages": [
-                    SystemMessage(content=system_prompt),
-                    HumanMessage(content=content),
-                ]
+                "messages": [{"role": "user", "content": effective_content}],
             },
+            context=ctx,
             config={"recursion_limit": 12},
         )
         if isinstance(result, dict):

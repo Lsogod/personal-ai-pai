@@ -1,5 +1,5 @@
-from langchain_core.messages import BaseMessage
-from langchain_core.prompts import ChatPromptTemplate
+from langchain.messages import BaseMessage
+from langchain.prompts import ChatPromptTemplate
 
 
 LEDGER_PENDING_SELECTION_PROMPT = ChatPromptTemplate.from_messages(

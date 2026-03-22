@@ -1,7 +1,7 @@
 import asyncio
 
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.memory import InMemorySaver
 
 from app.graph.state import GraphState
 from app.graph.nodes.onboarding import onboarding_node
@@ -59,7 +59,7 @@ async def get_graph():
         from app.core.config import get_settings
 
         settings = get_settings()
-        checkpointer = MemorySaver()
+        checkpointer = InMemorySaver()
         try:
             from langgraph.checkpoint.redis import AsyncRedisSaver, RedisSaver  # type: ignore
 
@@ -91,7 +91,7 @@ async def get_graph():
             _redis_cm_sync = None
             _redis_cm_async = None
             if settings.allow_memory_checkpointer_fallback:
-                checkpointer = MemorySaver()
+                checkpointer = InMemorySaver()
             else:
                 raise RuntimeError("Redis checkpointer unavailable") from exc
         _graph = _build_graph(checkpointer)

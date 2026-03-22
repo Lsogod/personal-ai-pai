@@ -99,7 +99,7 @@ class TrackingChatOpenAI(ChatOpenAI):
 
     覆写 ainvoke 和 agenerate 两条路径：
     - ainvoke: 直接调用和 memory worker 等走此路径
-    - agenerate: create_react_agent + astream_events 内部走此路径
+    - agenerate: create_agent + astream_events 内部走此路径
     两者互不重复，各自独立追踪。
     """
 
@@ -183,7 +183,7 @@ class TrackingChatOpenAI(ChatOpenAI):
             self._enqueue(None, started, success=False, error=str(exc))
             raise
 
-    # NOTE: agenerate is NOT overridden here. When create_react_agent uses
+    # NOTE: agenerate is NOT overridden here. When create_agent uses
     # astream_events, token tracking is handled by main_agent.py's
     # on_chat_model_end event handler which accumulates usage_metadata across
     # multi-turn tool calls. This avoids double-counting.
