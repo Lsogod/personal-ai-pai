@@ -23,6 +23,7 @@
 - 行为判断基线：如果线上表现与 `main` 存在差异，请优先以 `feat/single-agent` 的代码、日志和 README 说明为准。
 - `main` 的定位：保留 Router + 多节点架构的主干版本，用于并行演进、对照回归和逐步吸收稳定改动；它不是当前线上运行基线。
 - 切换条件：只有服务器显式检出 `main`、同步代码并重建容器后，线上才会从 `feat/single-agent` 切换到 `main`。
+- 当前两个分支都已迁到 `LangChain 1.x / LangGraph 1.x`；现在的主要区别是工作流结构，而不是工具调用 API 代际。
 
 ## 📐 系统架构
 
@@ -44,14 +45,14 @@
 | **微信小程序** | 独立客户端 | `wx.login` + JWT，支持在线 WS 与离线订阅提醒 |
 | **Web** | 独立客户端 | React SPA，支持 SSE 流式对话 |
 
-### 🧠 单 Agent 架构（create_react_agent）
-基于 LangGraph `create_react_agent` 的统一智能体，**一个 Agent 拥有所有工具**，自主决策调用：
+### 🧠 单 Agent 架构（create_agent）
+基于 `LangChain 1.x / LangGraph 1.x` 的 `create_agent(...)` 统一智能体，**一个 Agent 拥有所有工具**，自主决策调用：
 
 <p align="center">
   <img src="docs/agent-workflow.svg" alt="PAI 单 Agent 工作流" width="100%"/>
 </p>
 
-- **🤖 Main Agent** — 单一 ReAct Agent，自主调用所有工具，无需预分类路由
+- **🤖 Main Agent** — 单一统一 Agent，自主调用所有工具，无需预分类路由
 - **💰 记账工具** — `ledger_insert` / `ledger_update` / `ledger_delete` / `ledger_text2sql` / `analyze_receipt`
 - **📅 日程工具** — `schedule_insert` / `schedule_update` / `schedule_delete` / `schedule_list`
 - **🧠 记忆工具** — `memory_list` / `update_user_profile` / `query_user_profile`
@@ -71,7 +72,7 @@ flowchart TB
     C --> D{"setup_stage < 3 ?"}
 
     D -->|是| N1["onboarding_node\n新用户引导"]
-    D -->|否| AG["🤖 Main Agent\ncreate_react_agent"]
+    D -->|否| AG["🤖 Main Agent\ncreate_agent(...)"]
 
     AG --> T1["⏱ now_time"]
     AG --> T2["🌐 fetch_url"]
@@ -172,7 +173,7 @@ pai/
 │   │   │   ├── workflow.py     # 图构建 (entry → onboarding / agent)
 │   │   │   ├── state.py        # 状态定义
 │   │   │   ├── context.py      # 会话上下文渲染
-│   │   │   └── nodes/          # main_agent (ReAct) + onboarding
+│   │   │   └── nodes/          # main_agent (tool-calling agent) + onboarding
 │   │   ├── models/             # SQLModel 数据模型
 │   │   ├── schemas/            # Pydantic 请求/响应模型 (+ mcp.py)
 │   │   ├── services/           # 业务逻辑层
@@ -478,7 +479,7 @@ cp miniapp/config.local.example.js miniapp/config.local.js
 | 分支 | 架构 | 当前状态 | 说明 |
 |------|------|------|------|
 | **`main`** | 分领域节点（Router + 6 专业节点） | 本地主干 / 非线上运行 | LLM 先做意图分类，再路由到 Ledger/Schedule/Chat/Skill/Help/Complex 等专业节点处理 |
-| **`feat/single-agent`** | 单 Agent（create_react_agent） | **当前线上运行分支** | 一个 ReAct Agent 拥有全部工具，自主决策调用，无需路由分类；线上服务器当前就是按这个分支构建与运行 |
+| **`feat/single-agent`** | 单 Agent（create_agent） | **当前线上运行分支** | 一个统一 Agent 拥有全部工具，自主决策调用，无需路由分类；线上服务器当前就是按这个分支构建与运行 |
 
 ### 当前线上部署说明
 - 当前线上代码基线：`feat/single-agent`
