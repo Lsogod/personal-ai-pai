@@ -16,6 +16,7 @@
 > **🔀 分支说明**
 > - `main` — 多节点路由架构（Router → 专业领域节点），当前分支
 > - [`feat/single-agent`](../../tree/feat/single-agent) — **单 Agent + 丰富工具集架构**，消除 Router 串行 LLM 调用，简单对话仅需 1 次 LLM 调用即可响应，延迟大幅降低。详见该分支 README。
+> - 两个分支当前都已迁到 `LangChain 1.x / LangGraph 1.x`；核心差别在于工作流组织方式，而不是工具调用 API 代际。
 
 ---
 
@@ -51,6 +52,9 @@
 ### 🧠 LangGraph 智能工作流
 基于 LangGraph 的有向图工作流，通过 LLM 自动识别用户意图并路由到专业节点：
 
+- 当前 `main` 分支已迁到 `LangChain 1.x / LangGraph 1.x`
+- `chat_manager` 与 `complex_task` 内部使用 `create_agent(...)` 处理工具调用与子任务执行
+
 <p align="center">
   <img src="docs/agent-workflow.svg" alt="PAI 智能体决策调度流程图" width="100%"/>
 </p>
@@ -61,7 +65,7 @@
 - **✨️ Chat Manager** — 翻译、润色、写作、通用问答、MCP 工具调用、天气查询
 - **🎯 Skill Manager** — 用户自定义技能的创建/更新/发布
 - **📖 Help Center** — 使用指南、命令帮助、工具能力概览（加载 knowledge/AGENT_GUIDE.md）
-- **🧠 Complex Task** — 复杂任务编排（单次结构化决策 + ReAct Subagent 执行）
+- **🧠 Complex Task** — 复杂任务编排（单次结构化决策 + Agent 子代理执行）
 - **🚀 Onboarding** — 新用户三步引导流程
 
 <details>
@@ -89,8 +93,8 @@ flowchart TB
     N4 --> SCH["Scheduler"]
     SCH --> PUSH["send_reminder_job\n消息推送"]
     N5 --> DOC["AGENT_GUIDE + 技能/工具目录"]
-    N6 --> AG["LangGraph ReAct Agent"]
-    N7 --> ORCH["LLM 决策 + ReAct Subagent"]
+    N6 --> AG["LangChain Agent"]
+    N7 --> ORCH["LLM 决策 + Agent 子代理"]
 
     AG --> T1["now_time"]
     AG --> T2["fetch_url"]
@@ -477,7 +481,7 @@ cp miniapp/config.local.example.js miniapp/config.local.js
 | 分支 | 架构 | 当前状态 | 说明 |
 |------|------|------|------|
 | **`main`** ⬅ 当前 | 分领域节点（Router + 6 专业节点） | 本地主干 / 非线上运行 | LLM 先做意图分类，再路由到 Ledger/Schedule/Chat/Skill/Help/Complex 等专业节点处理 |
-| **`feat/single-agent`** | 单 Agent（create_react_agent） | **当前线上运行分支** | 一个 ReAct Agent 拥有全部工具，自主决策调用，无需路由分类；线上服务器当前就是按这个分支构建与运行 |
+| **`feat/single-agent`** | 单 Agent（create_agent） | **当前线上运行分支** | 一个统一 Agent 拥有全部工具，自主决策调用，无需路由分类；线上服务器当前就是按这个分支构建与运行 |
 
 ### 当前线上部署说明
 - 当前线上代码基线：`feat/single-agent`
