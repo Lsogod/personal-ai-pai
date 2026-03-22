@@ -1,18 +1,27 @@
 const config = require("../../config");
 const { clearToken, getToken } = require("../../utils/auth");
 const { fetchProfile } = require("../../utils/http");
+const {
+  getSubscribeStatus,
+  markSubscribeAccepted,
+  clearSubscribeAccepted,
+} = require("../../utils/subscribe");
 
 Page({
   data: {
     authed: false,
     profile: null,
     loading: false,
+    subscribeStatus: "checking",
+    subscribeStatusText: "检查中",
+    subscribeStatusHint: "正在读取提醒订阅状态",
   },
 
   onShow() {
     const token = getToken();
     const authed = !!token;
     this.setData({ authed });
+    this.refreshSubscribeStatus();
     if (!authed) {
       this.setData({ profile: null });
       return;
@@ -72,15 +81,30 @@ Page({
         tmplIds: [tid],
         success: (res) => {
           if (res && res[tid] === "accept") {
+            markSubscribeAccepted(tid);
             wx.showToast({ title: "订阅授权成功", icon: "none" });
+            this.refreshSubscribeStatus();
             return;
           }
+          clearSubscribeAccepted(tid);
+          this.refreshSubscribeStatus();
           wx.showToast({ title: "你未勾选该订阅模板", icon: "none" });
         },
         fail: (err) => {
+          this.refreshSubscribeStatus();
           wx.showToast({ title: err.errMsg || "订阅请求失败", icon: "none" });
         },
       });
+    });
+  },
+
+  async refreshSubscribeStatus() {
+    const tid = String(config.SUBSCRIBE_TEMPLATE_ID || "").trim();
+    const status = await getSubscribeStatus(tid, !!this.data.authed);
+    this.setData({
+      subscribeStatus: status.status,
+      subscribeStatusText: status.text,
+      subscribeStatusHint: status.hint,
     });
   },
 

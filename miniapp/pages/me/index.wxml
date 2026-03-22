@@ -40,6 +40,7 @@
         <image class="menu-icon" src="/assets/icons/ic-bell.svg" mode="aspectFit" />
       </view>
       <text class="menu-label">提醒订阅</text>
+      <text class="status-badge status-{{subscribeStatus}}">{{subscribeStatusText}}</text>
       <text class="menu-chevron">›</text>
     </view>
     <view class="menu-line"></view>

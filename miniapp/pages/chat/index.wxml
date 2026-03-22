@@ -66,7 +66,10 @@
       </view>
     </view>
     <view class="header-sub" wx:if="{{authed}}">
-      <text class="header-caption">输入指令 · 自动执行</text>
+      <view class="header-subscribe" bindtap="requestReminderSubscribe">
+        <text class="header-subscribe-label">提醒订阅</text>
+        <text class="subscribe-status-badge status-{{subscribeStatus}}">{{subscribeStatusText}}</text>
+      </view>
       <view class="header-stats">
         <text class="stat-pill">¥{{stats.total || 0}}</text>
         <text class="stat-pill">{{stats.count || 0}}笔</text>
@@ -166,7 +169,7 @@
             <view wx:if="{{toolStepsExpanded}}" class="tool-steps-list">
               <view wx:for="{{toolSteps}}" wx:for-item="step" wx:for-index="stepIdx" wx:key="stepIdx" class="tool-step">
                 <view class="tool-step-icon {{step.status === 'running' ? 'spinning' : 'done'}}">
-                  <text wx:if="{{step.status === 'running'}}">⟳</text>
+                  <view wx:if="{{step.status === 'running'}}" class="tool-spinner"></view>
                   <text wx:else>✓</text>
                 </view>
                 <text class="tool-step-name">{{step.name}}</text>
@@ -213,27 +216,27 @@
   </view>
 
   <!-- Composer -->
-  <view class="composer safe-bottom" wx:if="{{authed && !guideVisible}}">
-    <view class="preview-area" wx:if="{{selectedImages.length > 0}}">
-      <scroll-view class="preview-list" scroll-x="true">
-        <view class="preview-inner">
-          <view class="preview-item" wx:for="{{selectedImages}}" wx:key="index">
-            <image class="preview-image" src="{{item.path}}" mode="aspectFill" data-index="{{index}}" bindtap="onPreviewImage"/>
-            <view class="preview-remove" data-index="{{index}}" catchtap="onRemoveImage">
-              <text class="remove-x">×</text>
+  <view class="composer" wx:if="{{authed && !guideVisible}}">
+    <view class="composer-box {{inputFocused ? 'focused' : ''}}">
+      <!-- Image previews -->
+      <view class="preview-area" wx:if="{{selectedImages.length > 0}}">
+        <scroll-view class="preview-list" scroll-x="true">
+          <view class="preview-inner">
+            <view class="preview-item" wx:for="{{selectedImages}}" wx:key="index">
+              <image class="preview-image" src="{{item.path}}" mode="aspectFill" data-index="{{index}}" bindtap="onPreviewImage"/>
+              <view class="preview-remove" data-index="{{index}}" catchtap="onRemoveImage">
+                <text class="remove-x">×</text>
+              </view>
             </view>
           </view>
-        </view>
-      </scroll-view>
-    </view>
-    <view class="input-area">
-      <view class="img-btn" bindtap="onChooseImage">
-        <image class="icon-img" src="/assets/icons/image.svg" mode="aspectFit"/>
+        </scroll-view>
       </view>
-      <view class="input-wrap">
+
+      <!-- Input area -->
+      <view class="composer-input-area">
         <textarea
-          class="input-box"
-          placeholder="输入指令：记账、提醒、查询..."
+          class="composer-input"
+          placeholder="记账、提醒、查询..."
           placeholder-style="color: #b0b6c3;"
           auto-height="true"
           maxlength="2000"
@@ -243,11 +246,22 @@
           value="{{inputText}}"
           bindinput="onInput"
           bindconfirm="onConfirmSend"
+          bindfocus="onInputFocus"
+          bindblur="onInputBlur"
         />
       </view>
-      <view class="send-btn {{inputText || selectedImages.length > 0 ? 'active' : ''}} {{sending ? 'sending' : ''}}" bindtap="onSend">
-        <image wx:if="{{!sending}}" class="icon-send" src="/assets/icons/send.svg" mode="aspectFit"/>
-        <text wx:else class="icon-send" style="font-size:30rpx;color:#fff;">⟳</text>
+
+      <!-- Bottom toolbar -->
+      <view class="composer-toolbar">
+        <view class="composer-tools">
+          <view class="tool-btn" bindtap="onChooseImage">
+            <image class="tool-icon" src="/assets/icons/image.svg" mode="aspectFit"/>
+          </view>
+        </view>
+        <view class="composer-send {{inputText || selectedImages.length > 0 ? 'active' : ''}} {{sending ? 'sending' : ''}}" bindtap="onSend">
+          <image wx:if="{{!sending}}" class="send-icon" src="/assets/icons/send.svg" mode="aspectFit"/>
+          <view wx:else class="send-spinner"></view>
+        </view>
       </view>
     </view>
   </view>
