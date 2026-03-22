@@ -22,10 +22,10 @@ from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
 from app.models.message import Message
 from app.models.user import User
-from app.services.langchain_tools import ToolInvocationContext
+from app.services.langchain_tools import AgentToolContext, ToolInvocationContext
 from app.services.ledger_pending import has_pending_ledger
 from app.services.llm import get_llm
-from app.services.runtime_context import get_session, get_llm_streamer
+from app.services.runtime_context import get_session, get_llm_streamer, reset_tool_audit_hook, set_tool_audit_hook
 from app.services.skills import load_skills
 from app.services.toolsets import build_node_langchain_tools, invoke_node_tool_typed
 
@@ -383,18 +383,24 @@ async def main_agent_node(state: GraphState) -> GraphState:
 
     # ── Build tools & context ──
     t1 = time.monotonic()
-    ctx = ToolInvocationContext(
+    ctx = AgentToolContext(
         user_id=user_id,
         platform=platform,
         conversation_id=conversation_id,
         image_urls=image_urls,
-        audit_hook=_audit_hook_factory(user_id, platform, conversation_id),
     )
+    audit_hook = _audit_hook_factory(user_id, platform, conversation_id)
     image_analysis_text = ""
     if image_urls:
         _log("[main_agent] pre-analyze image")
         image_result = await invoke_node_tool_typed(
-            context=ctx,
+            context=ToolInvocationContext(
+                user_id=user_id,
+                platform=platform,
+                conversation_id=conversation_id,
+                image_urls=image_urls,
+                audit_hook=audit_hook,
+            ),
             node_name="main_agent",
             tool_name="analyze_image",
             args={
@@ -428,7 +434,7 @@ async def main_agent_node(state: GraphState) -> GraphState:
         model=get_llm(node_name=LLM_NODE_NAME),
         tools=tools,
         system_prompt=system_prompt,
-        context_schema=ToolInvocationContext,
+        context_schema=AgentToolContext,
         name=f"main_agent_{user_id}_{conversation_id or 0}",
     )
 
@@ -441,6 +447,7 @@ async def main_agent_node(state: GraphState) -> GraphState:
     pending_tool_calls: dict[str, str] = {}  # call_id → tool_name
     _accumulated_tokens: dict[str, int] = {"prompt": 0, "completion": 0, "total": 0}
 
+    audit_hook_token = set_tool_audit_hook(audit_hook)
     try:
         async for event in agent.astream_events(
             {
@@ -542,6 +549,8 @@ async def main_agent_node(state: GraphState) -> GraphState:
         )
         if isinstance(result, dict):
             final_text = _extract_ai_text(result.get("messages") or [])
+    finally:
+        reset_tool_audit_hook(audit_hook_token)
 
     t4 = time.monotonic()
     agent_ms = int((t4 - t3) * 1000)
