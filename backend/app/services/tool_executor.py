@@ -229,6 +229,53 @@ def _schedule_to_payload(row: Schedule) -> dict[str, Any]:
     }
 
 
+SCHEDULE_STATUS_ALIASES: dict[str, str | None] = {
+    "": None,
+    "all": None,
+    "全部": None,
+    "所有": None,
+    "pending": "PENDING",
+    "todo": "PENDING",
+    "未完成": "PENDING",
+    "待办": "PENDING",
+    "待执行": "PENDING",
+    "未执行": "PENDING",
+    "executed": "EXECUTED",
+    "completed": "EXECUTED",
+    "done": "EXECUTED",
+    "已完成": "EXECUTED",
+    "完成": "EXECUTED",
+    "已执行": "EXECUTED",
+    "已提醒": "EXECUTED",
+    "提醒过": "EXECUTED",
+    "已触发": "EXECUTED",
+    "已发送": "EXECUTED",
+    "cancelled": "CANCELLED",
+    "canceled": "CANCELLED",
+    "已取消": "CANCELLED",
+    "取消": "CANCELLED",
+    "failed": "FAILED",
+    "失败": "FAILED",
+    "未送达": "FAILED",
+}
+
+
+def _normalize_schedule_status_arg(value: Any) -> str | None:
+    key = str(value or "").strip()
+    if not key:
+        return None
+    normalized = SCHEDULE_STATUS_ALIASES.get(key.lower())
+    if normalized is not None or key.lower() in SCHEDULE_STATUS_ALIASES:
+        return normalized
+    normalized = SCHEDULE_STATUS_ALIASES.get(key)
+    if normalized is not None or key in SCHEDULE_STATUS_ALIASES:
+        return normalized
+    upper = key.upper()
+    if upper == "ALL":
+        return None
+    return upper
+
+
 def _conversation_to_payload(row: Any, active_id: int | None) -> dict[str, Any]:
     row_id = int(getattr(row, "id", 0) or 0)
     return {
@@ -936,7 +983,7 @@ async def execute_capability(
                                   "或相对时间（如 '10秒后'、'5分钟后'、'明天下午3点'）重试。",
                         )
                     row.trigger_time = trigger_time
-                status_value = str(params.get("status") or "").strip().upper()
+                status_value = _normalize_schedule_status_arg(params.get("status")) or ""
                 if status_value:
                     row.status = status_value
                 try:
@@ -1059,8 +1106,8 @@ async def execute_capability(
                 if content_like:
                     stmt = stmt.where(Schedule.content.ilike(f"%{content_like}%"))
 
-                status = str(params.get("status") or "").strip().upper()
-                if status and status != "ALL":
+                status = _normalize_schedule_status_arg(params.get("status"))
+                if status:
                     stmt = stmt.where(Schedule.status == status)
                 order = str(params.get("order") or "asc").strip().lower()
                 if order == "desc":
