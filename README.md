@@ -45,11 +45,11 @@
 | **微信小程序** | 独立客户端 | `wx.login` + JWT，支持在线 WS 与离线订阅提醒 |
 | **Web** | 独立客户端 | React SPA，支持 SSE 流式对话 |
 
-### 🧠 单 Agent 架构（create_agent）
-基于 `LangChain 1.x / LangGraph 1.x` 的 `create_agent(...)` 统一智能体，**一个 Agent 拥有所有工具**，自主决策调用：
+### 🧠 单 Agent + Harness 架构
+基于 `LangChain 1.x / LangGraph 1.x` 的 **Agent + Harness** 分层架构 — Harness（StateGraph）负责状态持久化与短路分流，Agent（`create_agent`）拥有所有工具并自主决策调用。详见 [`docs/agent-harness-architecture.md`](docs/agent-harness-architecture.md)。
 
 <p align="center">
-  <img src="docs/agent-workflow.svg" alt="PAI 单 Agent 工作流" width="100%"/>
+  <img src="docs/agent-harness.svg" alt="PAI Agent + Harness 架构图" width="100%"/>
 </p>
 
 - **🤖 Main Agent** — 单一统一 Agent，自主调用所有工具，无需预分类路由
@@ -111,8 +111,8 @@ flowchart TB
 - **WebSocket 实时推送** — 跨平台消息同步 & 定时提醒通知
 - **系统级 MCP（Fetch）** — 统一网页抓取工具，可在对话中自然语言触发或命令触发
 - **真流式输出（LangChain `astream_events`）** — Agent 工具调用实时推送工具步骤事件，终态文本流式输出
-- **分层记忆系统** — 会话短期上下文 + 用户级长期记忆（当前主链路注入全部有效长期记忆，排除身份档案项）
-- **长期记忆双通道写入** — 对话后异步抽取 + `memory_worker` 定时补扫未处理消息（支持已处理游标）
+- **分层记忆系统** — 会话短期上下文 + 用户级长期记忆（全量注入有效记忆，排除身份档案项）
+- **长期记忆双通道写入** — Agent 显式工具调用 + 对话后异步抽取 + `memory_worker` 定时补扫（消息级状态追踪）
 - **管理后台（`/admin`）** — 用户/会话回放/工具开关/长期记忆清洗/首页弹窗配置
 - **Docker Compose 一键部署** — 含 PostgreSQL 15、Redis 7、GeWeChat、NapCat、memory_worker 及前后端
 
@@ -123,6 +123,12 @@ flowchart TB
 - **支持小票 / 支付截图记账** — 当图片内容和用户需求都指向记账时，会继续走记账识别链路，而不是只做通用描述
 - **支持同会话追问最近图片** — 用户上一条发图、下一条继续问“这张图里写了什么”时，系统会尽量复用最近图片上下文
 - **当前线上基线** — 上述图片识别行为当前以 `feat/single-agent` 分支为准；若 `main` 与线上表现不同，请优先参考单 Agent 分支
+
+### 🧠 记忆系统
+
+系统为每位用户维护独立的长期记忆，跨会话持久化。支持双通道写入（Agent 显式调用 + 异步提取）、全量记忆注入、语义去重与定期清洗。
+
+详见 **[docs/memory-system.md](docs/memory-system.md)**。
 
 ---
 
