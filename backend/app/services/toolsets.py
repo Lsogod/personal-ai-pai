@@ -59,12 +59,19 @@ PROFILE_TOOL_NAMES: set[str] = {
     "query_user_profile",
 }
 
+MEMORY_TOOL_NAMES: set[str] = {
+    "memory_list",
+    "memory_save",
+    "memory_append",
+    "memory_delete",
+}
+
 # Node-scoped tool visibility. Nodes should consume tools from this registry
 # instead of embedding ad-hoc tool name sets in node files.
 NODE_TOOL_NAMES: dict[str, set[str]] = {
     "chat_manager": SHARED_TOOL_NAMES | VISION_TOOL_NAMES | MCP_TOOL_NAMES | CONVERSATION_TOOL_NAMES,
-    "schedule_manager": SHARED_TOOL_NAMES | MCP_TOOL_NAMES | SCHEDULE_TOOL_NAMES,
-    "ledger_manager": LEDGER_TOOL_NAMES,
+    "schedule_manager": SHARED_TOOL_NAMES | MCP_TOOL_NAMES | SCHEDULE_TOOL_NAMES | MEMORY_TOOL_NAMES,
+    "ledger_manager": LEDGER_TOOL_NAMES | MEMORY_TOOL_NAMES,
 }
 
 

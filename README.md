@@ -122,8 +122,8 @@ flowchart TB
 - **WebSocket 实时推送** — 跨平台消息同步 & 定时提醒通知
 - **系统级 MCP（Fetch）** — 统一网页抓取工具，可在对话中自然语言触发或命令触发
 - **真流式输出（LangChain `astream`）** — 仅流式推送终态自然语言节点，执行细节写入后端日志
-- **分层记忆系统** — 会话短期上下文 + 用户级长期记忆（当前主链路注入全部有效长期记忆，排除身份档案项）
-- **长期记忆双通道写入** — 对话后异步抽取 + `memory_worker` 定时补扫未处理消息（支持已处理游标）
+- **分层记忆系统** — 会话短期上下文 + 用户级长期记忆（按用户消息相关性评分注入 top-k 记忆，排除身份档案项）
+- **长期记忆双通道写入** — Agent 显式工具调用 + 对话后异步抽取 + `memory_worker` 定时补扫未处理消息（消息级状态追踪）
 - **管理后台（`/admin`）** — 用户/会话回放/工具开关/长期记忆清洗/首页弹窗配置
 - **Docker Compose 一键部署** — 含 PostgreSQL 15、Redis 7、GeWeChat、NapCat、memory_worker 及前后端
 
@@ -134,6 +134,12 @@ flowchart TB
 - **支持小票 / 支付截图记账** — 当图片内容和用户需求都指向记账时，会继续走记账识别链路，而不是只做通用描述
 - **支持同会话追问最近图片** — 用户上一条发图、下一条继续问“这张图里写了什么”时，系统会尽量复用最近图片上下文
 - **当前线上基线** — 上述图片识别行为当前以 `feat/single-agent` 分支为准；若 `main` 与线上表现不同，请优先参考单 Agent 分支
+
+### 🧠 记忆系统
+
+系统为每位用户维护独立的长期记忆，跨会话持久化。支持双通道写入（Agent 显式调用 + 异步提取）、相关性检索注入、语义去重与定期清洗。
+
+详见 **[docs/memory-system.md](docs/memory-system.md)**。
 
 ---
 
@@ -458,11 +464,11 @@ cp miniapp/config.local.example.js miniapp/config.local.js
 | `AUTH_EMAIL_CODE_COOLDOWN_SEC` | - | `60` | 邮箱验证码发送冷却时间（秒） |
 | `AUTH_EMAIL_CODE_MAX_VERIFY_ATTEMPTS` | - | `8` | 单次验证码最大校验失败次数 |
 | `LONG_TERM_MEMORY_ENABLED` | - | `true` | 是否启用长期记忆 |
-| `LONG_TERM_MEMORY_MIN_CONFIDENCE` | - | `0.75` | 写入长期记忆的最小置信度 |
+| `LONG_TERM_MEMORY_MIN_CONFIDENCE` | - | `0.5` | 写入长期记忆的最小置信度 |
 | `LONG_TERM_MEMORY_MAX_WRITE_ITEMS` | - | `6` | 单轮最多写入记忆条数 |
-| `LONG_TERM_MEMORY_RETRIEVE_LIMIT` | - | `6` | 记忆检索条数上限（当前主链路全量注入时仅作保留配置） |
+| `LONG_TERM_MEMORY_RETRIEVE_LIMIT` | - | `20` | 相关性检索注入 prompt 的记忆条数上限 |
 | `LONG_TERM_MEMORY_RETRIEVE_SCAN_LIMIT` | - | `80` | 检索候选扫描上限 |
-| `LONG_TERM_MEMORY_DEFAULT_TTL_DAYS` | - | `180` | 默认记忆过期天数 |
+| `LONG_TERM_MEMORY_DEFAULT_TTL_DAYS` | - | `730` | 默认记忆过期天数 |
 | `LONG_TERM_MEMORY_SCAN_ENABLED` | - | `true` | 是否启用长期记忆后台扫描 |
 | `LONG_TERM_MEMORY_SCAN_RUN_IN_API` | - | `false` | 是否在 API 进程内挂载扫描任务 |
 | `LONG_TERM_MEMORY_SCAN_INTERVAL_SEC` | - | `120` | 后台扫描间隔秒数 |

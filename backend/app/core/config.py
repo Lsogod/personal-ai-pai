@@ -82,15 +82,15 @@ class Settings(BaseSettings):
     preload_graph_on_startup: bool = False
 
     long_term_memory_enabled: bool = True
-    long_term_memory_min_confidence: float = 0.75
+    long_term_memory_min_confidence: float = 0.5
     long_term_memory_max_write_items: int = 6
-    long_term_memory_retrieve_limit: int = 6
+    long_term_memory_retrieve_limit: int = 20
     long_term_memory_retrieve_scan_limit: int = 80
-    long_term_memory_default_ttl_days: int = 180
-    long_term_memory_debounce_sec: int = 12
+    long_term_memory_default_ttl_days: int = 730
+    long_term_memory_debounce_sec: int = 0
     long_term_memory_extract_timeout_sec: int = 90
     long_term_memory_upsert_timeout_sec: int = 90
-    long_term_memory_extract_context_max_chars: int = 8000
+    long_term_memory_extract_context_max_chars: int = 24000
     long_term_memory_extract_message_max_chars: int = 200
     long_term_memory_scan_enabled: bool = True
     long_term_memory_scan_run_in_api: bool = False

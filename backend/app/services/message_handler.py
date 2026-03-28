@@ -19,7 +19,7 @@ from app.services.commands.conversation import handle_conversation_command
 from app.services.llm import get_llm
 from app.services.memory import (
     extract_memory_candidates,
-    list_long_term_memories,
+    retrieve_relevant_long_term_memories,
     upsert_long_term_memories,
 )
 from app.services.sender import UnifiedSender
@@ -1108,12 +1108,10 @@ async def handle_message(
             skip_summary_update = True
         else:
             skip_summary_update = False
-            # Inject all active long-term memories into graph context.
-            # No relevance scoring/filtering is applied for this path.
-            long_term_memories = await list_long_term_memories(
+            long_term_memories = await retrieve_relevant_long_term_memories(
                 session=session,
                 user_id=user_id,
-                limit=None,
+                query=message.content,
             )
             state["extra"] = {
                 "conversation_summary": (conversation.summary or "").strip(),
