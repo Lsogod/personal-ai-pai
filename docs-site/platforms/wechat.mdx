@@ -1,0 +1,128 @@
+---
+title: "微信"
+description: "通过 GeWeChat 桥接服务接入个人微信"
+---
+
+# 微信接入
+
+PAI 通过 **GeWeChat** 桥接服务接入个人微信。GeWeChat 是一个独立的外部服务，负责与微信协议对接，PAI 通过其 HTTP API 收发消息。
+
+<Warning>
+  GeWeChat 是第三方服务，使用前请了解相关风险。微信可能会对非官方客户端进行限制。
+</Warning>
+
+---
+
+## 架构说明
+
+```
+微信用户 ←→ 微信服务器 ←→ GeWeChat 服务 ←→ PAI 后端
+                              (port 2531)
+```
+
+GeWeChat 作为中间层，将微信消息转发为标准 HTTP 请求，PAI 通过 Webhook 接收并处理。
+
+---
+
+## 环境变量配置
+
+<ParamField body="GEWECHAT_BASE_URL" type="string" required>
+  GeWeChat 服务的 HTTP 地址，例如 `http://gewechat:2531`
+</ParamField>
+
+<ParamField body="GEWECHAT_APP_ID" type="string" required>
+  GeWeChat 分配的应用 ID，用于标识当前接入实例
+</ParamField>
+
+<ParamField body="GEWECHAT_TOKEN" type="string" required>
+  GeWeChat 的认证 Token，用于 API 调用鉴权
+</ParamField>
+
+```env
+GEWECHAT_BASE_URL=http://gewechat:2531
+GEWECHAT_APP_ID=your-app-id
+GEWECHAT_TOKEN=your-token
+```
+
+---
+
+## Webhook 配置
+
+**端点：** `POST /webhook/wechat`
+
+GeWeChat 会将微信消息转发到此端点。需要在 GeWeChat 管理后台配置回调地址为：
+
+```
+http://backend:8000/webhook/wechat
+```
+
+<Info>
+  在 Docker Compose 部署中，使用容器名 `backend` 作为主机名即可。
+</Info>
+
+---
+
+## Docker 部署
+
+GeWeChat 作为独立服务运行，在 `docker-compose.yml` 中配置：
+
+```yaml
+gewechat:
+  image: gewechat/gewechat:latest
+  ports:
+    - "2531:2531"
+  volumes:
+    - gewe_data:/data
+  restart: unless-stopped
+```
+
+<Steps>
+  <Step title="启动 GeWeChat 服务">
+    确保 GeWeChat 容器正常运行，访问 `http://localhost:2531` 验证
+  </Step>
+  <Step title="登录微信">
+    通过 GeWeChat 提供的接口完成微信账号登录
+  </Step>
+  <Step title="配置回调地址">
+    将 Webhook 回调地址设置为 PAI 后端的 `/webhook/wechat` 端点
+  </Step>
+  <Step title="验证联通">
+    向微信 Bot 发送一条测试消息，确认 PAI 能正确接收和回复
+  </Step>
+</Steps>
+
+---
+
+## 功能支持
+
+### 文本消息
+
+接收和发送文本消息，支持完整的 AI 对话能力。
+
+### 图片消息
+
+- **接收图片：** 微信用户发送的图片会通过 GeWeChat 转发，PAI 获取图片 URL 后进行多模态处理
+- **发送图片：** AI 生成的图片内容会通过 GeWeChat API 发送给用户
+
+---
+
+## 消息处理流程
+
+```
+微信用户发送消息
+    │
+    ▼
+微信服务器 → GeWeChat 服务
+    │
+    ▼
+GeWeChat 转发到 POST /webhook/wechat
+    │
+    ▼
+解析为 UnifiedMessage(platform_id="wechat", content=..., image_urls=[...])
+    │
+    ▼
+AI 核心管线处理
+    │
+    ▼
+UnifiedSender → GeWeChat HTTP API → 微信服务器 → 用户收到回复
+```

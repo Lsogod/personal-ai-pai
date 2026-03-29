@@ -1,0 +1,278 @@
+---
+title: "生产环境部署"
+description: "PAI 生产环境部署注意事项与最佳实践"
+---
+
+# 生产环境部署
+
+本文档介绍将 PAI 部署到生产环境时需要关注的配置、安全性和运维事项。
+
+---
+
+## 环境变量
+
+生产环境需要配置以下关键环境变量：
+
+<ParamField body="DATABASE_URL" type="string" required>
+  PostgreSQL 数据库连接字符串，例如 `postgresql+asyncpg://user:pass@host:5432/pai`
+</ParamField>
+
+<ParamField body="REDIS_URL" type="string" required>
+  Redis 连接地址，例如 `redis://host:6379/0`
+</ParamField>
+
+<ParamField body="JWT_SECRET" type="string" required>
+  JWT Token 签名密钥。生产环境必须设置为强随机字符串，切勿使用默认值
+</ParamField>
+
+<ParamField body="ADMIN_TOKEN" type="string" required>
+  管理后台访问令牌，用于访问管理 API 和仪表盘
+</ParamField>
+
+```env
+DATABASE_URL=postgresql+asyncpg://pai:strong_password@db:5432/pai
+REDIS_URL=redis://redis:6379/0
+JWT_SECRET=your-strong-random-secret-key-at-least-32-chars
+ADMIN_TOKEN=your-admin-access-token
+```
+
+<Warning>
+  请为 `JWT_SECRET` 生成至少 32 位的随机字符串。可使用 `openssl rand -hex 32` 生成。
+</Warning>
+
+---
+
+## HTTPS 与反向代理
+
+生产环境必须使用 HTTPS。推荐使用 Nginx 作为反向代理：
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name pai.your-domain.com;
+
+    ssl_certificate /etc/ssl/certs/your-cert.pem;
+    ssl_certificate_key /etc/ssl/private/your-key.pem;
+
+    # 后端 API 和 Webhook
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /webhook/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # WebSocket 代理
+    location /api/chat/ws {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /api/notifications/ws {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    # 前端静态资源
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+    }
+}
+
+# HTTP 重定向到 HTTPS
+server {
+    listen 80;
+    server_name pai.your-domain.com;
+    return 301 https://$host$request_uri;
+}
+```
+
+<Info>
+  推荐使用 Let's Encrypt 免费获取 SSL 证书，并配合 certbot 自动续期。
+</Info>
+
+---
+
+## Webhook URL 配置
+
+各平台的 Webhook 地址需要指向生产域名：
+
+| 平台 | Webhook URL |
+|------|------------|
+| Telegram | `https://pai.your-domain.com/webhook/telegram` |
+| 微信 | `https://pai.your-domain.com/webhook/wechat` |
+| QQ | `https://pai.your-domain.com/webhook/qq` |
+| 飞书 | `https://pai.your-domain.com/webhook/feishu` |
+
+<Note>
+  Telegram 要求 Webhook 必须使用 HTTPS。其他平台同样建议使用 HTTPS 保证数据安全。
+</Note>
+
+---
+
+## Memory Worker
+
+`memory_worker` 是独立于主后端的异步进程，负责从 Redis 队列消费对话消息并提取用户记忆。
+
+生产环境注意事项：
+
+- **独立进程：** memory_worker 必须作为单独的进程运行，不要合并到主后端中
+- **重启策略：** 设置 `restart: unless-stopped` 确保异常退出后自动恢复
+- **资源隔离：** 建议为 memory_worker 分配独立的 CPU 和内存限制，避免影响主后端
+
+```yaml
+memory_worker:
+  build:
+    context: .
+    dockerfile: Dockerfile
+  command: python -m app.memory.worker
+  env_file:
+    - .env
+  depends_on:
+    - db
+    - redis
+  restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        memory: 1G
+```
+
+---
+
+## Redis 持久化
+
+生产环境建议开启 Redis 持久化，防止重启后数据丢失：
+
+```yaml
+redis:
+  image: redis:7-alpine
+  command: redis-server --appendonly yes --appendfsync everysec
+  volumes:
+    - redis_data:/data
+  restart: unless-stopped
+```
+
+- **AOF 模式：** `appendonly yes` 开启追加日志持久化
+- **同步频率：** `appendfsync everysec` 每秒同步一次，兼顾性能和可靠性
+
+---
+
+## 数据库备份
+
+<Steps>
+  <Step title="定时备份">
+    使用 cron 定时执行 `pg_dump` 备份数据库：
+    ```bash
+    # 每天凌晨 3 点备份
+    0 3 * * * docker-compose exec -T db pg_dump -U pai pai | gzip > /backups/pai_$(date +\%Y\%m\%d).sql.gz
+    ```
+  </Step>
+  <Step title="备份验证">
+    定期验证备份文件可以正常恢复：
+    ```bash
+    gunzip < /backups/pai_20260101.sql.gz | docker-compose exec -T db psql -U pai pai
+    ```
+  </Step>
+  <Step title="远程存储">
+    将备份文件同步到远程存储（如 S3、OSS），防止服务器故障导致备份丢失
+  </Step>
+</Steps>
+
+<Warning>
+  备份文件包含用户数据，请确保存储位置的访问权限受到严格控制。
+</Warning>
+
+---
+
+## 日志管理
+
+### 日志输出
+
+后端日志默认输出到 `./logs` 目录和标准输出。生产环境建议：
+
+- **日志级别：** 设置为 `INFO`，避免 `DEBUG` 级别产生过多日志
+- **日志轮转：** 配置 logrotate 或 Docker 的日志驱动防止日志文件无限增长
+
+```yaml
+backend:
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "5"
+```
+
+### Docker 日志限制
+
+为所有服务配置日志大小限制，防止磁盘空间耗尽：
+
+```yaml
+# 在 docker-compose.yml 顶层配置默认日志选项
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+```
+
+---
+
+## 监控
+
+### 管理仪表盘
+
+PAI 内置管理后台，通过 `ADMIN_TOKEN` 访问，提供以下监控能力：
+
+- **工具使用分析：** 查看各工具的调用频次和成功率
+- **平台消息统计：** 各平台的消息量和活跃用户数
+- **系统状态：** 数据库连接、Redis 连接、Worker 运行状态
+
+### 健康检查
+
+```yaml
+backend:
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 40s
+```
+
+---
+
+## 安全清单
+
+<AccordionGroup>
+  <Accordion title="环境变量安全">
+    - 使用强随机值设置 `JWT_SECRET` 和 `ADMIN_TOKEN`
+    - 不要将 `.env` 文件提交到版本控制
+    - 生产数据库使用强密码
+  </Accordion>
+  <Accordion title="网络安全">
+    - 强制使用 HTTPS
+    - 数据库和 Redis 端口不要暴露到公网
+    - 配置防火墙规则，仅开放必要端口（80、443）
+  </Accordion>
+  <Accordion title="Webhook 安全">
+    - 为 Telegram 配置 `TELEGRAM_WEBHOOK_SECRET`
+    - 为飞书配置 `FEISHU_ENCRYPT_KEY`
+    - 验证所有 Webhook 请求的来源
+  </Accordion>
+  <Accordion title="数据安全">
+    - 定期备份数据库并验证备份可用性
+    - 开启 Redis 持久化
+    - 备份文件加密存储
+  </Accordion>
+</AccordionGroup>

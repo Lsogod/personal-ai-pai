@@ -1,0 +1,257 @@
+---
+title: "Docker 部署"
+description: "使用 Docker Compose 一键部署 PAI 全部服务"
+---
+
+# Docker Compose 部署
+
+PAI 提供完整的 Docker Compose 配置，可一键部署全部服务。所有服务通过 Docker 内部网络通信，简化配置和运维。
+
+---
+
+## 服务概览
+
+PAI 的 Docker Compose 包含 **7 个服务**：
+
+| 服务 | 说明 | 端口 | 依赖 |
+|------|------|------|------|
+| `backend` | FastAPI 主后端 | 8000 | db, redis |
+| `memory_worker` | 记忆提取异步 Worker | — | db, redis |
+| `frontend` | React Web 前端 | 3000 | backend |
+| `db` | PostgreSQL + pgvector | 5432 | — |
+| `redis` | Redis 缓存 | 6379 | — |
+| `gewechat` | GeWeChat 微信桥接 | 2531 | — |
+| `napcat` | NapCat QQ OneBot 桥接 | 3000 | — |
+
+---
+
+## 服务详情
+
+### backend
+
+主后端服务，处理所有 API 请求和 Webhook 消息。
+
+```yaml
+backend:
+  build:
+    context: .
+    dockerfile: Dockerfile
+  ports:
+    - "8000:8000"
+  env_file:
+    - .env
+  depends_on:
+    - db
+    - redis
+  volumes:
+    - ./skills:/app/skills
+    - ./logs:/app/logs
+  restart: unless-stopped
+```
+
+### memory_worker
+
+独立的记忆提取 Worker 进程，从 Redis 队列消费消息，异步提取和存储用户记忆。
+
+```yaml
+memory_worker:
+  build:
+    context: .
+    dockerfile: Dockerfile
+  command: python -m app.memory.worker
+  env_file:
+    - .env
+  depends_on:
+    - db
+    - redis
+  restart: unless-stopped
+```
+
+### frontend
+
+React Web 前端，构建为静态资源并通过 Nginx 提供服务。
+
+```yaml
+frontend:
+  build:
+    context: ./frontend
+    dockerfile: Dockerfile
+  ports:
+    - "3000:80"
+  depends_on:
+    - backend
+  restart: unless-stopped
+```
+
+### db
+
+PostgreSQL 数据库，启用 pgvector 扩展用于向量存储。
+
+```yaml
+db:
+  image: pgvector/pgvector:pg16
+  ports:
+    - "5432:5432"
+  environment:
+    POSTGRES_USER: pai
+    POSTGRES_PASSWORD: pai_password
+    POSTGRES_DB: pai
+  volumes:
+    - pg_data:/var/lib/postgresql/data
+  restart: unless-stopped
+```
+
+### redis
+
+Redis 用于缓存、会话管理和消息队列。
+
+```yaml
+redis:
+  image: redis:7-alpine
+  ports:
+    - "6379:6379"
+  restart: unless-stopped
+```
+
+### gewechat
+
+GeWeChat 微信桥接服务。仅在需要微信接入时启动。
+
+```yaml
+gewechat:
+  image: gewechat/gewechat:latest
+  ports:
+    - "2531:2531"
+  volumes:
+    - gewe_data:/data
+  restart: unless-stopped
+```
+
+### napcat
+
+NapCat QQ OneBot 协议桥接。自动配置回调地址指向后端。
+
+```yaml
+napcat:
+  image: napcat/napcat:latest
+  ports:
+    - "3000:3000"
+  volumes:
+    - napcat_config:/config
+  environment:
+    - NAPCAT_HTTP_POST_URL=http://backend:8000/webhook/qq
+  restart: unless-stopped
+```
+
+---
+
+## 数据卷
+
+```yaml
+volumes:
+  pg_data:         # PostgreSQL 数据持久化
+  gewe_data:       # GeWeChat 数据和登录状态
+  napcat_config:   # NapCat 配置文件
+```
+
+此外还有两个 bind mount 目录：
+
+| 挂载路径 | 说明 |
+|---------|------|
+| `./skills` | Skill 定义文件目录 |
+| `./logs` | 应用日志输出目录 |
+
+---
+
+## 部署操作
+
+### 构建镜像
+
+```bash
+docker-compose build
+```
+
+### 启动全部服务
+
+```bash
+docker-compose up -d
+```
+
+### 查看日志
+
+```bash
+# 查看所有服务日志
+docker-compose logs -f
+
+# 只看后端日志
+docker-compose logs -f backend
+
+# 只看 memory_worker 日志
+docker-compose logs -f memory_worker
+```
+
+### 停止服务
+
+```bash
+docker-compose down
+```
+
+---
+
+## 选择性启动
+
+如果不需要所有平台，可以只启动必要的服务：
+
+```bash
+# 仅启动核心服务（后端 + 前端 + 数据库 + Redis）
+docker-compose up -d backend memory_worker frontend db redis
+
+# 核心 + Telegram（无需额外服务，仅需配置环境变量）
+docker-compose up -d backend memory_worker frontend db redis
+
+# 核心 + 微信
+docker-compose up -d backend memory_worker frontend db redis gewechat
+
+# 核心 + QQ
+docker-compose up -d backend memory_worker frontend db redis napcat
+```
+
+<Info>
+  Telegram 和飞书不需要额外的桥接服务，只需在 `.env` 中配置对应的环境变量即可。
+</Info>
+
+---
+
+## 数据库迁移
+
+首次部署或升级版本后，可能需要执行数据库迁移：
+
+```bash
+# 进入后端容器执行迁移
+docker-compose exec backend alembic upgrade head
+```
+
+<Warning>
+  生产环境执行迁移前，建议先备份数据库。
+</Warning>
+
+---
+
+## 常见问题
+
+<AccordionGroup>
+  <Accordion title="端口冲突怎么办？">
+    修改 `docker-compose.yml` 中对应服务的端口映射，例如将 `8000:8000` 改为 `8080:8000`。
+  </Accordion>
+  <Accordion title="如何更新到新版本？">
+    ```bash
+    git pull
+    docker-compose build
+    docker-compose up -d
+    docker-compose exec backend alembic upgrade head
+    ```
+  </Accordion>
+  <Accordion title="gewechat 或 napcat 启动失败？">
+    这两个服务需要额外的登录步骤。请查看对应的平台接入文档完成账号登录。如果不需要对应平台，可以不启动这些服务。
+  </Accordion>
+</AccordionGroup>

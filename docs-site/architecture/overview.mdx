@@ -1,0 +1,134 @@
+---
+title: "系统架构概览"
+description: "PAI 系统的整体架构设计、服务组成与数据流"
+---
+
+# 系统架构概览
+
+PAI 采用 **FastAPI + LangGraph** 构建后端，通过多节点 Router 架构实现意图分流，支持多平台即时通讯接入。
+
+---
+
+## 高层架构
+
+整个系统的请求处理流程如下：
+
+```
+用户 → 平台桥接层 → FastAPI Webhook → LangGraph 工作流 → 响应 → 平台发送
+```
+
+<Steps>
+  <Step title="用户发送消息">
+    用户通过 Telegram、微信、QQ、飞书、小程序或 Web 等平台发送消息
+  </Step>
+  <Step title="平台桥接层接收">
+    各平台适配器（Webhook / Polling）将消息转换为统一的 `UnifiedMessage` 格式
+  </Step>
+  <Step title="FastAPI 处理">
+    后端 API 接收标准化消息，进入 `handle_message` 流程，加载会话上下文、长期记忆等
+  </Step>
+  <Step title="LangGraph 工作流执行">
+    Router 节点根据意图分类，将请求路由到对应的专业节点执行
+  </Step>
+  <Step title="响应回传">
+    通过 `UnifiedSender` 将响应发送回用户所在平台
+  </Step>
+</Steps>
+
+---
+
+## 服务组成
+
+PAI 通过 Docker Compose 编排以下服务：
+
+<CardGroup cols={2}>
+  <Card title="backend (FastAPI)" icon="server">
+    核心后端服务，运行在 8000 端口。负责 Webhook 接收、消息处理、LangGraph 工作流执行、工具调用等全部业务逻辑
+  </Card>
+  <Card title="memory_worker" icon="brain">
+    独立的记忆处理进程，与 backend 共享同一镜像。负责异步提取和持久化用户长期记忆，避免阻塞主请求流程
+  </Card>
+  <Card title="frontend (React + Vite)" icon="browser">
+    Web 前端，运行在 3001 端口。提供基于 WebSocket 的流式对话界面
+  </Card>
+  <Card title="db (PostgreSQL 15)" icon="database">
+    主数据库，使用 `postgres:15-alpine` 镜像。存储用户、会话、消息、账单、日程等业务数据，配合 pgvector 扩展支持向量检索
+  </Card>
+  <Card title="redis (Redis 7)" icon="bolt">
+    使用 `redis-stack-server:7.4.0-v6` 镜像。用于 LangGraph 检查点持久化、会话缓存与消息去重
+  </Card>
+  <Card title="gewechat" icon="message">
+    微信个人号接入服务（GeWeChat），运行在 2531 端口。实现微信消息的收发桥接
+  </Card>
+  <Card title="napcat" icon="message">
+    QQ 接入服务（NapCat），运行在 3000 端口。通过 OneBot v11 协议将 QQ 消息转发到后端 Webhook
+  </Card>
+</CardGroup>
+
+---
+
+## 数据流
+
+以下是一条消息从接收到响应的完整数据流：
+
+```
+消息接收 (Webhook/Polling)
+    │
+    ▼
+消息标准化 (UnifiedMessage)
+    │
+    ▼
+handle_message
+    ├── 去重检查 (is_duplicate)
+    ├── 获取/创建用户 (get_or_create_user)
+    ├── 确保活跃会话 (ensure_active_conversation)
+    ├── 加载上下文消息 (_load_context_messages)
+    ├── 检索长期记忆 (retrieve_relevant_long_term_memories)
+    │
+    ▼
+Graph invoke (LangGraph 工作流)
+    ├── router_node → 意图分类
+    ├── 路由到对应节点执行
+    │
+    ▼
+响应发送 (UnifiedSender)
+    │
+    ▼
+异步记忆提取 (memory_worker)
+```
+
+<Note>
+  `memory_worker` 以独立进程运行，通过数据库轮询待处理消息（`memory_status = PENDING`），异步完成记忆提取和存储，不影响主流程响应速度。
+</Note>
+
+---
+
+## 关键设计决策
+
+### 为什么选择 LangGraph
+
+<AccordionGroup>
+  <Accordion title="有状态的对话管理">
+    LangGraph 提供内置的检查点（Checkpointing）机制，支持跨轮次的状态持久化。配合 `AsyncRedisSaver`，可以在生产环境中可靠地保存和恢复对话状态，无需手动管理状态序列化。
+  </Accordion>
+  <Accordion title="图结构的工作流编排">
+    相比线性的 Chain，LangGraph 的 `StateGraph` 支持条件边（conditional edges），可以根据运行时状态动态决定执行路径。例如 `ledger_manager` 处理完账单后可以有条件地路由到 `chat_manager` 继续对话。
+  </Accordion>
+  <Accordion title="节点级别的工具隔离">
+    每个节点拥有独立的工具集（通过 `toolsets.py` 中的 `NODE_TOOL_NAMES` 定义），避免了工具权限混乱，同时便于独立测试和扩展。
+  </Accordion>
+</AccordionGroup>
+
+### 为什么采用多节点 Router 架构
+
+<AccordionGroup>
+  <Accordion title="关注点分离">
+    每个节点专注于一个领域（记账、日程、对话等），拥有独立的系统提示词和工具集。这使得每个节点可以针对特定场景进行深度优化，而不是用一个通用节点处理所有请求。
+  </Accordion>
+  <Accordion title="LLM 意图分类的灵活性">
+    Router 使用 LLM 进行意图分类（`with_structured_output`），支持 7 种意图。相比基于规则的路由，LLM 路由可以理解自然语言的模糊表达，并结合会话上下文做出更准确的判断。
+  </Accordion>
+  <Accordion title="可扩展性">
+    添加新的业务能力只需要：定义新节点、在 `toolsets.py` 注册工具集、在 `workflow.py` 中添加节点和路由边。无需修改现有节点的逻辑。
+  </Accordion>
+</AccordionGroup>

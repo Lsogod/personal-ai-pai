@@ -1,0 +1,138 @@
+---
+title: "Telegram"
+description: "通过 Telegram Bot API 接入 PAI"
+---
+
+# Telegram 接入
+
+Telegram 是 PAI 推荐的首选平台，支持完整的文本和图片消息处理，可通过 Webhook 或轮询两种模式工作。
+
+---
+
+## 创建 Bot
+
+<Steps>
+  <Step title="联系 BotFather">
+    在 Telegram 中搜索 [@BotFather](https://t.me/BotFather) 并发送 `/newbot`
+  </Step>
+  <Step title="设置 Bot 名称">
+    按提示输入 Bot 的显示名称和用户名（用户名必须以 `bot` 结尾）
+  </Step>
+  <Step title="获取 Token">
+    BotFather 会返回一个 Bot Token，格式如 `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`，妥善保存
+  </Step>
+</Steps>
+
+---
+
+## 环境变量配置
+
+<ParamField body="TELEGRAM_BOT_TOKEN" type="string" required>
+  从 BotFather 获取的 Bot Token
+</ParamField>
+
+<ParamField body="TELEGRAM_WEBHOOK_SECRET" type="string">
+  Webhook 验证密钥，用于校验入站请求的合法性。建议在生产环境中设置
+</ParamField>
+
+<ParamField body="TELEGRAM_POLLING_ENABLED" type="boolean" default="false">
+  是否启用轮询模式。设为 `true` 时使用轮询代替 Webhook，适合本地开发
+</ParamField>
+
+<ParamField body="TELEGRAM_POLLING_INTERVAL" type="integer" default="1">
+  轮询间隔（秒）
+</ParamField>
+
+<ParamField body="TELEGRAM_POLLING_TIMEOUT" type="integer" default="30">
+  轮询超时时间（秒），使用 long polling 减少请求频率
+</ParamField>
+
+```env
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+TELEGRAM_WEBHOOK_SECRET=your-webhook-secret
+TELEGRAM_POLLING_ENABLED=false
+```
+
+---
+
+## Webhook 模式
+
+Webhook 是生产环境推荐的模式。Telegram 会将消息主动推送到你配置的 URL。
+
+**端点：** `POST /webhook/telegram`
+
+### 设置 Webhook
+
+使用 Telegram Bot API 设置 Webhook 地址：
+
+```bash
+curl -X POST "https://api.telegram.org/bot<YOUR_TOKEN>/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://your-domain.com/webhook/telegram", "secret_token": "your-webhook-secret"}'
+```
+
+<Warning>
+  Webhook URL 必须使用 HTTPS。本地开发时可使用 ngrok 等工具创建隧道。
+</Warning>
+
+---
+
+## 轮询模式
+
+轮询模式适合本地开发和调试，无需公网 HTTPS 地址。
+
+```env
+TELEGRAM_POLLING_ENABLED=true
+TELEGRAM_POLLING_INTERVAL=1
+TELEGRAM_POLLING_TIMEOUT=30
+```
+
+启用后，PAI 会定期调用 `getUpdates` 拉取新消息。
+
+<Info>
+  轮询模式和 Webhook 模式互斥。启用轮询后，已设置的 Webhook 会被自动移除。
+</Info>
+
+---
+
+## 功能支持
+
+### 文本消息
+
+接收用户发送的文本消息，经 AI 处理后回复文本响应。
+
+### 图片消息
+
+支持接收用户发送的照片：
+
+1. Telegram 会为每张图片生成多个尺寸的 `file_id`
+2. PAI 选取最高分辨率版本
+3. 通过 Telegram `getFile` API 获取文件下载 URL
+4. 将 URL 写入 `UnifiedMessage.image_urls` 供多模态处理
+
+### 文件 URL 获取
+
+Telegram 的文件通过 `file_id` 引用，PAI 自动调用 Bot API 将其转换为可访问的 HTTP URL，用于后续的图片识别等处理。
+
+---
+
+## 消息处理示例
+
+```
+用户发送消息
+    │
+    ▼
+Telegram 推送到 POST /webhook/telegram
+    │
+    ▼
+验证 secret_token
+    │
+    ▼
+解析为 UnifiedMessage(platform_id="telegram", content=..., image_urls=[...])
+    │
+    ▼
+AI 核心管线处理
+    │
+    ▼
+UnifiedSender → Telegram sendMessage API → 用户收到回复
+```

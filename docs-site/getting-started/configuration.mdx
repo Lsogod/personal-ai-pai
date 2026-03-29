@@ -1,0 +1,288 @@
+---
+title: "配置指南"
+description: "PAI 所有环境变量的详细说明与推荐配置"
+---
+
+PAI 通过 `.env` 文件管理所有配置。部署前请复制示例文件并根据需要修改：
+
+```bash
+cp .env.example .env
+```
+
+<Note>
+  标记为 **必填** 的变量必须在启动前设置，否则服务将无法正常运行。其余变量均有合理默认值，可按需调整。
+</Note>
+
+---
+
+## 核心配置
+
+基础运行所需的核心参数。
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `DATABASE_URL` | PostgreSQL 数据库连接字符串 | `postgresql+asyncpg://pai:pai@db:5432/pai` | 否 |
+| `REDIS_URL` | Redis 连接字符串 | `redis://redis:6379/0` | 否 |
+| `OPENAI_API_KEY` | OpenAI API 密钥 | - | **是** |
+| `OPENAI_MODEL` | 使用的模型名称 | `gpt-4o` | 否 |
+| `OPENAI_BASE_URL` | 自定义 API 端点（兼容 OpenAI 格式的第三方服务） | - | 否 |
+| `TIMEZONE` | 系统时区 | `Asia/Shanghai` | 否 |
+
+<Tip>
+  如果你使用兼容 OpenAI 格式的第三方模型服务（如 DeepSeek、智谱等），只需设置 `OPENAI_BASE_URL` 和对应的 `OPENAI_API_KEY` 即可。
+</Tip>
+
+---
+
+## 认证配置
+
+用户认证与管理相关参数。
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `JWT_SECRET` | JWT 签名密钥，建议使用随机字符串 | - | **是** |
+| `ADMIN_TOKEN` | 管理员接口访问 Token | - | **是** |
+| `JWT_EXP_MINUTES` | JWT Token 过期时间（分钟） | `43200`（30 天） | 否 |
+
+<Warning>
+  `JWT_SECRET` 和 `ADMIN_TOKEN` 必须设置为强随机字符串。可使用以下命令生成：
+
+  ```bash
+  openssl rand -hex 32
+  ```
+</Warning>
+
+---
+
+## Telegram 配置
+
+接入 Telegram Bot 所需的参数。
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `TELEGRAM_BOT_TOKEN` | Telegram Bot Token（从 @BotFather 获取） | - | 接入时必填 |
+| `TELEGRAM_WEBHOOK_SECRET` | Webhook 验证密钥 | - | Webhook 模式必填 |
+| `TELEGRAM_POLLING` | 是否使用轮询模式（`true`/`false`） | `false` | 否 |
+| `TELEGRAM_POLLING_INTERVAL` | 轮询间隔（秒） | `1` | 否 |
+
+<Tabs>
+  <Tab title="Webhook 模式（推荐）">
+    适用于有公网域名的生产环境。需要配置 `TELEGRAM_WEBHOOK_SECRET` 用于验证请求来源。
+
+    ```dotenv
+    TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+    TELEGRAM_WEBHOOK_SECRET=your-webhook-secret
+    TELEGRAM_POLLING=false
+    ```
+  </Tab>
+  <Tab title="轮询模式">
+    适用于本地开发或无公网环境。无需配置 Webhook，Bot 主动拉取消息。
+
+    ```dotenv
+    TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+    TELEGRAM_POLLING=true
+    TELEGRAM_POLLING_INTERVAL=1
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## 微信配置
+
+通过 GeWeChat 服务接入个人微信。
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `GEWECHAT_BASE_URL` | GeWeChat 服务地址 | - | 接入时必填 |
+| `GEWECHAT_APP_ID` | GeWeChat 应用 ID | - | 接入时必填 |
+| `GEWECHAT_TOKEN` | GeWeChat 回调验证 Token | - | 接入时必填 |
+
+```dotenv
+GEWECHAT_BASE_URL=http://gewechat:2531/v2/api
+GEWECHAT_APP_ID=your-app-id
+GEWECHAT_TOKEN=your-callback-token
+```
+
+<Info>
+  GeWeChat 是独立的微信协议服务，需要单独部署。详细接入说明请参考 [微信平台接入](/platforms/wechat)。
+</Info>
+
+---
+
+## QQ 配置
+
+通过 OneBot v11 协议接入 QQ。
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `ONEBOT_BASE_URL` | OneBot 实现的 HTTP API 地址 | - | 接入时必填 |
+| `ONEBOT_ACCESS_TOKEN` | OneBot 访问 Token | - | 接入时必填 |
+
+```dotenv
+ONEBOT_BASE_URL=http://napcat:3000
+ONEBOT_ACCESS_TOKEN=your-access-token
+```
+
+<Info>
+  推荐使用 [NapCat](https://github.com/NapNeko/NapCatQQ) 作为 OneBot 实现。详细接入说明请参考 [QQ 平台接入](/platforms/qq)。
+</Info>
+
+---
+
+## 飞书配置
+
+接入飞书开放平台。
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `FEISHU_APP_ID` | 飞书应用 App ID | - | 接入时必填 |
+| `FEISHU_APP_SECRET` | 飞书应用 App Secret | - | 接入时必填 |
+| `FEISHU_VERIFICATION_TOKEN` | 事件订阅验证 Token | - | 接入时必填 |
+| `FEISHU_ENCRYPT_KEY` | 事件订阅加密密钥 | - | 接入时必填 |
+
+```dotenv
+FEISHU_APP_ID=cli_xxxxxxxxxxxx
+FEISHU_APP_SECRET=your-app-secret
+FEISHU_VERIFICATION_TOKEN=your-verification-token
+FEISHU_ENCRYPT_KEY=your-encrypt-key
+```
+
+---
+
+## 小程序配置
+
+微信小程序接入参数。
+
+| 变量名 | 说明 | 默认值 | 必填 |
+|--------|------|--------|------|
+| `MINIAPP_APP_ID` | 小程序 App ID | - | 接入时必填 |
+| `MINIAPP_APP_SECRET` | 小程序 App Secret | - | 接入时必填 |
+| `MINIAPP_SUBSCRIBE_TEMPLATE_ID` | 订阅消息模板 ID（用于日程提醒推送） | - | 订阅通知时必填 |
+
+```dotenv
+MINIAPP_APP_ID=wx_your_app_id
+MINIAPP_APP_SECRET=your-app-secret
+MINIAPP_SUBSCRIBE_TEMPLATE_ID=your-template-id
+```
+
+---
+
+## 记忆系统配置
+
+控制长期记忆的提取、存储和召回行为。
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `LONG_TERM_MEMORY_ENABLED` | 是否启用长期记忆 | `true` |
+| `LONG_TERM_MEMORY_MIN_CONFIDENCE` | 记忆提取最低置信度阈值（0-1） | `0.75` |
+| `LONG_TERM_MEMORY_TTL` | 记忆有效期（天） | `180`（6 个月） |
+| `LONG_TERM_MEMORY_RETRIEVE_LIMIT` | 每次召回的最大记忆条数 | `6` |
+| `LONG_TERM_MEMORY_CONTEXT` | 记忆上下文窗口大小（字符数） | `8000` |
+| `LONG_TERM_MEMORY_DEBOUNCE` | 记忆提取防抖时间（秒），0 表示不防抖 | `12` |
+
+```dotenv
+LONG_TERM_MEMORY_ENABLED=true
+LONG_TERM_MEMORY_MIN_CONFIDENCE=0.75
+LONG_TERM_MEMORY_TTL=180
+LONG_TERM_MEMORY_RETRIEVE_LIMIT=6
+LONG_TERM_MEMORY_CONTEXT=8000
+LONG_TERM_MEMORY_DEBOUNCE=12
+```
+
+<Tip>
+  `MIN_CONFIDENCE` 控制记忆提取的精确度：值越高，提取的记忆越精确但可能遗漏；值越低，召回更全面但可能包含噪声。`feat/single-agent` 分支默认 `0.75`，配合全量注入策略使用较高阈值过滤低质量记忆。
+</Tip>
+
+---
+
+## MCP 工具配置
+
+MCP（Model Context Protocol）外部工具扩展配置。
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `MCP_FETCH_ENABLED` | 是否启用 MCP Fetch 工具 | `false` |
+| `MCP_FETCH_URL` | MCP Fetch 服务地址 | - |
+
+```dotenv
+MCP_FETCH_ENABLED=true
+MCP_FETCH_URL=http://mcp-fetch:8080
+```
+
+<Info>
+  MCP Fetch 工具允许 AI 抓取网页内容。启用前需要部署对应的 MCP 服务。
+</Info>
+
+---
+
+## SMTP 邮件配置
+
+用于发送邮件通知（如日程提醒等）。
+
+| 变量名 | 说明 | 默认值 |
+|--------|------|--------|
+| `SMTP_HOST` | SMTP 服务器地址 | - |
+| `SMTP_PORT` | SMTP 服务器端口 | `587` |
+| `SMTP_USER` | SMTP 登录用户名 | - |
+| `SMTP_PASSWORD` | SMTP 登录密码 | - |
+| `SMTP_FROM` | 发件人地址 | 与 `SMTP_USER` 相同 |
+| `SMTP_USE_TLS` | 是否使用 TLS 加密 | `true` |
+
+```dotenv
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASSWORD=your-app-password
+SMTP_FROM=your-email@gmail.com
+SMTP_USE_TLS=true
+```
+
+<Warning>
+  Gmail 用户请使用[应用专用密码](https://support.google.com/accounts/answer/185833)，不要使用账户密码。
+</Warning>
+
+---
+
+## 完整 .env 示例
+
+以下是一个包含所有常用配置的 `.env` 示例：
+
+```dotenv
+# ===== 核心配置 =====
+DATABASE_URL=postgresql+asyncpg://pai:pai@db:5432/pai
+REDIS_URL=redis://redis:6379/0
+OPENAI_API_KEY=sk-your-api-key
+OPENAI_MODEL=gpt-4o
+TIMEZONE=Asia/Shanghai
+
+# ===== 认证配置 =====
+JWT_SECRET=your-random-jwt-secret
+ADMIN_TOKEN=your-admin-token
+JWT_EXP_MINUTES=43200
+
+# ===== Telegram =====
+TELEGRAM_BOT_TOKEN=123456:ABC-DEF
+TELEGRAM_POLLING=true
+
+# ===== 记忆系统 =====
+LONG_TERM_MEMORY_ENABLED=true
+LONG_TERM_MEMORY_MIN_CONFIDENCE=0.75
+LONG_TERM_MEMORY_TTL=180
+LONG_TERM_MEMORY_RETRIEVE_LIMIT=6
+LONG_TERM_MEMORY_CONTEXT=8000
+LONG_TERM_MEMORY_DEBOUNCE=12
+```
+
+---
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="架构概览" icon="sitemap" href="/architecture/single-agent">
+    了解 PAI 的单 Agent + Harness 架构设计
+  </Card>
+  <Card title="平台接入" icon="message" href="/platforms/overview">
+    配置并接入你需要的即时通讯平台
+  </Card>
+</CardGroup>

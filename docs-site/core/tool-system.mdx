@@ -1,0 +1,170 @@
+---
+title: "工具系统"
+description: "PAI 工具体系：24 个内建工具 + MCP 外部工具，单 Agent 全量可用"
+---
+
+## 概述
+
+PAI 提供 24 个内建工具，涵盖时间、视觉、记账、对话、记忆、日程、用户档案等能力。同时通过 MCP（Model Context Protocol）协议接入外部工具，实现地图天气等扩展能力。
+
+在 `feat/single-agent` 分支中，所有工具通过 `langchain_tools.py` 统一注册，单一 Agent 拥有全部工具的访问权限，自主决策调用哪些工具，无节点作用域隔离。
+
+## 工具分类
+
+### 时间与通用工具
+
+| 工具名 | 功能 |
+|--------|------|
+| `now_time` | 获取当前时间 |
+| `fetch_url` | 抓取 URL 内容 |
+
+### 视觉工具
+
+| 工具名 | 功能 |
+|--------|------|
+| `analyze_image` | 通用图片分析（OCR、内容理解） |
+| `analyze_receipt` | 小票/支付截图结构化解析 |
+
+### 记账工具
+
+| 工具名 | 功能 |
+|--------|------|
+| `ledger_text2sql` | 自然语言转 SQL 查询 |
+| `ledger_insert` | 新增记账条目 |
+| `ledger_update` | 更新记账条目 |
+| `ledger_delete` | 删除记账条目 |
+| `ledger_get_latest` | 获取最近一条记录 |
+| `ledger_list_recent` | 获取最近记录列表 |
+| `ledger_list` | 按条件查询记录列表 |
+
+### 对话工具
+
+| 工具名 | 功能 |
+|--------|------|
+| `conversation_current` | 获取当前对话信息 |
+| `conversation_list` | 查询历史对话列表 |
+
+### 记忆工具
+
+| 工具名 | 功能 |
+|--------|------|
+| `memory_list` | 查询用户长期记忆 |
+| `memory_save` | 创建或覆盖记忆 |
+| `memory_append` | 追加内容到已有记忆 |
+| `memory_delete` | 删除指定记忆 |
+
+### 日程工具
+
+| 工具名 | 功能 |
+|--------|------|
+| `schedule_insert` | 创建日程提醒 |
+| `schedule_update` | 更新日程 |
+| `schedule_delete` | 删除日程 |
+| `schedule_get_latest` | 获取最近日程 |
+| `schedule_list_recent` | 获取最近日程列表 |
+| `schedule_list` | 按条件查询日程 |
+
+### 用户档案工具
+
+| 工具名 | 功能 |
+|--------|------|
+| `update_user_profile` | 更新用户档案 |
+| `query_user_profile` | 查询用户档案 |
+
+### MCP 外部工具
+
+| 工具名 | 功能 |
+|--------|------|
+| `mcp_list_tools` | 列出可用的 MCP 工具 |
+| `mcp_call_tool` | 调用指定 MCP 工具 |
+| `maps_weather` | 地图天气查询（MCP 提供） |
+
+## 工具注册
+
+`feat/single-agent` 分支通过 `langchain_tools.py` 统一注册所有工具到单一 Agent：
+
+```python
+# langchain_tools.py
+# 所有工具统一注册，Agent 全量可用
+ALL_TOOLS = [
+    # 时间与通用
+    now_time, fetch_url,
+    # 视觉分析
+    analyze_image, analyze_receipt,
+    # 记账管理
+    ledger_text2sql, ledger_insert, ledger_update, ledger_delete,
+    ledger_get_latest, ledger_list_recent, ledger_list,
+    # 日程管理
+    schedule_insert, schedule_update, schedule_delete,
+    schedule_get_latest, schedule_list_recent, schedule_list,
+    # 记忆管理
+    memory_list, memory_save, memory_append, memory_delete,
+    # 对话管理
+    conversation_current, conversation_list,
+    # 用户档案
+    update_user_profile, query_user_profile,
+    # MCP 扩展
+    mcp_list_tools, mcp_call_tool, maps_weather,
+]
+```
+
+<Note>
+  与 `main` 分支不同，`feat/single-agent` 分支没有 `toolsets.py` 和节点级工具权限隔离。Agent 自主判断使用哪些工具，可以在单次推理中跨领域调用多个工具（如同时记账 + 创建日程提醒）。
+</Note>
+
+## 工具执行流程
+
+工具调用遵循统一的执行路径：
+
+<Steps>
+  <Step title="LLM 函数调用">
+    LLM 在对话推理中决定调用某工具，输出 `function_call` 消息（工具名 + 参数 JSON）
+  </Step>
+  <Step title="LangChain 工具分发">
+    LangChain 框架接收函数调用，匹配到对应的 `BaseTool` 实例
+  </Step>
+  <Step title="能力执行">
+    通过 `execute_capability_with_usage` 执行实际逻辑，区分 `builtin`（内建）和 `mcp`（外部）两种来源
+  </Step>
+  <Step title="结果返回">
+    执行结果序列化为字符串返回给 LLM，包含 `ok` 状态、`output` 数据、`latency_ms` 延迟等信息
+  </Step>
+</Steps>
+
+```
+用户消息 → LLM 推理 → function_call
+        → LangChain BaseTool
+        → execute_capability_with_usage(source, name, args)
+        → 结果 JSON → LLM 继续推理 → 最终回复
+```
+
+## MCP 集成
+
+PAI 通过 MCP 协议接入外部工具服务器：
+
+- `fetch_url`：通过 MCP 抓取网页内容
+- `maps_weather`：地图天气查询服务
+
+工具来源通过 `_resolve_tool_source` 函数判断：`maps_weather` 路由到 MCP，其余默认为 builtin。
+
+## 管理功能
+
+### 工具开关
+
+管理员可通过 Admin API 控制单个工具的启用/禁用状态，实现运行时工具管理。
+
+### 使用日志
+
+每次工具调用都会记录审计信息：
+
+| 字段 | 说明 |
+|------|------|
+| `source` | 工具来源（builtin / mcp） |
+| `name` | 工具名称 |
+| `args` | 调用参数 |
+| `ok` | 是否成功 |
+| `latency_ms` | 执行耗时（毫秒） |
+| `output` | 输出内容 |
+| `error` | 错误信息（如有） |
+
+通过审计钩子（`audit_hook`）回调记录，可用于后续分析工具使用频率、延迟分布和错误率。

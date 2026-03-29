@@ -1,0 +1,105 @@
+---
+title: '日程提醒'
+description: '自然语言创建提醒，APScheduler 定时触发，多平台推送'
+---
+
+## 概览
+
+日程模块让用户通过自然语言设置提醒，系统自动解析时间并在指定时刻通过用户所在平台推送通知。
+
+```
+用户: "明天下午 3 点提醒我开会"
+Agent → schedule_insert(content="开会", trigger_time="2026-03-30T15:00:00")
+Agent: "已设置提醒：明天 15:00 开会"
+// 到时间后 → 推送到用户的 Telegram/微信/QQ/飞书/Web
+```
+
+---
+
+## 数据模型
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | int | 主键 |
+| `user_id` | int | 所属用户 |
+| `content` | string | 提醒内容 |
+| `trigger_time` | datetime | 触发时间 |
+| `status` | string | 状态 |
+| `created_at` | datetime | 创建时间 |
+
+### 状态流转
+
+```
+PENDING → EXECUTED  （定时到达，成功推送）
+       → CANCELLED （用户取消）
+       → FAILED    （推送失败）
+```
+
+<Info>
+系统支持 30+ 个中英文状态别名映射，例如"待执行"、"已完成"、"已取消"、"done"、"cancelled" 等都能正确识别。
+</Info>
+
+---
+
+## 工具链
+
+| 工具 | 功能 |
+|------|------|
+| `schedule_insert` | 创建提醒（自动注册 APScheduler job）|
+| `schedule_update` | 更新内容/时间/状态（自动重新调度）|
+| `schedule_delete` | 删除提醒（移除 APScheduler job）|
+| `schedule_list` | 按状态/日期范围筛选 |
+
+### 时间解析
+
+`trigger_time` 支持多种格式：
+
+| 格式 | 示例 |
+|------|------|
+| ISO 8601 | `2026-03-30T15:00:00` |
+| 日期 + 时间 | `2026-03-30 15:00` |
+| 相对表达 | LLM 将"明天下午3点"转换为绝对时间 |
+
+时间统一按 `TIMEZONE` 配置（默认 `Asia/Shanghai`）处理。
+
+---
+
+## 执行与推送
+
+<Steps>
+  <Step title="创建提醒">
+    Agent 调用 `schedule_insert` → DB 写入 + APScheduler 注册 job
+  </Step>
+  <Step title="定时触发">
+    APScheduler 到时执行 `send_reminder_job()`
+  </Step>
+  <Step title="多平台推送">
+    `UnifiedSender` 根据用户 platform 推送到对应渠道（Telegram/微信/QQ/飞书/小程序/Web）
+  </Step>
+  <Step title="状态更新">
+    推送成功 → `EXECUTED`；失败 → `FAILED`
+  </Step>
+</Steps>
+
+---
+
+## API 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/schedules` | 列表查询 |
+| POST | `/api/schedules` | 创建提醒 |
+| PATCH | `/api/schedules/{id}` | 更新提醒 |
+| DELETE | `/api/schedules/{id}` | 删除提醒 |
+| GET | `/api/calendar` | 日历视图（含日程 + 账单）|
+
+---
+
+## 使用示例
+
+```
+"明天下午 3 点提醒我开会"     → 创建提醒
+"把开会提醒改到 4 点"         → 更新时间
+"取消明天的提醒"               → 状态改为 CANCELLED
+"这周有哪些提醒"               → 列表查询
+```

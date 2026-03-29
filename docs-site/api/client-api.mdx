@@ -1,0 +1,815 @@
+---
+title: "Client API"
+description: "面向终端用户的 REST API 参考，涵盖认证、用户、对话、账本、日程、技能等资源"
+---
+
+所有 Client API 前缀为 `/api`，除认证接口外均需在 Header 中携带 JWT Token：
+
+```
+Authorization: Bearer {access_token}
+```
+
+---
+
+## 认证（Auth）
+
+### 发送邮箱验证码
+
+<ParamField body="email" type="string" required>
+  邮箱地址
+</ParamField>
+<ParamField body="purpose" type="string" required>
+  用途：`register` | `login` | `reset_password`
+</ParamField>
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/auth/email/send-code` |
+| 鉴权 | 无 |
+
+**响应：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `ok` | boolean | 是否成功 |
+| `message` | string | 提示信息 |
+| `expire_seconds` | int | 验证码有效期（秒），默认 600 |
+| `cooldown_seconds` | int | 冷却时间（秒），默认 60 |
+
+---
+
+### 邮箱 + 验证码注册
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/auth/register/code` |
+| 鉴权 | 无 |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `email` | string | 是 | 邮箱地址 |
+| `password` | string | 是 | 密码（最少 6 位） |
+| `confirm_password` | string | 是 | 确认密码 |
+| `code` | string | 是 | 邮箱验证码 |
+
+**响应：** `TokenResponse`（`access_token` + `token_type`）
+
+---
+
+### 邮箱 + 密码注册
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/auth/register` |
+| 鉴权 | 无 |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `email` | string | 是 | 邮箱地址 |
+| `password` | string | 是 | 密码（最少 6 位） |
+| `confirm_password` | string | 是 | 确认密码 |
+
+**响应：** `TokenResponse`
+
+---
+
+### 邮箱 + 密码登录
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/auth/login` |
+| 鉴权 | 无 |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `email` | string | 是 | 邮箱地址 |
+| `password` | string | 是 | 密码 |
+
+**响应：** `TokenResponse`
+
+---
+
+### 邮箱 + 验证码登录
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/auth/login/code` |
+| 鉴权 | 无 |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `email` | string | 是 | 邮箱地址 |
+| `code` | string | 是 | 邮箱验证码 |
+
+**响应：** `TokenResponse`
+
+---
+
+### 重置密码
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/auth/password/reset` |
+| 鉴权 | 无 |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `email` | string | 是 | 邮箱地址 |
+| `code` | string | 是 | 验证码 |
+| `new_password` | string | 是 | 新密码（最少 6 位） |
+| `confirm_password` | string | 是 | 确认新密码 |
+
+**响应：** `ActionResponse`（`ok` + `message`）
+
+---
+
+### 小程序登录
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/miniapp/auth/login` |
+| 鉴权 | 无 |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `code` | string | 是 | `wx.login()` 返回的 code |
+| `nickname` | string | 否 | 用户昵称 |
+
+**响应：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `access_token` | string | JWT Token |
+| `token_type` | string | 固定 `bearer` |
+| `openid` | string | 微信 OpenID |
+
+---
+
+## 用户（User）
+
+### 获取用户资料
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `GET` |
+| 路径 | `/api/user/profile` |
+| 鉴权 | JWT |
+
+**响应：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `uuid` | string | 用户唯一标识 |
+| `nickname` | string | 用户昵称 |
+| `ai_name` | string | AI 助手名称 |
+| `ai_emoji` | string | AI 助手头像 Emoji |
+| `platform` | string | 当前来源平台 |
+| `email` | string | 绑定邮箱 |
+| `setup_stage` | string | 引导阶段 |
+| `binding_stage` | int | 绑定阶段 |
+
+---
+
+### 获取用户身份列表
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `GET` |
+| 路径 | `/api/user/identities` |
+| 鉴权 | JWT |
+
+**响应：** 身份对象数组，每项包含 `platform`、`platform_id`、`created_at`。
+
+---
+
+### 提交反馈
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/user/feedback` |
+| 鉴权 | JWT |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `content` | string | 是 | 反馈内容 |
+| `contact` | string | 否 | 联系方式 |
+
+**响应：** `FeedbackCreateResponse`（`ok` + `id`）
+
+---
+
+### 生成绑定码
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/user/bind-code` |
+| 鉴权 | JWT |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `platform` | string | 否 | 来源平台 |
+
+**响应：** `BindCodeCreateResponse`（`ok` + `code` + `expires_in`）
+
+---
+
+### 消费绑定码
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/user/bind-consume` |
+| 鉴权 | JWT |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `code` | string | 是 | 6 位绑定码 |
+
+**响应：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `ok` | boolean | 是否成功 |
+| `message` | string | 结果信息 |
+| `canonical_user_id` | int | 合并后的主用户 ID |
+| `access_token` | string | 如用户被合并则返回新 Token |
+
+---
+
+## 对话（Chat）
+
+### 获取聊天记录
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `GET` |
+| 路径 | `/api/chat/history` |
+| 鉴权 | JWT |
+
+**查询参数：**
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `limit` | int | 50 | 返回条数，1-200 |
+
+**响应：** 消息对象数组（按时间正序）：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `role` | string | `user` 或 `assistant` |
+| `content` | string | 消息内容 |
+| `created_at` | string | 发送时间 |
+| `image_urls` | string[] | 图片 URL 列表 |
+
+---
+
+### 发送消息
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/chat/send` |
+| 鉴权 | JWT |
+
+**查询参数：**
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `stream` | bool | false | 是否使用 SSE 流式响应 |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `content` | string | 是 | 消息文本 |
+| `image_urls` | string[] | 否 | 附带图片 URL |
+| `source_platform` | string | 否 | 来源平台，默认 `web` |
+
+**非流式响应：**
+
+```json
+{
+  "responses": ["AI 回复内容"],
+  "debug": { ... }
+}
+```
+
+**流式响应（SSE）：**
+
+```
+data: {"chunk": "AI"}
+data: {"chunk": "回复"}
+data: {"chunk": "内容"}
+data: {"done": true, "debug": {...}}
+```
+
+<Info>
+  流式模式返回 `text/event-stream`，每个 SSE event 的 data 为 JSON，包含 `chunk`（增量文本）或 `done`（完成标记）。
+</Info>
+
+---
+
+### WebSocket 对话
+
+详见 [WebSocket 协议文档](/api/websocket)。
+
+---
+
+## 会话管理（Conversations）
+
+### 获取会话列表
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `GET` |
+| 路径 | `/api/conversations` |
+| 鉴权 | JWT |
+
+**响应：** `ConversationResponse` 数组：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | int | 会话 ID |
+| `title` | string | 会话标题 |
+| `summary` | string | 会话摘要 |
+| `last_message_at` | string | 最后消息时间 |
+| `active` | boolean | 是否为当前活跃会话 |
+
+---
+
+### 获取当前会话
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `GET` |
+| 路径 | `/api/conversations/current` |
+| 鉴权 | JWT |
+
+**响应：** 单个 `ConversationResponse`。
+
+---
+
+### 创建会话
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/conversations` |
+| 鉴权 | JWT |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `title` | string | 否 | 会话标题 |
+
+**响应：** `ConversationResponse`
+
+---
+
+### 切换会话
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/conversations/{conversation_id}/switch` |
+| 鉴权 | JWT |
+
+**响应：** `ConversationResponse`
+
+---
+
+### 重命名会话
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `PATCH` |
+| 路径 | `/api/conversations/{conversation_id}` |
+| 鉴权 | JWT |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `title` | string | 是 | 新标题 |
+
+**响应：** `ConversationResponse`
+
+---
+
+### 删除会话
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `DELETE` |
+| 路径 | `/api/conversations/{conversation_id}` |
+| 鉴权 | JWT |
+
+**响应：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `ok` | boolean | 是否成功 |
+| `deleted_id` | int | 被删除的会话 ID |
+| `deleted_title` | string | 被删除的会话标题 |
+| `active_conversation` | object | 自动切换到的新活跃会话 |
+
+---
+
+## 账本（Ledger）
+
+### 获取账本列表
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `GET` |
+| 路径 | `/api/ledgers` |
+| 鉴权 | JWT |
+
+**查询参数：**
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `limit` | int | 30 | 返回条数，1-200 |
+| `before_id` | int | - | 游标分页，返回此 ID 之前的记录 |
+
+**响应：** `LedgerItemResponse` 数组：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | int | 记录 ID |
+| `amount` | float | 金额 |
+| `currency` | string | 货币 |
+| `category` | string | 分类 |
+| `item` | string | 项目名称 |
+| `transaction_date` | string | 交易时间 |
+| `created_at` | string | 创建时间 |
+
+---
+
+### 创建账本记录
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/ledgers` |
+| 鉴权 | JWT |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `amount` | float | 是 | 金额 |
+| `category` | string | 否 | 分类，默认"其他" |
+| `item` | string | 否 | 项目名称，默认"手动记录" |
+| `transaction_date` | string | 否 | 交易时间（ISO 8601） |
+
+**响应：** `LedgerItemResponse`
+
+---
+
+### 更新账本记录
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `PATCH` |
+| 路径 | `/api/ledgers/{ledger_id}` |
+| 鉴权 | JWT |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `amount` | float | 否 | 金额 |
+| `category` | string | 否 | 分类 |
+| `item` | string | 否 | 项目名称 |
+
+**响应：** `LedgerItemResponse`
+
+---
+
+### 删除账本记录
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `DELETE` |
+| 路径 | `/api/ledgers/{ledger_id}` |
+| 鉴权 | JWT |
+
+**响应：** `{ "ok": true, "id": 123 }`
+
+---
+
+### 账本统计
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `GET` |
+| 路径 | `/api/stats/ledger` |
+| 鉴权 | JWT |
+
+**查询参数：**
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `scope` | string | - | 范围：`day` / `week` / `month` |
+| `days` | int | 30 | 统计天数（1-365），scope 为空时生效 |
+
+---
+
+### 日历视图
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `GET` |
+| 路径 | `/api/calendar` |
+| 鉴权 | JWT |
+
+**查询参数：**
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `start_date` | string | 本月 1 日 | 起始日期（YYYY-MM-DD） |
+| `end_date` | string | 下月 1 日 | 结束日期（YYYY-MM-DD），不含 |
+
+**响应：**
+
+```json
+{
+  "start_date": "2026-03-01",
+  "end_date": "2026-04-01",
+  "days": [
+    {
+      "date": "2026-03-01",
+      "ledger_total": -150.0,
+      "ledger_count": 3,
+      "schedule_count": 1,
+      "ledgers": [...],
+      "schedules": [...]
+    }
+  ]
+}
+```
+
+---
+
+## 日程（Schedule）
+
+### 获取日程列表
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `GET` |
+| 路径 | `/api/schedules` |
+| 鉴权 | JWT |
+
+**查询参数：**
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `limit` | int | 50 | 返回条数，1-200 |
+
+**响应：** `ScheduleItemResponse` 数组：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | int | 日程 ID |
+| `content` | string | 提醒内容 |
+| `trigger_time` | string | 触发时间 |
+| `status` | string | 状态：`PENDING` / `COMPLETED` / `CANCELLED` |
+| `created_at` | string | 创建时间 |
+
+---
+
+### 创建日程
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/schedules` |
+| 鉴权 | JWT |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `content` | string | 是 | 提醒内容 |
+| `trigger_time` | string | 是 | 触发时间（ISO 8601） |
+
+**响应：** `ScheduleItemResponse`
+
+---
+
+### 更新日程
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `PATCH` |
+| 路径 | `/api/schedules/{schedule_id}` |
+| 鉴权 | JWT |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `content` | string | 否 | 新提醒内容 |
+| `trigger_time` | string | 否 | 新触发时间 |
+| `status` | string | 否 | 新状态 |
+
+**响应：** `ScheduleItemResponse`
+
+---
+
+### 删除日程
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `DELETE` |
+| 路径 | `/api/schedules/{schedule_id}` |
+| 鉴权 | JWT |
+
+**响应：** `{ "ok": true, "id": 123 }`
+
+---
+
+## 技能（Skills）
+
+### 获取技能列表
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `GET` |
+| 路径 | `/api/skills` |
+| 鉴权 | JWT |
+
+**响应：** `SkillItemResponse` 数组：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `slug` | string | 技能标识 |
+| `name` | string | 技能名称 |
+| `description` | string | 技能描述 |
+| `status` | string | 状态：`DRAFT` / `PUBLISHED` / `DISABLED` / `BUILTIN` |
+| `active_version` | int | 当前激活版本号 |
+| `source` | string | 来源：`user` / `builtin` |
+| `read_only` | boolean | 是否只读 |
+
+---
+
+### 获取技能详情
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `GET` |
+| 路径 | `/api/skills/{slug}` |
+| 鉴权 | JWT |
+
+**查询参数：**
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `source` | string | `user` | 来源：`user` / `builtin` |
+
+**响应：** 在 `SkillItemResponse` 基础上增加 `content_md`（Markdown 内容）。
+
+---
+
+### 创建 / 更新草稿
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/skills/draft` |
+| 鉴权 | JWT |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `request` | string | 是 | 用户对技能的描述或修改请求 |
+| `skill_slug` | string | 否 | 已有技能的 slug（编辑模式） |
+| `skill_name` | string | 否 | 技能名称 |
+
+**响应：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `slug` | string | 技能标识 |
+| `version` | int | 草稿版本号 |
+| `status` | string | 状态 |
+| `content_md` | string | 生成的 Markdown 内容 |
+
+---
+
+### 发布技能
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/skills/{slug}/publish` |
+| 鉴权 | JWT |
+
+**响应：** `SkillItemResponse`
+
+---
+
+### 禁用技能
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/skills/{slug}/disable` |
+| 鉴权 | JWT |
+
+**响应：** `SkillItemResponse`
+
+---
+
+## MCP 工具
+
+### 获取工具列表
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `GET` |
+| 路径 | `/api/mcp/tools` |
+| 鉴权 | JWT |
+
+**响应：** 工具对象数组：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `name` | string | 工具名称 |
+| `description` | string | 工具描述 |
+
+---
+
+### 抓取 URL 内容
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `POST` |
+| 路径 | `/api/mcp/fetch` |
+| 鉴权 | JWT |
+
+**请求 Body：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `url` | string | 是 | 目标 URL |
+| `max_length` | int | 否 | 最大返回长度 |
+| `start_index` | int | 否 | 起始偏移 |
+| `raw` | bool | 否 | 是否返回原始内容 |
+
+**响应：** `{ "content": "..." }`
+
+---
+
+## 配置（Config）
+
+### 获取小程序首页弹窗配置
+
+| 属性 | 值 |
+|------|-----|
+| 方法 | `GET` |
+| 路径 | `/api/config/miniapp/home-popup` |
+| 鉴权 | 无 |
+
+**响应：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `enabled` | boolean | 是否启用 |
+| `title` | string | 弹窗标题 |
+| `content` | string | 弹窗内容 |
+| `show_mode` | string | 展示模式：`once_per_day` 等 |
+| `version` | int | 配置版本号 |
+| `active` | boolean | 当前是否生效（考虑时间窗口） |
+| `server_time` | string | 服务器当前时间 |

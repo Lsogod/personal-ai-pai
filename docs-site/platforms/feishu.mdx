@@ -1,0 +1,163 @@
+---
+title: "飞书"
+description: "通过飞书开放平台接入 PAI"
+---
+
+# 飞书接入
+
+PAI 支持通过飞书开放平台的事件订阅机制接入，适用于企业内部部署场景。当前支持**单聊（P2P）模式**。
+
+---
+
+## 创建飞书应用
+
+<Steps>
+  <Step title="创建应用">
+    登录 [飞书开放平台](https://open.feishu.cn/)，进入开发者后台，创建一个企业自建应用
+  </Step>
+  <Step title="获取凭证">
+    在「凭证与基础信息」页面获取 App ID 和 App Secret
+  </Step>
+  <Step title="配置事件订阅">
+    在「事件订阅」中添加 `im.message.receive_v1` 事件，设置请求地址为 PAI 的 Webhook 端点
+  </Step>
+  <Step title="配置权限">
+    在「权限管理」中开通以下权限：
+    - `im:message` — 发送消息
+    - `im:message.receive` — 接收消息
+    - `im:resource` — 上传图片等资源
+  </Step>
+  <Step title="发布应用">
+    完成配置后发布应用，等待管理员审批
+  </Step>
+</Steps>
+
+---
+
+## 环境变量配置
+
+<ParamField body="FEISHU_APP_ID" type="string" required>
+  飞书应用的 App ID
+</ParamField>
+
+<ParamField body="FEISHU_APP_SECRET" type="string" required>
+  飞书应用的 App Secret
+</ParamField>
+
+<ParamField body="FEISHU_VERIFICATION_TOKEN" type="string" required>
+  事件订阅的 Verification Token，用于验证请求来源
+</ParamField>
+
+<ParamField body="FEISHU_ENCRYPT_KEY" type="string">
+  事件订阅的 Encrypt Key。如果在飞书后台配置了加密，则需要填写此项
+</ParamField>
+
+<ParamField body="FEISHU_RECEIVE_ID_TYPE" type="string" default="open_id">
+  消息接收者 ID 类型，可选值：`open_id`、`user_id`、`union_id`、`email`、`chat_id`
+</ParamField>
+
+```env
+FEISHU_APP_ID=cli_xxxxxxxxxx
+FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxxxxxxxx
+FEISHU_VERIFICATION_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxx
+FEISHU_ENCRYPT_KEY=xxxxxxxxxxxxxxxxxxxxxxxx
+FEISHU_RECEIVE_ID_TYPE=open_id
+```
+
+---
+
+## Webhook 配置
+
+**端点：** `POST /webhook/feishu`
+
+### URL 验证握手
+
+飞书在配置事件订阅时会发送一个验证请求，PAI 会自动处理此握手：
+
+```json
+// 飞书发送的验证请求
+{
+  "challenge": "ajls384kdjx98XX",
+  "token": "xxxxxx",
+  "type": "url_verification"
+}
+
+// PAI 返回的响应
+{
+  "challenge": "ajls384kdjx98XX"
+}
+```
+
+<Info>
+  URL 验证是一次性的。配置完成后，飞书会通过相同端点推送实际的消息事件。
+</Info>
+
+---
+
+## Token 管理
+
+飞书 API 调用需要 `tenant_access_token`，PAI 会自动管理 Token 的获取和缓存：
+
+1. 首次调用时，使用 App ID 和 App Secret 换取 `tenant_access_token`
+2. Token 会被缓存，避免重复请求
+3. Token 过期前自动刷新
+
+开发者无需手动处理 Token 生命周期。
+
+---
+
+## 功能支持与限制
+
+<Note>
+  当前仅支持**单聊（P2P）对话**，群聊消息暂不处理。
+</Note>
+
+### 文本消息
+
+支持接收和发送文本消息，完整的 AI 对话能力。
+
+### 图片消息
+
+飞书的图片处理采用特殊的上传流程：
+
+<Steps>
+  <Step title="生成图片">
+    AI 处理产生需要发送的图片数据（二进制格式）
+  </Step>
+  <Step title="上传到飞书">
+    调用飞书图片上传 API，将二进制图片数据上传到飞书服务器
+  </Step>
+  <Step title="获取 image_key">
+    飞书返回 `image_key`，这是图片在飞书系统中的唯一标识
+  </Step>
+  <Step title="发送图片消息">
+    使用 `image_key` 构造图片消息并发送给用户
+  </Step>
+</Steps>
+
+```
+图片二进制数据 → 飞书图片上传 API → image_key → 发送图片消息
+```
+
+---
+
+## 消息处理流程
+
+```
+飞书用户发送单聊消息
+    │
+    ▼
+飞书服务器推送事件到 POST /webhook/feishu
+    │
+    ▼
+验证 Verification Token（+ 解密 Encrypt Key）
+    │
+    ▼
+解析为 UnifiedMessage(platform_id="feishu", content=..., image_urls=[...])
+    │
+    ▼
+AI 核心管线处理
+    │
+    ▼
+UnifiedSender → 飞书发消息 API（使用 tenant_access_token）→ 用户收到回复
+```

@@ -1,0 +1,111 @@
+---
+title: "单 Agent 架构"
+description: "Agent + Harness 分层架构：Harness 管状态，Agent 管决策"
+---
+
+# 单 Agent 架构
+
+PAI `feat/single-agent` 分支采用 **Agent + Harness 分层架构**，与 `main` 分支的多节点 Router 架构不同。核心理念是：Harness 负责状态管理和流程控制，单一 Agent 拥有全部工具并自主决策。
+
+---
+
+## 架构分层
+
+### Harness 层（StateGraph）
+
+Harness 是基于 LangGraph `StateGraph` 构建的状态管理层，负责以下职责：
+
+- **状态持久化**：维护对话状态、用户信息、上下文等
+- **新用户引导**：当 `setup_stage < 3` 时，将请求路由到 onboarding 流程
+- **待确认流程**：处理 pending_ledger 等需要用户确认的中间状态
+- **Agent 调度**：在上述前置条件不满足时，将请求交给 Agent 处理
+
+```
+用户消息 → Harness (StateGraph)
+            ├─ setup_stage < 3 → onboarding 节点
+            ├─ has_pending → 待确认处理
+            └─ 正常流程 → Agent
+```
+
+### Agent 层（create_agent）
+
+Agent 通过 LangChain 的 `create_agent` 创建，是整个系统的智能决策核心：
+
+- **拥有全部工具**：所有 24 个内建工具 + MCP 外部工具统一注册
+- **自主决策**：无需意图分类，Agent 根据用户消息自主判断调用哪些工具
+- **跨领域协作**：可以在单次对话中同时使用记账、日程、记忆等不同领域的工具
+- **工具注册**：通过 `langchain_tools.py` 统一注册所有工具
+
+---
+
+## 全部工具列表
+
+Agent 可访问以下所有工具，无作用域限制：
+
+| 分类 | 工具 |
+|------|------|
+| 时间与通用 | `now_time`, `fetch_url` |
+| 视觉分析 | `analyze_image`, `analyze_receipt` |
+| 记账管理 | `ledger_text2sql`, `ledger_insert`, `ledger_update`, `ledger_delete`, `ledger_get_latest`, `ledger_list_recent`, `ledger_list` |
+| 日程管理 | `schedule_insert`, `schedule_update`, `schedule_delete`, `schedule_get_latest`, `schedule_list_recent`, `schedule_list` |
+| 记忆管理 | `memory_list`, `memory_save`, `memory_append`, `memory_delete` |
+| 对话管理 | `conversation_current`, `conversation_list` |
+| 用户档案 | `update_user_profile`, `query_user_profile` |
+| MCP 扩展 | `mcp_list_tools`, `mcp_call_tool`, `maps_weather` |
+
+---
+
+## 与多节点 Router 的对比
+
+| 特性 | 单 Agent（feat/single-agent） | 多节点 Router（main） |
+|------|------|------|
+| 架构模式 | Agent + Harness 分层 | LLM 意图分类 + 多节点路由 |
+| 意图分类 | 不需要，Agent 自主决策 | 需要 Router 节点做 7 类意图分类 |
+| 工具分配 | 所有工具统一注册，Agent 全量可用 | 按节点作用域分配（toolsets.py） |
+| 工具注册 | `langchain_tools.py` | `toolsets.py` + 节点级 `NODE_TOOL_NAMES` |
+| 跨领域协作 | 天然支持，单次调用可混合多领域工具 | 需要 complex_task 节点做多步 DAG 编排 |
+| 记忆注入 | 全量注入（`list_long_term_memories`） | 相关性检索（`retrieve_relevant_long_term_memories`） |
+| 路由错误 | 不存在，无路由环节 | 可能出现意图误分类 |
+| 复杂度 | 较低，结构简洁 | 较高，需维护多节点和路由逻辑 |
+
+---
+
+## 优势
+
+1. **简洁性**：无需维护 Router 和多个专业节点，架构更清晰
+2. **无路由错误**：不依赖 LLM 意图分类，避免了误分类导致的工具不可用问题
+3. **跨领域自由协作**：Agent 可以在同一次推理中使用记账+日程+记忆等多种工具
+4. **更低延迟**：省去了 Router 意图分类的 LLM 调用开销
+5. **易于扩展**：新增工具只需在 `langchain_tools.py` 中注册，无需考虑分配到哪个节点
+
+---
+
+## 流程图
+
+```
+                    ┌───────────────┐
+                    │    Harness    │
+                    │  (StateGraph) │
+                    └───────┬───────┘
+                            │
+              ┌─────────────┼─────────────┐
+              │             │             │
+       setup_stage < 3   pending?      正常流程
+              │             │             │
+              ▼             ▼             ▼
+       ┌────────────┐ ┌──────────┐ ┌──────────────┐
+       │ onboarding │ │  确认处理  │ │    Agent     │
+       └─────┬──────┘ └────┬─────┘ │(create_agent)│
+             │              │       │  全部工具可用  │
+             ▼              ▼       └──────┬───────┘
+            END            END             │
+                                    工具调用循环
+                                    （自主决策）
+                                           │
+                                           ▼
+                                          END
+```
+
+<Note>
+  `main` 分支已切换为多节点 Router 架构。如需了解 Router 架构详情，请切换到 `main` 分支文档。
+</Note>

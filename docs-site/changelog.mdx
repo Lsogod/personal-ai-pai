@@ -1,0 +1,80 @@
+---
+title: '更新日志'
+description: 'PAI 项目版本更新记录'
+---
+
+## 2026-03-29
+
+### 文档
+
+- 新增 `docs/memory-system.md` 独立记忆系统文档
+- README 记忆章节改为文档引用链接
+- 上线 Mintlify 文档站点（docs-site/），适配 `feat/single-agent` 分支架构
+
+---
+
+## 2026-03-28
+
+### 日程模块修复
+
+- 修复 `schedule_list` 工具的状态别名解析（completed/done/finished 等）
+
+### 文档
+
+- README 架构描述对齐 LangChain/LangGraph 1.x
+
+---
+
+## 2026-03-27
+
+### LangGraph 1.x 迁移
+
+- 多节点路由工作流迁移至 LangGraph 1.x API
+- 移除 Agent schema 中的 callable tool context
+- 统一图结构定义
+
+---
+
+## 2026-03
+
+### 图片识别能力
+
+- 新增 Router 图片预分析流程
+- 支持通用看图问答、OCR 文字提取
+- 支持小票/支付截图自动记账
+- 支持同会话追问最近图片
+
+---
+
+## 2026-02
+
+### 核心架构
+
+- **多节点 Router 架构**上线（main 分支）
+- 7 种意图分类：complex_task / skill_manager / ledger_manager / schedule_manager / chat_manager / help_center / unknown
+- 节点级工具权限隔离（toolsets.py）
+
+### 平台接入
+
+- Telegram / 微信（GeWeChat）/ QQ（NapCat）/ 飞书 / 微信小程序 / Web
+- 统一消息格式 `UnifiedMessage`
+- 统一发送器 `UnifiedSender`
+
+### 记忆系统
+
+- 长期记忆提取管道（三阶段：提取 → 精炼 → 写入）
+- memory_worker 后台补扫进程
+- 语义去重算法（Jaccard + 中文 bigram）
+- 消息级状态追踪
+
+### 工具系统
+
+- 24 个内置工具
+- MCP 外部工具集成
+- 管理后台工具开关
+
+### 技能系统
+
+- SKILL.md 格式定义
+- 用户技能 CRUD + 版本管理
+- 内置技能：translator、writer

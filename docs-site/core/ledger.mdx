@@ -1,0 +1,113 @@
+---
+title: '记账模块'
+description: '自然语言记账、智能分类、收据识别与统计查询'
+---
+
+## 概览
+
+记账模块让用户通过自然语言完成收支记录，无需手动填写表单。支持文本记账、图片识别记账和复杂查询。
+
+```
+用户: "午饭 35 元"
+Agent → ledger_insert(amount=35, category="餐饮", item="午饭")
+Agent: "已记录：餐饮 - 午饭 ¥35.00"
+```
+
+---
+
+## 数据模型
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | int | 主键 |
+| `user_id` | int | 所属用户 |
+| `amount` | decimal | 金额 |
+| `currency` | string | 币种（默认 CNY）|
+| `category` | string | 分类（餐饮、交通、购物等）|
+| `item` | string | 具体条目 |
+| `transaction_date` | date | 交易日期 |
+| `created_at` | datetime | 创建时间 |
+
+---
+
+## 工具链
+
+### 基础 CRUD
+
+| 工具 | 功能 |
+|------|------|
+| `ledger_insert` | 创建记账记录 |
+| `ledger_update` | 按 ID 更新记录 |
+| `ledger_delete` | 按 ID 删除记录 |
+| `ledger_get_latest` | 获取最新一条 |
+| `ledger_list_recent` | 获取最近 N 条 |
+| `ledger_list` | 按日期/分类/条目筛选 |
+
+### Text2SQL 智能查询
+
+`ledger_text2sql` 支持三种模式：
+
+<Tabs>
+  <Tab title="execute（直接执行）">
+    用户自然语言 → LLM 生成 SQL → 执行并返回结果
+
+    ```
+    用户: "这个月餐饮花了多少"
+    → SELECT SUM(amount) FROM ledgers WHERE category='餐饮' AND ...
+    → "本月餐饮支出共 ¥1,280.00"
+    ```
+  </Tab>
+  <Tab title="preview_write（预览写入）">
+    LLM 生成写入 SQL → 返回预览记录 + 预计影响行数，等待用户确认
+
+    ```
+    用户: "把上周所有交通类改成出行"
+    → 预览: 找到 5 条记录...
+    ```
+  </Tab>
+  <Tab title="commit_write_by_ids（确认写入）">
+    用户确认后，按 ID 列表执行实际写入操作
+
+    ```
+    用户: "确认修改"
+    → 已更新 5 条记录
+    ```
+  </Tab>
+</Tabs>
+
+### 图片记账
+
+当用户上传小票/支付截图时：
+
+1. Router 检测到图片 + 记账意图
+2. `analyze_receipt` 工具提取结构化数据（金额、商户、日期）
+3. 自动调用 `ledger_insert` 创建记录
+
+<Info>
+识别关键词：记账、入账、账单、小票、发票、支付截图、付款截图、消费截图、金额、花了、支出、收入、报销
+</Info>
+
+---
+
+## API 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/ledgers` | 列表查询（支持 limit、before_id 分页）|
+| POST | `/api/ledgers` | 创建记录 |
+| PATCH | `/api/ledgers/{id}` | 更新记录 |
+| DELETE | `/api/ledgers/{id}` | 删除记录 |
+| GET | `/api/stats/ledger` | 统计汇总（day/week/month 维度）|
+| GET | `/api/calendar` | 日历视图（按日聚合账单 + 日程）|
+
+---
+
+## 使用示例
+
+```
+"午饭 35 元"           → 自动记录
+"上个月花了多少"       → Text2SQL 查询
+"这张小票帮我记一下"   → 图片识别记账
+"把昨天咖啡改成 28 元" → 更新记录
+"删掉最后一条"         → 删除记录
+```

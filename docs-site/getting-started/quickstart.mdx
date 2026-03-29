@@ -1,0 +1,192 @@
+---
+title: "快速开始"
+description: "5 分钟完成 PAI 本地部署，开始你的第一次对话"
+---
+
+## 前置条件
+
+在开始之前，请确保你的机器已安装以下软件：
+
+<CardGroup cols={2}>
+  <Card title="Docker" icon="docker">
+    Docker Engine 20.10 及以上版本
+  </Card>
+  <Card title="Docker Compose" icon="layer-group">
+    Docker Compose v2 及以上版本
+  </Card>
+</CardGroup>
+
+<Tip>
+  推荐使用 [Docker Desktop](https://www.docker.com/products/docker-desktop)，它已内置 Docker Compose。
+</Tip>
+
+---
+
+## 部署步骤
+
+<Steps>
+  <Step title="克隆仓库">
+    ```bash
+    git clone https://github.com/Lsogod/personal-ai-pai.git
+    cd personal-ai-pai
+    ```
+  </Step>
+
+  <Step title="配置环境变量">
+    复制示例配置文件并填写必要参数：
+
+    ```bash
+    cp .env.example .env
+    ```
+
+    打开 `.env` 文件，至少需要设置以下变量：
+
+    ```dotenv
+    # 必填：OpenAI API 密钥
+    OPENAI_API_KEY=sk-your-api-key-here
+
+    # 必填：JWT 密钥（用于用户认证，可随机生成）
+    JWT_SECRET=your-random-secret-string
+
+    # 必填：管理员 Token（用于后台管理接口）
+    ADMIN_TOKEN=your-admin-token
+    ```
+
+    <Warning>
+      请妥善保管你的 API 密钥和 Token，不要将 `.env` 文件提交到公开仓库。
+    </Warning>
+  </Step>
+
+  <Step title="启动服务">
+    使用 Docker Compose 一键启动所有服务：
+
+    ```bash
+    docker-compose up -d
+    ```
+
+    首次启动会自动拉取镜像并初始化数据库，可能需要几分钟时间。你可以通过以下命令查看启动日志：
+
+    ```bash
+    docker-compose logs -f
+    ```
+
+    <Info>
+      启动的服务包括：后端 API 服务、PostgreSQL 数据库、Redis 缓存，以及 Web 前端。
+    </Info>
+  </Step>
+
+  <Step title="访问前端">
+    服务启动完成后，打开浏览器访问：
+
+    ```
+    http://localhost:3001
+    ```
+
+    你将看到 PAI 的 Web 聊天界面。
+  </Step>
+
+  <Step title="开始对话">
+    在聊天框中输入你的第一条消息，例如：
+
+    ```
+    你好，请介绍一下你自己
+    ```
+
+    PAI 会通过流式响应实时回复你。你可以尝试以下功能：
+
+    <Tabs>
+      <Tab title="日常对话">
+        ```
+        今天天气怎么样？
+        帮我写一封邮件草稿
+        ```
+      </Tab>
+      <Tab title="记账">
+        ```
+        今天午餐花了 35 元
+        这个月花了多少钱？
+        ```
+      </Tab>
+      <Tab title="日程">
+        ```
+        明天下午 3 点提醒我开会
+        这周有什么安排？
+        ```
+      </Tab>
+      <Tab title="图片识别">
+        发送一张图片，PAI 会自动识别并描述图片内容。
+      </Tab>
+    </Tabs>
+  </Step>
+</Steps>
+
+---
+
+## 接入平台（可选）
+
+完成基础部署后，你可以进一步接入即时通讯平台：
+
+<CardGroup cols={3}>
+  <Card title="Telegram" icon="telegram" href="/platforms/telegram">
+    配置 Bot Token 即可接入
+  </Card>
+  <Card title="微信" icon="comment" href="/platforms/wechat">
+    通过 GeWeChat 接入个人微信
+  </Card>
+  <Card title="QQ" icon="comment-dots" href="/platforms/qq">
+    通过 OneBot 协议接入 QQ
+  </Card>
+  <Card title="飞书" icon="building" href="/platforms/feishu">
+    接入飞书开放平台
+  </Card>
+  <Card title="小程序" icon="mobile" href="/platforms/miniapp">
+    微信小程序原生接入
+  </Card>
+  <Card title="Web" icon="globe" href="/platforms/web">
+    已随部署自动启动
+  </Card>
+</CardGroup>
+
+---
+
+## 常见问题
+
+<AccordionGroup>
+  <Accordion title="启动后无法访问 localhost:3001">
+    请检查 Docker 容器是否正常运行：
+
+    ```bash
+    docker-compose ps
+    ```
+
+    确保所有服务状态为 `Up`。如果有服务启动失败，查看对应日志排查问题。
+  </Accordion>
+
+  <Accordion title="对话没有响应">
+    请确认 `OPENAI_API_KEY` 已正确配置，且 API 密钥有效。查看后端日志：
+
+    ```bash
+    docker-compose logs -f backend
+    ```
+  </Accordion>
+
+  <Accordion title="如何更新到最新版本">
+    ```bash
+    git pull origin main
+    docker-compose up -d --build
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="配置指南" icon="gear" href="/getting-started/configuration">
+    了解所有环境变量的详细说明
+  </Card>
+  <Card title="架构概览" icon="sitemap" href="/architecture/overview">
+    深入理解 PAI 的多节点 Router 架构
+  </Card>
+</CardGroup>

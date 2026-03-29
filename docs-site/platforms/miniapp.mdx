@@ -1,0 +1,143 @@
+---
+title: "微信小程序"
+description: "微信小程序客户端接入 PAI"
+---
+
+# 微信小程序
+
+PAI 提供原生微信小程序客户端，用户可通过小程序与 AI 进行对话，并使用日历、记账等功能。小程序通过 HTTP API 与后端通信，可选配 WebSocket 实现实时消息推送。
+
+---
+
+## 架构说明
+
+```
+微信小程序 ←→ HTTP API / WebSocket ←→ PAI 后端
+               │
+               ▼
+          微信登录服务（code → openid）
+```
+
+与 Telegram、微信等平台不同，小程序不通过 Webhook 接收消息，而是主动调用后端 HTTP API 发送消息和获取响应。
+
+---
+
+## 环境变量配置
+
+<ParamField body="MINIAPP_APP_ID" type="string" required>
+  微信小程序的 App ID
+</ParamField>
+
+<ParamField body="MINIAPP_APP_SECRET" type="string" required>
+  微信小程序的 App Secret
+</ParamField>
+
+<ParamField body="MINIAPP_SUBSCRIBE_TEMPLATE_ID" type="string">
+  订阅消息模板 ID，用于日程提醒等场景的消息推送
+</ParamField>
+
+```env
+MINIAPP_APP_ID=wx1234567890abcdef
+MINIAPP_APP_SECRET=your-app-secret
+MINIAPP_SUBSCRIBE_TEMPLATE_ID=your-template-id
+```
+
+---
+
+## 认证流程
+
+小程序使用微信登录 + JWT Token 认证：
+
+<Steps>
+  <Step title="获取登录凭证">
+    小程序调用 `wx.login()` 获取临时登录凭证 `code`
+  </Step>
+  <Step title="后端换取 OpenID">
+    将 `code` 发送到 PAI 后端，后端调用微信 `code2Session` 接口换取用户 `openid` 和 `session_key`
+  </Step>
+  <Step title="签发 JWT">
+    后端验证成功后，为该用户签发 JWT Token
+  </Step>
+  <Step title="后续请求鉴权">
+    小程序在后续所有请求的 Header 中携带 JWT Token 进行身份认证
+  </Step>
+</Steps>
+
+```
+wx.login() → code → PAI 后端 → 微信 code2Session → openid
+                                     │
+                                     ▼
+                              签发 JWT Token → 小程序存储并使用
+```
+
+---
+
+## 页面结构
+
+小程序包含以下核心页面：
+
+| 页面 | 路径 | 说明 |
+|------|------|------|
+| 首页 | `/pages/home` | 功能入口和快捷操作 |
+| 对话 | `/pages/chat` | AI 对话界面，支持文本和图片 |
+| 日历 | `/pages/calendar` | 日程管理和提醒查看 |
+| 记账 | `/pages/ledger` | 收支记录和统计 |
+| 登录 | `/pages/login` | 微信登录页 |
+| 个人中心 | `/pages/profile` | 用户设置和信息管理 |
+
+---
+
+## 订阅消息通知
+
+小程序支持通过微信订阅消息实现日程提醒等推送功能：
+
+<Steps>
+  <Step title="配置模板">
+    在微信公众平台配置订阅消息模板，获取模板 ID
+  </Step>
+  <Step title="用户授权">
+    在小程序中引导用户点击授权订阅消息（每次触发需用户主动同意）
+  </Step>
+  <Step title="后端推送">
+    当日程到期时，PAI 后端调用微信订阅消息 API 向用户推送提醒
+  </Step>
+</Steps>
+
+<Warning>
+  微信订阅消息需要用户主动授权，且每次授权仅允许发送一条消息。建议在创建日程时引导用户完成授权。
+</Warning>
+
+---
+
+## 通信方式
+
+### HTTP API
+
+小程序的主要通信方式，通过 POST 请求发送消息和获取响应：
+
+```
+POST /api/chat/send
+Authorization: Bearer <jwt-token>
+Content-Type: application/json
+
+{
+  "content": "帮我记一笔今天午餐花了 35 元",
+  "image_urls": []
+}
+```
+
+### WebSocket（可选）
+
+可通过 WebSocket 实现实时消息推送和流式响应，提升用户体验。
+
+---
+
+## 功能支持
+
+| 功能 | 支持 | 说明 |
+|------|:----:|------|
+| 文本对话 | ✅ | 完整 AI 对话能力 |
+| 图片识别 | ✅ | 支持发送图片进行多模态处理 |
+| 记账 | ✅ | 自然语言记账和查询 |
+| 日程 | ✅ | 创建和管理日程提醒 |
+| 订阅通知 | ✅ | 日程到期自动推送 |
