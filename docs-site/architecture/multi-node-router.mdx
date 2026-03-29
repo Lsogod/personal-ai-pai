@@ -1,0 +1,167 @@
+---
+title: "多节点 Router 架构"
+description: "PAI main 分支的核心架构：基于 LLM 意图分类的多节点路由系统"
+---
+
+# 多节点 Router 架构
+
+PAI `main` 分支采用多节点 Router 架构。Router 节点作为入口，使用 LLM 对用户消息进行意图分类，然后将请求路由到对应的专业节点处理。
+
+---
+
+## Router 节点
+
+Router 是整个工作流的入口节点，负责两件核心工作：
+
+1. **图片预分析** -- 如果消息包含图片，先调用 `analyze_image` 获取图片类型、摘要、OCR 文字等信息
+2. **LLM 意图分类** -- 使用 `with_structured_output` 将用户消息分类为以下 7 种意图之一
+
+### 意图类型
+
+| 意图 | 说明 | 示例 |
+|------|------|------|
+| `complex_task` | 需要跨节点/跨工具编排的多步任务 | "如果明天下雨就帮我取消户外行程" |
+| `skill_manager` | 技能管理类元操作 | "创建一个新技能"、"列出我的技能" |
+| `ledger_manager` | 账单记录与查询 | "午饭35元记一笔"、"这个月花了多少" |
+| `schedule_manager` | 日程与提醒管理 | "明天上午10点提醒我开会" |
+| `chat_manager` | 通用对话、创作、信息查询 | "帮我写一段自我介绍"、"武汉天气怎么样" |
+| `help_center` | 产品帮助与使用说明 | "你能做什么"、"怎么使用记账功能" |
+| `unknown` | 证据不足，无法明确归类 | 路由到 `complex_task` 进行二次分解 |
+
+<Note>
+  当 Router 判断为 `unknown` 时，实际会路由到 `complex_task` 节点进行结构化分解，而非默认 fallback 到 `chat_manager`。这确保了模糊意图也能得到合理处理。
+</Note>
+
+### 分类上下文
+
+Router 在进行意图分类时，会向 LLM 提供以下上下文信息：
+
+- 用户消息文本
+- 是否包含图片（`has_image`）
+- 是否存在未完成的待确认账单（`has_pending_ledger`）
+- 图片预分析结果（图片类型、摘要、OCR 文字、置信度）
+- 未完成的复杂任务状态（`pending_complex`）
+- 最近 8 条会话上下文（包含会话摘要）
+
+---
+
+## 节点详解
+
+### router -- 入口路由
+
+入口节点，执行图片预分析和 LLM 意图分类。如果用户 `setup_stage < 3`（未完成新手引导），直接路由到 `onboarding` 节点。
+
+### onboarding -- 新用户引导
+
+处理新用户的初始化设置流程。当 `user_setup_stage < 3` 时，所有请求都会被路由到此节点，引导用户完成基础信息配置。
+
+### chat_manager -- 通用对话
+
+通用问答与创作节点，作为 Tool Agent 运行。支持多模态输入，可调用视觉分析、MCP 外部工具、记忆管理和会话管理等工具。用户身份和档案相关的操作也路由到此节点。
+
+### ledger_manager -- 记账管理
+
+处理所有账单相关操作，包括自然语言记账、小票/支付截图识别入账、text2sql 查询统计和账单增删改。
+
+<Warning>
+  `ledger_manager` 是唯一拥有条件后续路由的节点：处理完成后，如果 `intent` 被更新为 `chat_manager`，会继续路由到 `chat_manager` 节点进行后续对话。
+</Warning>
+
+### schedule_manager -- 日程管理
+
+处理日程和提醒的创建、修改、删除和查询。基于 APScheduler 实现定时触发，支持 cron 表达式和自然语言时间描述。
+
+### skill_manager -- 技能管理
+
+处理技能（Skill）的 CRUD 操作，包括技能的创建、查看、修改和删除。
+
+### complex_task -- 复杂任务执行
+
+多步 DAG 执行器，处理需要跨节点协作的复杂任务。将任务分解为子步骤，按依赖顺序执行。当 Router 无法明确归类意图时（`unknown`），也会路由到此节点进行结构化分解。
+
+### help_center -- 帮助中心
+
+产品功能说明和使用帮助，基于产品文档回答用户关于 PAI 能力、使用方法等方面的问题。
+
+---
+
+## 路由流程
+
+```
+                    ┌──────────┐
+                    │  router  │
+                    └────┬─────┘
+                         │
+            ┌────────────┼────────────────────────────────┐
+            │            │                                │
+     setup_stage < 3     │ LLM 意图分类                    │
+            │            │                                │
+            ▼            ▼                                ▼
+     ┌────────────┐  ┌──────────────┐  ┌─────────────────────────┐
+     │ onboarding │  │ chat_manager │  │ ledger_manager          │
+     └─────┬──────┘  └──────┬───────┘  └─────────┬───────────────┘
+           │                │                     │
+           ▼                ▼              intent == chat_manager?
+          END              END                 ┌──┴──┐
+                                              Yes    No
+                                               │      │
+                                               ▼      ▼
+                                        chat_manager  END
+                                               │
+                                               ▼
+                                              END
+
+     其他节点:
+     ┌─────────────────┐  ┌──────────────────┐  ┌───────────────┐
+     │ schedule_manager │  │  skill_manager   │  │  help_center  │
+     └────────┬────────┘  └────────┬─────────┘  └───────┬───────┘
+              ▼                    ▼                     ▼
+             END                  END                   END
+
+     ┌──────────────┐
+     │ complex_task │ ← 也接收 unknown 意图
+     └──────┬───────┘
+            ▼
+           END
+```
+
+---
+
+## 节点工具集
+
+每个节点通过 `toolsets.py` 中的 `NODE_TOOL_NAMES` 定义可访问的工具集，实现严格的工具权限隔离。
+
+<Tabs>
+  <Tab title="chat_manager">
+    **工具集：** `SHARED` + `VISION` + `MCP` + `CONVERSATION`
+
+    | 分组 | 工具 |
+    |------|------|
+    | SHARED | `now_time`, `fetch_url` |
+    | VISION | `analyze_image` |
+    | MCP | `mcp_list_tools`, `mcp_call_tool`, `maps_weather` |
+    | CONVERSATION | `conversation_current`, `conversation_list`, `memory_list`, `memory_save`, `memory_append`, `memory_delete` |
+  </Tab>
+  <Tab title="schedule_manager">
+    **工具集：** `SHARED` + `MCP` + `SCHEDULE` + `MEMORY`
+
+    | 分组 | 工具 |
+    |------|------|
+    | SHARED | `now_time`, `fetch_url` |
+    | MCP | `mcp_list_tools`, `mcp_call_tool`, `maps_weather` |
+    | SCHEDULE | `schedule_insert`, `schedule_update`, `schedule_delete`, `schedule_get_latest`, `schedule_list_recent`, `schedule_list` |
+    | MEMORY | `memory_list`, `memory_save`, `memory_append`, `memory_delete` |
+  </Tab>
+  <Tab title="ledger_manager">
+    **工具集：** `LEDGER` + `MEMORY`
+
+    | 分组 | 工具 |
+    |------|------|
+    | LEDGER | `analyze_receipt`, `ledger_text2sql`, `ledger_insert`, `ledger_update`, `ledger_delete`, `ledger_get_latest`, `ledger_list_recent`, `ledger_list` |
+    | MEMORY | `memory_list`, `memory_save`, `memory_append`, `memory_delete` |
+  </Tab>
+</Tabs>
+
+<Info>
+  未在 `NODE_TOOL_NAMES` 中注册的节点（如 `onboarding`、`skill_manager`、`complex_task`、`help_center`）不通过 toolsets 分配工具，而是在各自节点内部直接管理所需的能力调用。
+</Info>

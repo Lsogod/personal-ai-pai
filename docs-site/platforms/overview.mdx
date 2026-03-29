@@ -1,0 +1,130 @@
+---
+title: "平台接入概览"
+description: "PAI 统一消息处理架构与多平台接入说明"
+---
+
+# 平台接入概览
+
+PAI 采用**统一消息处理架构**，所有平台的入站消息都会被标准化为 `UnifiedMessage` 格式，经过核心 AI 管线处理后，再通过 `UnifiedSender` 路由到对应平台发送响应。
+
+这种设计使得新增平台只需实现两个适配层：**消息解析**（入站）和**消息发送**（出站），无需修改核心逻辑。
+
+---
+
+## 统一消息格式
+
+### UnifiedMessage
+
+所有平台的入站消息都会被转换为 `UnifiedMessage`，确保核心处理管线与平台无关。
+
+<ParamField body="platform_id" type="string" required>
+  平台标识符，如 `telegram`、`wechat`、`qq`、`feishu`、`miniapp`、`web`
+</ParamField>
+
+<ParamField body="content" type="string" required>
+  消息文本内容
+</ParamField>
+
+<ParamField body="image_urls" type="list[str]">
+  消息中包含的图片 URL 列表，用于多模态处理
+</ParamField>
+
+<ParamField body="message_id" type="string">
+  平台原始消息 ID，用于消息追踪和去重
+</ParamField>
+
+<ParamField body="event_ts" type="string">
+  消息事件时间戳
+</ParamField>
+
+<ParamField body="raw_data" type="dict">
+  平台原始消息数据，保留完整上下文供特殊处理使用
+</ParamField>
+
+```python
+class UnifiedMessage(BaseModel):
+    platform_id: str
+    content: str
+    image_urls: list[str] = []
+    message_id: str | None = None
+    event_ts: str | None = None
+    raw_data: dict = {}
+```
+
+---
+
+### UnifiedSender
+
+`UnifiedSender` 负责将 AI 生成的响应路由到正确的平台发送。根据 `platform_id` 自动选择对应的平台发送器。
+
+```
+AI 响应 → UnifiedSender → platform_id 路由 → 平台发送器 → 用户
+```
+
+---
+
+## 支持平台一览
+
+<Note>
+  所有平台均通过 Webhook 或轮询方式接收消息，经统一消息格式处理后进入相同的 AI 管线。
+</Note>
+
+| 平台 | 文本消息 | 图片消息 | Webhook | WebSocket | 说明 |
+|------|:--------:|:--------:|:-------:|:---------:|------|
+| Telegram | ✅ | ✅ | ✅ | ❌ | Bot API，支持轮询模式 |
+| 微信 | ✅ | ✅ | ✅ | ❌ | 通过 GeWeChat 桥接 |
+| QQ | ✅ | ❌ | ✅ | ❌ | 通过 NapCat OneBot 协议 |
+| 飞书 | ✅ | ✅ | ✅ | ❌ | 飞书开放平台事件订阅 |
+| 小程序 | ✅ | ✅ | ❌ | ✅ | 微信小程序原生客户端 |
+| Web | ✅ | ✅ | ❌ | ✅ | React SPA，支持 SSE 流式 |
+
+---
+
+## 消息处理流程
+
+```
+┌──────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────┐
+│ 平台入站  │ ──→ │ 消息标准化    │ ──→ │ AI 核心管线   │ ──→ │ 平台出站  │
+│ Webhook  │     │ UnifiedMessage│     │ LangGraph    │     │ Sender   │
+└──────────┘     └──────────────┘     └──────────────┘     └──────────┘
+```
+
+<Steps>
+  <Step title="接收消息">
+    各平台通过 Webhook 或 WebSocket 将消息推送到后端对应的端点
+  </Step>
+  <Step title="消息标准化">
+    平台适配器将原始消息解析为 `UnifiedMessage` 格式
+  </Step>
+  <Step title="AI 处理">
+    统一消息进入 LangGraph 工作流，经 Router 节点路由到对应功能节点处理
+  </Step>
+  <Step title="响应发送">
+    `UnifiedSender` 根据 `platform_id` 将响应路由到正确的平台发送器
+  </Step>
+</Steps>
+
+---
+
+## 快速导航
+
+<CardGroup cols={3}>
+  <Card title="Telegram" icon="telegram" href="/platforms/telegram">
+    Bot API 接入，推荐首选
+  </Card>
+  <Card title="微信" icon="message" href="/platforms/wechat">
+    GeWeChat 桥接接入
+  </Card>
+  <Card title="QQ" icon="message" href="/platforms/qq">
+    OneBot 协议接入
+  </Card>
+  <Card title="飞书" icon="message" href="/platforms/feishu">
+    企业级事件订阅
+  </Card>
+  <Card title="小程序" icon="mobile" href="/platforms/miniapp">
+    微信小程序客户端
+  </Card>
+  <Card title="Web" icon="browser" href="/platforms/web">
+    React SPA 前端
+  </Card>
+</CardGroup>

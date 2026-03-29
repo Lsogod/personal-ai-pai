@@ -1,0 +1,178 @@
+---
+title: "技能系统"
+description: "PAI 技能系统：基于 Markdown 的行为规则，引导 Agent 响应特定场景"
+---
+
+## 概述
+
+技能（Skill）是 PAI 的可扩展行为规则系统。每个技能是一份 Markdown 文档，定义了 Agent 在特定场景下的触发条件、工作流程、约束和输出格式。技能系统让用户可以通过自然语言定制 Agent 的行为模式。
+
+<CardGroup cols={2}>
+  <Card title="Markdown 驱动" icon="file-lines">
+    技能以 SKILL.md 格式存储，可读性强
+  </Card>
+  <Card title="自然语言管理" icon="message">
+    通过对话或 /skill 命令创建、更新技能
+  </Card>
+  <Card title="版本控制" icon="code-branch">
+    每次修改自动创建新版本，支持版本回溯
+  </Card>
+  <Card title="生命周期管理" icon="arrows-spin">
+    DRAFT -> PUBLISHED -> DISABLED 完整状态流转
+  </Card>
+</CardGroup>
+
+## SKILL.md 格式
+
+每个技能文档包含 frontmatter 元数据和 4 个必需章节：
+
+```markdown
+---
+name: "翻译助手"
+description: "中英互译，保持专业术语准确"
+---
+
+# Trigger
+当用户发送翻译请求或包含"翻译"、"translate"等关键词时触发。
+
+# Workflow
+1. 识别源语言和目标语言
+2. 翻译内容，保留专业术语
+3. 必要时附加术语说明
+
+# Constraints
+- 保持原文格式和段落结构
+- 专业术语使用行业通用译法
+- 不对内容做主观评价
+
+# Output Contract
+- 直接输出译文
+- 术语说明以括号注释形式附在首次出现处
+```
+
+### 必需章节
+
+| 章节 | 用途 |
+|------|------|
+| `# Trigger` | 定义技能的触发条件 |
+| `# Workflow` | 描述执行步骤 |
+| `# Constraints` | 约束规则与限制 |
+| `# Output Contract` | 输出格式约定 |
+
+<Warning>
+  缺少任何必需章节或 frontmatter 中的 `name`、`description` 字段，技能校验将不通过。
+</Warning>
+
+## 技能类型
+
+### 内建技能
+
+系统自带的只读技能，存储在 `backend/skills/` 目录：
+
+| 技能 | 说明 |
+|------|------|
+| `translator` | 翻译助手 |
+| `writer` | 写作助手 |
+
+内建技能支持两种目录结构：
+- 新格式：`backend/skills/<skill-name>/SKILL.md`
+- 兼容格式：`backend/skills/*.md`
+
+### 用户技能
+
+用户通过自然语言或 `/skill` 命令创建的自定义技能，存储在数据库中。
+
+## 技能生命周期
+
+```
+DRAFT → PUBLISHED → DISABLED
+  ↑         |          |
+  └─────────┴──────────┘
+        (可回退)
+```
+
+| 状态 | 说明 |
+|------|------|
+| `DRAFT` | 草稿，新创建的技能默认状态 |
+| `PUBLISHED` | 已发布，在对话中可被匹配和加载 |
+| `DISABLED` | 已禁用，暂停使用但不删除 |
+
+## 版本管理
+
+技能采用递增版本号管理：
+
+- 每次更新创建新的 `SkillVersion` 记录
+- `Skill.active_version` 字段追踪当前激活版本
+- 版本内容存储在 `skill_versions` 表的 `content_md` 字段
+
+```sql
+-- Skill 表
+skills (id, user_id, slug, name, description, status, active_version)
+
+-- 版本表
+skill_versions (id, skill_id, version, content_md, created_at)
+```
+
+## 技能意图解析
+
+当用户输入与技能相关的指令时，系统通过两层机制识别意图：
+
+<Steps>
+  <Step title="LLM 结构化解析">
+    使用 LLM 提取用户意图，输出结构化结果：
+    - `action`：操作类型（create / update / delete / list / show / publish / disable / help）
+    - `skill_name`：技能名称
+    - `skill_slug`：技能标识
+    - `target`：操作目标
+  </Step>
+  <Step title="正则回退">
+    LLM 解析失败时，使用 `parse_skill_command_fallback` 正则匹配：
+    - 检测后续更新模式（改为、修改、调整等关键词）
+    - 提取技能 slug 和操作类型
+  </Step>
+</Steps>
+
+## 技能加载
+
+`load_skills()` 在对话处理时按以下逻辑加载匹配的技能：
+
+1. 加载所有内建技能文档
+2. 查询用户已发布的技能
+3. 对每个技能计算与当前查询的匹配分数
+4. 匹配规则：
+   - 技能名称出现在查询中：+10 分
+   - 技能 slug 出现在查询中：+8 分
+   - 名称/slug/描述中的词命中查询：每词 +2 分
+5. 返回匹配度最高的技能列表
+
+## Slug 生成
+
+技能使用 slug 作为唯一标识符：
+
+- 将名称转为小写，非字母数字字符替换为连字符
+- 合并连续连字符，去除首尾连字符
+- 最大长度 **64 字符**
+- 无法生成有效 slug 时使用 MD5 哈希回退：`skill-{md5[:10]}`
+
+```python
+# 示例
+"翻译助手" → "翻译助手"  # 中文保留
+"My Writer" → "my-writer"
+""          → "skill-d41d8cd98f"  # MD5 回退
+```
+
+## /skill 命令
+
+用户可通过斜杠命令管理技能：
+
+| 命令 | 功能 |
+|------|------|
+| `/skill list` | 列出所有技能 |
+| `/skill show <slug>` | 查看技能详情 |
+| `/skill create` | 创建新技能 |
+| `/skill update <slug>` | 更新技能内容 |
+| `/skill publish <slug>` | 发布技能 |
+| `/skill disable <slug>` | 禁用技能 |
+| `/skill delete <slug>` | 删除技能 |
+
+除了命令方式，用户也可以用自然语言描述需求（如"帮我创建一个翻译技能"），系统会自动解析意图并执行对应操作。

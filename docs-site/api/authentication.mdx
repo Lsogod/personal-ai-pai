@@ -1,0 +1,199 @@
+---
+title: "鉴权指南"
+description: "JWT 登录流程、Token 结构、Admin Token 配置"
+---
+
+## Client API 鉴权（JWT）
+
+Client API 使用 JWT（JSON Web Token）进行身份验证。流程如下：
+
+<Steps>
+  <Step title="获取 Token">
+    通过注册或登录接口获取 `access_token`。
+  </Step>
+  <Step title="携带 Token 请求">
+    在后续请求的 `Authorization` Header 中携带 Token。
+  </Step>
+</Steps>
+
+```bash
+# 示例：携带 Token 访问用户资料
+curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
+     https://your-domain.com/api/user/profile
+```
+
+### 注册方式
+
+PAI 支持两种注册方式：
+
+<Tabs>
+  <Tab title="邮箱 + 验证码注册">
+    **第一步：发送验证码**
+
+    ```bash
+    POST /api/auth/email/send-code
+    Content-Type: application/json
+
+    {
+      "email": "user@example.com",
+      "purpose": "register"
+    }
+    ```
+
+    **第二步：验证码注册**
+
+    ```bash
+    POST /api/auth/register/code
+    Content-Type: application/json
+
+    {
+      "email": "user@example.com",
+      "password": "your_password",
+      "confirm_password": "your_password",
+      "code": "123456"
+    }
+    ```
+  </Tab>
+  <Tab title="邮箱 + 密码注册（无验证码）">
+    ```bash
+    POST /api/auth/register
+    Content-Type: application/json
+
+    {
+      "email": "user@example.com",
+      "password": "your_password",
+      "confirm_password": "your_password"
+    }
+    ```
+
+    <Note>此方式不需要邮件服务配置，适用于开发环境。</Note>
+  </Tab>
+</Tabs>
+
+注册成功后返回：
+
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "token_type": "bearer"
+}
+```
+
+### 登录方式
+
+<Tabs>
+  <Tab title="邮箱 + 密码登录">
+    ```bash
+    POST /api/auth/login
+    Content-Type: application/json
+
+    {
+      "email": "user@example.com",
+      "password": "your_password"
+    }
+    ```
+  </Tab>
+  <Tab title="邮箱 + 验证码登录">
+    先调用 `POST /api/auth/email/send-code`（purpose 设为 `login`），再：
+
+    ```bash
+    POST /api/auth/login/code
+    Content-Type: application/json
+
+    {
+      "email": "user@example.com",
+      "code": "123456"
+    }
+    ```
+  </Tab>
+  <Tab title="小程序登录">
+    使用微信小程序 `wx.login()` 获取的 code 换取 Token：
+
+    ```bash
+    POST /api/miniapp/auth/login
+    Content-Type: application/json
+
+    {
+      "code": "wx_login_code",
+      "nickname": "用户昵称"
+    }
+    ```
+
+    返回额外包含 `openid` 字段：
+
+    ```json
+    {
+      "access_token": "eyJhbGciOiJIUzI1NiIs...",
+      "token_type": "bearer",
+      "openid": "o1234567890"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### 密码重置
+
+```bash
+# 1. 发送重置验证码
+POST /api/auth/email/send-code
+{ "email": "user@example.com", "purpose": "reset_password" }
+
+# 2. 提交新密码
+POST /api/auth/password/reset
+{
+  "email": "user@example.com",
+  "code": "123456",
+  "new_password": "new_password",
+  "confirm_password": "new_password"
+}
+```
+
+## Token 结构
+
+JWT Payload 包含以下字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `sub` | string | 用户 ID（字符串形式） |
+| `exp` | number | 过期时间（Unix 时间戳） |
+| `src` | string | 来源平台（可选），如 `web`、`miniapp` |
+
+### Token 有效期
+
+通过环境变量 `JWT_EXP_MINUTES` 配置，默认值为 **10080 分钟（7 天）**。
+
+### 签名算法
+
+使用 `JWT_SECRET` 环境变量作为密钥，算法由 `JWT_ALGORITHM` 环境变量指定（默认 `HS256`）。
+
+<Warning>
+  生产环境务必设置强随机的 `JWT_SECRET`，切勿使用默认值。
+</Warning>
+
+## Admin API 鉴权
+
+Admin API 使用静态 Token 进行鉴权，通过 `X-Admin-Token` Header 传递。
+
+```bash
+curl -H "X-Admin-Token: your-admin-token" \
+     https://your-domain.com/api/admin/v1/dashboard
+```
+
+### 配置方式
+
+在环境变量中设置：
+
+```env
+ADMIN_TOKEN=your-secure-admin-token
+```
+
+<Warning>
+  如果 `ADMIN_TOKEN` 未配置，所有 Admin API 请求将返回 `403 Forbidden`。
+</Warning>
+
+### 鉴权错误
+
+| 状态码 | 场景 |
+|--------|------|
+| `401` | Token 缺失或不匹配 |
+| `403` | 服务端未配置 `ADMIN_TOKEN` |

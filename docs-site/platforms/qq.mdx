@@ -1,0 +1,139 @@
+---
+title: "QQ"
+description: "通过 NapCat OneBot 协议接入 QQ"
+---
+
+# QQ 接入
+
+PAI 通过 **NapCat** 实现 QQ 接入。NapCat 是一个兼容 OneBot v11 协议的 QQ 机器人框架，PAI 通过其 HTTP API 与 QQ 交互。
+
+---
+
+## 架构说明
+
+```
+QQ 用户 ←→ QQ 服务器 ←→ NapCat (OneBot 协议) ←→ PAI 后端
+                           (port 3000)
+```
+
+NapCat 作为 OneBot 协议桥接层，将 QQ 消息转换为标准 OneBot 格式并通过 HTTP 回调推送给 PAI。
+
+---
+
+## 环境变量配置
+
+<ParamField body="ONEBOT_BASE_URL" type="string" required>
+  NapCat 的 HTTP API 地址，例如 `http://napcat:3000`
+</ParamField>
+
+<ParamField body="ONEBOT_ACCESS_TOKEN" type="string">
+  OneBot HTTP API 的访问令牌，用于鉴权
+</ParamField>
+
+```env
+ONEBOT_BASE_URL=http://napcat:3000
+ONEBOT_ACCESS_TOKEN=your-access-token
+```
+
+---
+
+## Webhook 配置
+
+**端点：** `POST /webhook/qq`
+
+NapCat 会将 QQ 消息通过 HTTP POST 推送到此端点。
+
+---
+
+## Docker 部署
+
+NapCat 作为独立服务在 Docker Compose 中运行，会自动配置回调地址指向 PAI 后端：
+
+```yaml
+napcat:
+  image: napcat/napcat:latest
+  ports:
+    - "3000:3000"
+  volumes:
+    - napcat_config:/config
+  environment:
+    - NAPCAT_HTTP_POST_URL=http://backend:8000/webhook/qq
+  restart: unless-stopped
+```
+
+<Info>
+  NapCat 容器启动时会自动配置 HTTP POST 回调地址为 `http://backend:8000/webhook/qq`，无需手动设置。
+</Info>
+
+<Steps>
+  <Step title="启动 NapCat 服务">
+    通过 Docker Compose 启动 NapCat 容器
+  </Step>
+  <Step title="登录 QQ 账号">
+    按照 NapCat 的登录流程完成 QQ 账号认证
+  </Step>
+  <Step title="验证联通">
+    向 QQ Bot 发送私聊消息，确认 PAI 能正确接收和回复
+  </Step>
+</Steps>
+
+---
+
+## 消息格式
+
+QQ 消息使用 OneBot 的 **CQ 消息数组格式**（message segment array）：
+
+```json
+[
+  {
+    "type": "text",
+    "data": {
+      "text": "你好，帮我查一下明天的天气"
+    }
+  }
+]
+```
+
+PAI 会解析 CQ 消息数组，提取文本内容并转换为 `UnifiedMessage`。
+
+---
+
+## 功能支持与限制
+
+<Note>
+  当前仅支持**私聊消息**，群聊消息不会被处理。
+</Note>
+
+### 文本消息
+
+支持接收和发送文本消息，完整的 AI 对话能力。
+
+### 图片消息
+
+当前 QQ 平台暂不支持图片消息的接收和发送。
+
+---
+
+## 消息处理流程
+
+```
+QQ 用户发送私聊消息
+    │
+    ▼
+QQ 服务器 → NapCat (OneBot)
+    │
+    ▼
+NapCat 推送 CQ 消息数组到 POST /webhook/qq
+    │
+    ▼
+解析 CQ 消息数组，提取文本内容
+    │
+    ▼
+转换为 UnifiedMessage(platform_id="qq", content=...)
+    │
+    ▼
+AI 核心管线处理
+    │
+    ▼
+UnifiedSender → NapCat send_private_msg API → QQ 服务器 → 用户收到回复
+```

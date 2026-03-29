@@ -1,0 +1,139 @@
+---
+title: 'WebSocket 协议'
+description: '实时聊天与通知推送的 WebSocket 接口'
+---
+
+## 概览
+
+系统提供两个 WebSocket 端点：
+
+| 端点 | 用途 | 方向 |
+|------|------|------|
+| `/api/chat/ws` | 实时聊天 | 双向 |
+| `/api/notifications/ws` | 通知推送 | 服务端 → 客户端 |
+
+两者均通过 JWT token 进行认证（query 参数传递）。
+
+---
+
+## 聊天 WebSocket
+
+### 连接
+
+```
+ws://your-domain/api/chat/ws?token={jwt_token}
+```
+
+连接时服务端校验 JWT，校验失败立即关闭连接。
+
+### 客户端发送
+
+```json
+{
+  "content": "你好",
+  "image_urls": ["https://example.com/photo.jpg"]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `content` | string | 是 | 消息文本 |
+| `image_urls` | string[] | 否 | 图片 URL 列表 |
+
+### 服务端响应
+
+```json
+{
+  "ok": true,
+  "responses": [
+    "你好！有什么可以帮你的吗？"
+  ]
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `ok` | bool | 处理是否成功 |
+| `responses` | string[] | 回复文本数组 |
+
+### 内部消息格式
+
+服务端将 WebSocket 消息标准化为 `UnifiedMessage`：
+
+```json
+{
+  "platform_id": "web:{user_id}",
+  "content": "用户消息",
+  "image_urls": [],
+  "message_id": "web-ws-{timestamp}",
+  "event_ts": 1711699200,
+  "raw_data": {"web": true, "transport": "ws"}
+}
+```
+
+---
+
+## 通知 WebSocket
+
+### 连接
+
+```
+ws://your-domain/api/notifications/ws?token={jwt_token}
+```
+
+### 工作模式
+
+- **单向推送**：服务端主动向客户端发送通知，客户端只需保持连接
+- **心跳**：客户端通过 `receive_text()` 保持连接存活
+- **多连接**：同一用户可同时打开多个连接，所有连接都会收到通知
+
+### 推送消息格式
+
+```json
+{
+  "type": "reminder",
+  "content": "开会提醒",
+  "schedule_id": 123,
+  "trigger_time": "2026-03-30T15:00:00"
+}
+```
+
+### NotificationHub 架构
+
+```
+NotificationHub
+├── user_1 → {ws_conn_1, ws_conn_2}
+├── user_2 → {ws_conn_3}
+└── user_3 → {ws_conn_4, ws_conn_5, ws_conn_6}
+
+hub.send_to_user(user_id, payload)
+  → 遍历该用户所有连接 → 逐个发送
+  → 发送失败的连接自动清理
+```
+
+---
+
+## SSE 流式输出
+
+除 WebSocket 外，HTTP 端点也支持 SSE（Server-Sent Events）流式输出：
+
+```
+POST /api/chat/send?stream=true
+Authorization: Bearer {jwt_token}
+Content-Type: application/json
+
+{"content": "写一首诗"}
+```
+
+服务端返回 `text/event-stream`，逐块推送 Agent 输出。
+
+---
+
+## 错误处理
+
+| 场景 | 行为 |
+|------|------|
+| JWT 无效 | 连接时立即关闭，HTTP 状态码 403 |
+| 消息格式错误 | 返回 `{"ok": false, "error": "..."}` |
+| 服务端异常 | 返回错误消息后保持连接 |
+| 客户端断开 | 自动从 NotificationHub 清理 |

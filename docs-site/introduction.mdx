@@ -1,0 +1,112 @@
+---
+title: "PAI - 你的个人 AI 助手"
+description: "多平台、可扩展的个人 AI 助手，基于 FastAPI + LangGraph 构建"
+---
+
+# 什么是 PAI
+
+PAI（Personal AI Assistant）是一个开源的多平台个人 AI 助手。它基于 FastAPI 和 LangGraph 构建，采用**多节点 Router 架构**，能够在多个即时通讯平台上为你提供智能对话、记忆管理、日程安排、记账、图片识别等丰富功能。
+
+PAI 的设计目标是成为你真正的「数字分身」——它能记住你的偏好、管理你的日常事务，并且可以通过 Telegram、微信、QQ、飞书、小程序和 Web 等多种渠道随时触达。
+
+---
+
+## 核心特性
+
+<CardGroup cols={3}>
+  <Card title="多平台接入" icon="message">
+    同时支持 Telegram、微信、QQ、飞书、小程序和 Web 前端，一套后端服务所有平台
+  </Card>
+  <Card title="长期记忆" icon="brain">
+    基于向量检索的长期记忆系统，自动提取、存储和召回用户信息，让 AI 真正「记住」你
+  </Card>
+  <Card title="工具系统" icon="wrench">
+    内置网页抓取、邮件发送等工具，支持 MCP 协议扩展外部工具
+  </Card>
+  <Card title="技能系统" icon="wand-magic-sparkles">
+    通过 Skill 机制封装复杂业务流程，如记账、日程管理等，可灵活扩展
+  </Card>
+  <Card title="智能记账" icon="calculator">
+    自然语言记账，自动分类，支持多币种，随时查询收支统计
+  </Card>
+  <Card title="日程管理" icon="calendar">
+    自然语言创建定时提醒和日程，支持 cron 表达式，到期自动通知
+  </Card>
+  <Card title="图片识别" icon="image">
+    支持多模态输入，可识别图片内容并进行对话
+  </Card>
+  <Card title="流式响应" icon="bolt">
+    WebSocket 实时流式输出，打字机效果，体验流畅
+  </Card>
+  <Card title="Docker 部署" icon="docker">
+    完整的 Docker Compose 配置，一键部署全部服务
+  </Card>
+</CardGroup>
+
+---
+
+## 架构概览
+
+PAI `main` 分支采用**多节点 Router 架构**，通过 LangGraph 构建有状态的对话图。Router 节点根据用户意图将请求分发到 6 个专业节点：
+
+```
+用户消息 → Router → ┬─ Chat Node（通用对话）
+                     ├─ Tool Node（工具调用）
+                     ├─ Skill Node（技能执行）
+                     ├─ Ledger Node（记账管理）
+                     ├─ Schedule Node（日程管理）
+                     └─ Image Node（图片识别）
+```
+
+每个节点拥有独立的系统提示词和处理逻辑，确保在各自领域提供最佳表现。Router 根据上下文智能路由，用户无需手动切换。
+
+---
+
+## 支持平台
+
+| 平台 | 协议 | 说明 |
+|------|------|------|
+| Telegram | Bot API / Webhook | 全功能支持，推荐首选 |
+| 微信 | GeWeChat | 通过 GeWeChat 服务接入个人微信 |
+| QQ | OneBot v11 | 通过 NapCat 等 OneBot 实现接入 |
+| 飞书 | 飞书开放平台 | 企业级接入，支持事件订阅 |
+| 小程序 | 微信小程序 | 原生小程序前端，支持订阅消息通知 |
+| Web | REST + WebSocket | React 前端，支持流式对话 |
+
+---
+
+## 技术栈
+
+<CardGroup cols={2}>
+  <Card title="后端" icon="server">
+    - **FastAPI** — 高性能异步 Web 框架
+    - **LangGraph** — 有状态的 AI 工作流引擎
+    - **PostgreSQL** — 主数据库 + pgvector 向量存储
+    - **Redis** — 缓存与会话管理
+    - **SQLAlchemy** — ORM 与数据库迁移
+  </Card>
+  <Card title="前端" icon="browser">
+    - **React** — Web 前端框架
+    - **微信小程序** — 原生小程序
+    - **WebSocket** — 实时流式通信
+  </Card>
+</CardGroup>
+
+---
+
+## 快速导航
+
+<CardGroup cols={2}>
+  <Card title="快速开始" icon="rocket" href="/getting-started/quickstart">
+    5 分钟完成本地部署，开始你的第一次对话
+  </Card>
+  <Card title="配置指南" icon="gear" href="/getting-started/configuration">
+    了解所有环境变量及其配置方法
+  </Card>
+  <Card title="架构详解" icon="sitemap" href="/architecture/overview">
+    深入了解多节点 Router 架构设计
+  </Card>
+  <Card title="API 参考" icon="code" href="/api/overview">
+    完整的 REST API 和 WebSocket 接口文档
+  </Card>
+</CardGroup>

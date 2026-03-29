@@ -1,0 +1,137 @@
+---
+title: "API 概览"
+description: "PAI 平台 API 总览：分组、基础 URL、响应格式与错误处理"
+---
+
+## API 分组
+
+PAI 后端提供三组 API，面向不同调用场景：
+
+<CardGroup cols={3}>
+  <Card title="Client API" icon="user">
+    面向终端用户（Web / 小程序），JWT Bearer 鉴权。
+  </Card>
+  <Card title="Admin API" icon="shield-halved">
+    面向管理后台，静态 Token 鉴权。
+  </Card>
+  <Card title="Webhook API" icon="plug">
+    面向第三方平台回调（Telegram、微信、飞书等），各平台独立验签。
+  </Card>
+</CardGroup>
+
+## 基础 URL
+
+| 分组 | 前缀 | 示例 |
+|------|------|------|
+| Client API | `/api` | `POST /api/auth/login` |
+| Admin API | `/api/admin/v1` | `GET /api/admin/v1/dashboard` |
+| Webhook API | `/api/webhooks/{platform}` | `POST /api/webhooks/telegram` |
+
+<Info>
+  所有 API 均通过 HTTPS 访问。开发环境默认端口为 `8000`，生产环境建议通过反向代理暴露 443 端口。
+</Info>
+
+## 鉴权方式
+
+| 分组 | 鉴权方式 | Header |
+|------|---------|--------|
+| Client API | JWT Bearer Token | `Authorization: Bearer {token}` |
+| Admin API | 静态管理员 Token | `X-Admin-Token: {token}` |
+| Webhook API | 平台验签 | 各平台独立机制 |
+
+详细鉴权流程请参考 [鉴权指南](/api/authentication)。
+
+## 响应格式
+
+### 成功响应
+
+所有接口返回 JSON，成功时 HTTP 状态码为 `200`。常见响应结构：
+
+**操作类接口：**
+
+```json
+{
+  "ok": true,
+  "message": "操作成功"
+}
+```
+
+**资源类接口：**
+
+```json
+{
+  "id": 1,
+  "content": "...",
+  "created_at": "2026-03-28T10:00:00+08:00"
+}
+```
+
+**列表类接口（Client）：**
+
+直接返回数组：
+
+```json
+[
+  { "id": 1, "title": "..." },
+  { "id": 2, "title": "..." }
+]
+```
+
+**分页列表（Admin）：**
+
+```json
+{
+  "page": 1,
+  "size": 20,
+  "total": 100,
+  "items": [...]
+}
+```
+
+### Token 响应
+
+登录 / 注册成功后返回：
+
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIs...",
+  "token_type": "bearer"
+}
+```
+
+## 错误处理
+
+错误响应使用对应的 HTTP 状态码，Body 格式统一为：
+
+```json
+{
+  "detail": "错误描述信息"
+}
+```
+
+### 常见错误码
+
+| 状态码 | 含义 | 典型场景 |
+|--------|------|---------|
+| `400` | 请求参数错误 | 邮箱已注册、密码太短、参数格式不合法 |
+| `401` | 未授权 | Token 缺失、过期或无效；Admin Token 不匹配 |
+| `403` | 禁止访问 | Admin Token 未配置 |
+| `404` | 资源不存在 | 账本、日程、对话、技能不存在 |
+| `429` | 请求过于频繁 | 验证码发送冷却中 |
+| `502` | 上游服务错误 | MCP 工具调用失败 |
+| `503` | 服务不可用 | 邮件服务未配置 |
+
+<Warning>
+  所有时间字段均以用户所在时区的 ISO 8601 格式返回（如 `2026-03-28T10:00:00+08:00`），服务端根据 `TIMEZONE` 环境变量（默认 `Asia/Shanghai`）自动转换。
+</Warning>
+
+## WebSocket 端点
+
+除 REST API 外，PAI 还提供两个 WebSocket 端点用于实时通信：
+
+| 端点 | 路径 | 用途 |
+|------|------|------|
+| Chat WS | `/api/chat/ws?token={jwt}` | 实时对话，双向通信 |
+| Notifications WS | `/api/notifications/ws?token={jwt}` | 服务端推送通知 |
+
+详见 [WebSocket 协议文档](/api/websocket)。

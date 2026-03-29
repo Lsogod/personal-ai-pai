@@ -1,0 +1,152 @@
+---
+title: "Web 前端"
+description: "React SPA Web 客户端接入 PAI"
+---
+
+# Web 前端
+
+PAI 提供基于 React 的 Web 前端客户端，支持完整的对话、记账、日历等功能，并通过 WebSocket 和 SSE 实现流式响应和实时通知。
+
+---
+
+## 技术栈
+
+<CardGroup cols={2}>
+  <Card title="构建工具" icon="hammer">
+    **Vite** — 快速的开发构建工具
+  </Card>
+  <Card title="UI 框架" icon="palette">
+    **Tailwind CSS** — 原子化 CSS 框架
+  </Card>
+  <Card title="状态管理" icon="database">
+    **Zustand** — 轻量级状态管理
+  </Card>
+  <Card title="数据获取" icon="arrows-rotate">
+    **TanStack Query** — 服务端状态管理与缓存
+  </Card>
+</CardGroup>
+
+---
+
+## 用户认证
+
+Web 前端使用 JWT（JSON Web Token）进行身份认证，支持邮箱注册和登录。
+
+### 注册
+
+```
+POST /api/auth/register
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "your-password",
+  "name": "用户名"
+}
+```
+
+### 登录
+
+```
+POST /api/auth/login
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "your-password"
+}
+```
+
+登录成功后返回 JWT Token，前端存储并在后续请求的 `Authorization` Header 中携带。
+
+---
+
+## 对话功能
+
+### HTTP 模式
+
+通过 HTTP POST 发送消息并获取完整响应：
+
+```
+POST /api/chat/send
+Authorization: Bearer <jwt-token>
+Content-Type: application/json
+
+{
+  "content": "你好，今天天气怎么样？",
+  "conversation_id": "conv_xxx"
+}
+```
+
+### SSE 流式模式
+
+添加 `stream=true` 参数开启 Server-Sent Events 流式响应，实现打字机效果：
+
+```
+POST /api/chat/send?stream=true
+Authorization: Bearer <jwt-token>
+Content-Type: application/json
+
+{
+  "content": "写一篇关于人工智能的文章",
+  "conversation_id": "conv_xxx"
+}
+```
+
+响应为 SSE 事件流，逐步输出 AI 回复内容。
+
+### WebSocket 模式
+
+通过 WebSocket 实现全双工实时通信：
+
+```
+WebSocket /api/chat/ws?token=<jwt-token>
+```
+
+WebSocket 模式适用于需要低延迟实时交互的场景。
+
+---
+
+## 实时通知
+
+通过独立的 WebSocket 连接接收系统通知（如日程提醒）：
+
+```
+WebSocket /api/notifications/ws?token=<jwt-token>
+```
+
+通知类型包括：
+- 日程到期提醒
+- 系统消息
+
+---
+
+## 功能模块
+
+| 模块 | 说明 |
+|------|------|
+| 对话管理 | 创建、切换、删除会话，支持多会话并行 |
+| 记账视图 | 查看收支记录、分类统计、时间筛选 |
+| 日历 | 日程创建、查看、提醒管理 |
+| 用户档案 | 个人信息编辑、偏好设置 |
+
+---
+
+## 部署
+
+Web 前端作为独立服务在 Docker Compose 中构建和运行：
+
+```yaml
+frontend:
+  build:
+    context: ./frontend
+    dockerfile: Dockerfile
+  ports:
+    - "3000:80"
+  depends_on:
+    - backend
+```
+
+<Info>
+  生产部署时建议通过 Nginx 反向代理统一处理前端静态资源和后端 API，避免跨域问题。
+</Info>

@@ -1,0 +1,184 @@
+---
+title: '管理 API'
+description: '用户管理、记忆清洗、工具开关、数据统计'
+---
+
+## 认证
+
+所有管理 API 需要在请求头中携带管理令牌：
+
+```
+X-Admin-Token: your-admin-token
+```
+
+令牌通过环境变量 `ADMIN_TOKEN` 配置。未设置时返回 `403`，令牌错误返回 `401`。
+
+**Base URL**: `/api/admin/v1`
+
+---
+
+## 仪表盘
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/dashboard` | 总览统计（用户数、DAU、消息数、Token 用量）|
+| GET | `/conversations/stats` | 会话活跃度趋势 |
+
+**`/dashboard` 查询参数：**
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `days` | 30 | 统计时间窗口（1-120 天）|
+
+**返回字段：** total_users, new_users_today, dau_today, total_messages, window_messages, token_summary (prompts/completions/total), users_per_day 图表数据
+
+---
+
+## 用户管理
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/users` | 分页用户列表 |
+| GET | `/users/{user_id}` | 用户详情（含记忆、会话、账单、工具使用）|
+| PATCH | `/users/{user_id}/block` | 封禁/解封用户 |
+| PATCH | `/users/{user_id}/quota` | 设置消息配额 |
+
+**`/users` 查询参数：**
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `page` | 1 | 页码 |
+| `size` | 20 | 每页条数（1-200）|
+
+**`/users/{user_id}/block` 请求体：**
+
+```json
+{
+  "is_blocked": true,
+  "reason": "违规操作"
+}
+```
+
+**`/users/{user_id}/quota` 请求体：**
+
+```json
+{
+  "daily_message_limit": 100,
+  "monthly_message_limit": 3000
+}
+```
+
+---
+
+## 记忆管理
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/users/{user_id}/memories/consolidate` | 清洗单用户记忆 |
+| POST | `/memories/consolidate` | 批量清洗记忆 |
+| DELETE | `/users/{user_id}/memories` | 清空单用户记忆 |
+| POST | `/memories/purge` | 批量清空记忆 |
+
+**清洗（consolidate）**：LLM 审查记忆，决策保留/删除/合并，去除过时和重复条目。
+
+**单用户清洗参数：**
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `max_scan` | 200 | 扫描上限（10-2000）|
+
+**批量清洗请求体：**
+
+```json
+{
+  "limit_users": 50,
+  "max_scan": 200
+}
+```
+
+---
+
+## 会话管理
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/conversations` | 分页会话列表 |
+| GET | `/conversations/{id}/messages` | 会话消息回放 |
+
+---
+
+## 技能管理
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/skills` | 全部技能列表 |
+| GET | `/skills/{skill_id}/versions` | 技能版本历史 |
+| POST | `/skills/{skill_id}/disable` | 全局禁用技能 |
+
+---
+
+## 工具管理
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/tools` | 工具列表 + 使用统计 |
+| PATCH | `/tools/{source}/{name}` | 启用/禁用工具 |
+
+**启用/禁用请求体：**
+
+```json
+{
+  "enabled": false
+}
+```
+
+`source` 为 `builtin` 或 `mcp`，`name` 为工具名称。
+
+---
+
+## 日程管理
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/schedules` | 分页日程列表 |
+| GET | `/schedules/delivery` | 提醒投递统计 |
+
+---
+
+## 审计日志
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/audit` | 分页审计日志（user_id, action, platform, details, timestamp）|
+
+---
+
+## 反馈管理
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/feedbacks` | 分页用户反馈列表 |
+
+---
+
+## 小程序配置
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/miniapp/home-popup` | 获取首页弹窗配置 |
+| PUT | `/miniapp/home-popup` | 更新首页弹窗 |
+
+**弹窗配置请求体：**
+
+```json
+{
+  "enabled": true,
+  "title": "系统公告",
+  "content": "新功能上线...",
+  "show_mode": "once",
+  "start_at": "2026-03-29T00:00:00",
+  "end_at": "2026-04-05T00:00:00",
+  "version": "1.0",
+  "primary_button_text": "知道了"
+}
+```
