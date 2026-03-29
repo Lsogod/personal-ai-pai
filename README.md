@@ -481,6 +481,23 @@ cp miniapp/config.local.example.js miniapp/config.local.js
 
 ---
 
+## 📖 文档
+
+完整的项目文档已发布在 **[docs.oneee.cn](https://docs.oneee.cn)**，涵盖以下内容：
+
+| 章节 | 说明 |
+|------|------|
+| **快速开始** | 环境准备、Docker Compose 一键部署、环境变量配置 |
+| **架构设计** | [多节点 Router 架构](https://docs.oneee.cn/architecture/multi-node-router)（main 分支）、[单 Agent 架构](https://docs.oneee.cn/architecture/single-agent)（feat/single-agent 分支）、LangGraph 工作流 |
+| **核心能力** | 记忆系统、工具系统、技能系统、智能记账、日程管理、图片识别 |
+| **平台接入** | Telegram、微信、QQ、飞书、小程序、Web 全平台接入指南 |
+| **API 参考** | REST API、WebSocket、鉴权机制 |
+| **部署运维** | Docker 部署、生产环境优化、HTTPS 配置 |
+
+> 文档源码位于各分支的 `docs-site/` 目录，独立文档仓库 [Lsogod/docs](https://github.com/Lsogod/docs) 由 Mintlify 托管并自动部署。
+
+---
+
 ## 🌿 分支说明
 
 | 分支 | 架构 | 当前状态 | 说明 |
