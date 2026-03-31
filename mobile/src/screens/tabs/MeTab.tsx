@@ -1,12 +1,12 @@
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useState } from "react";
+import { Alert, Animated, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { fetchConversations, fetchProfile, fetchSkills, getSourcePlatformLabel } from "../../lib/api";
 import { useAuthStore } from "../../store/auth";
-import { colors, radii, spacing, surfaceCard } from "../../design/tokens";
+import { colors, radii, shadowSm, spacing, surfaceCard } from "../../design/tokens";
 import type { TabKey } from "../../components/MiniTabBar";
 import { BindingPanel } from "../me/BindingPanel";
 import { FeedbackPanel } from "../me/FeedbackPanel";
@@ -29,6 +29,15 @@ export function MeTab({ bottomInset, onNavigate, onLogout }: MeTabProps) {
   const token = useAuthStore((state) => state.token);
   const insets = useSafeAreaInsets();
   const [panel, setPanel] = useState<"skills" | "binding" | "feedback" | null>(null);
+  const fadeIn = useRef(new Animated.Value(0)).current;
+  const slideUp = useRef(new Animated.Value(24)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }),
+      Animated.timing(slideUp, { toValue: 0, duration: 400, useNativeDriver: true }),
+    ]).start();
+  }, [fadeIn, slideUp]);
 
   const profileQuery = useQuery({
     queryKey: ["profile"],
@@ -70,7 +79,7 @@ export function MeTab({ bottomInset, onNavigate, onLogout }: MeTabProps) {
         contentContainerStyle={{ paddingBottom: bottomInset + 24 }}
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.inner, { paddingTop: insets.top + 8 }]}>
+        <Animated.View style={[styles.inner, { paddingTop: insets.top + 8, opacity: fadeIn, transform: [{ translateY: slideUp }] }]}>
           <View style={styles.profileCard}>
             <View style={styles.heroGlowOne} />
             <View style={styles.heroGlowTwo} />
@@ -114,17 +123,23 @@ export function MeTab({ bottomInset, onNavigate, onLogout }: MeTabProps) {
 
           <View style={styles.quickPanel}>
             <Pressable style={styles.quickCard} onPress={() => onNavigate("chat")}>
-              <Ionicons name="chatbubble-ellipses-outline" size={22} color={colors.primary} />
+              <View style={[styles.quickIconWrap, { backgroundColor: colors.primaryLight }]}>
+                <Ionicons name="sparkles-outline" size={20} color={colors.primary} />
+              </View>
               <Text style={styles.quickTitle}>继续对话</Text>
               <Text style={styles.quickDesc}>直接打开助手</Text>
             </Pressable>
             <Pressable style={styles.quickCard} onPress={() => onNavigate("ledger")}>
-              <Ionicons name="wallet-outline" size={22} color={colors.accent} />
+              <View style={[styles.quickIconWrap, { backgroundColor: colors.accentLight }]}>
+                <Ionicons name="wallet-outline" size={20} color={colors.accent} />
+              </View>
               <Text style={styles.quickTitle}>查看账单</Text>
               <Text style={styles.quickDesc}>月度支出与明细</Text>
             </Pressable>
             <Pressable style={styles.quickCard} onPress={() => onNavigate("calendar")}>
-              <Ionicons name="calendar-outline" size={22} color={colors.warning} />
+              <View style={[styles.quickIconWrap, { backgroundColor: colors.warningLight }]}>
+                <Ionicons name="calendar-outline" size={20} color={colors.warning} />
+              </View>
               <Text style={styles.quickTitle}>提醒安排</Text>
               <Text style={styles.quickDesc}>管理待办与日程</Text>
             </Pressable>
@@ -171,7 +186,7 @@ export function MeTab({ bottomInset, onNavigate, onLogout }: MeTabProps) {
             <Ionicons name="log-out-outline" size={18} color={colors.text3} />
             <Text style={styles.logoutText}>退出登录</Text>
           </Pressable>
-        </View>
+        </Animated.View>
       </ScrollView>
 
       <SkillsPanel visible={panel === "skills"} token={token} onClose={() => setPanel(null)} />
@@ -221,14 +236,14 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   avatarRing: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 62,
+    height: 62,
+    borderRadius: 31,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.2)",
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.32)",
+    backgroundColor: "rgba(255,255,255,0.22)",
+    borderWidth: 2.5,
+    borderColor: "rgba(255,255,255,0.4)",
   },
   profileInfo: {
     flex: 1,
@@ -297,10 +312,18 @@ const styles = StyleSheet.create({
   },
   quickCard: {
     flex: 1,
-    paddingVertical: 18,
+    paddingVertical: 16,
     paddingHorizontal: 12,
-    gap: 10,
+    gap: 8,
     ...surfaceCard,
+  },
+  quickIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 2,
   },
   quickTitle: {
     fontSize: 15,
@@ -398,6 +421,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.borderLight,
+    ...shadowSm,
   },
   logoutText: {
     fontSize: 15,

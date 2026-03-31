@@ -104,17 +104,18 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   chatIconWrap: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.primary,
-    transform: [{ translateY: -2 }],
+    transform: [{ translateY: -6 }],
     ...shadowMd,
   },
   chatIconWrapActive: {
     backgroundColor: colors.primaryDark,
+    transform: [{ translateY: -8 }],
   },
   label: {
     fontSize: 11,

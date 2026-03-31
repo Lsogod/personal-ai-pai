@@ -165,6 +165,7 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [composerHeight, setComposerHeight] = useState(86);
+  const [showScrollDown, setShowScrollDown] = useState(false);
   const streamBufferRef = useRef("");
   const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollSyncTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -857,11 +858,26 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
               scrollIndicatorInsets={{ bottom: 20 }}
               onContentSizeChange={() => scrollToBottom(!keyboardOpen && !streamingReply)}
               onLayout={() => scrollToBottom(false)}
+              onScroll={(e) => {
+                const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+                const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
+                setShowScrollDown(distanceFromBottom > 120);
+              }}
+              scrollEventThrottle={80}
               ListFooterComponent={sendMutation.isPending && !streamingReply ? <TypingIndicator /> : null}
               keyboardShouldPersistTaps="handled"
             />
           )}
         </View>
+
+        {showScrollDown && messages.length > 0 ? (
+          <Pressable
+            style={[styles.scrollDownBtn, { bottom: composerOffset + composerHeight + 8 }]}
+            onPress={() => { scrollToBottom(true); setShowScrollDown(false); }}
+          >
+            <Ionicons name="chevron-down" size={20} color={colors.primary} />
+          </Pressable>
+        ) : null}
 
         <View
           style={[
@@ -1225,6 +1241,22 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: colors.text3,
+  },
+
+  /* ---- Scroll to bottom ---- */
+  scrollDownBtn: {
+    position: "absolute",
+    right: 16,
+    zIndex: 11,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadowSm,
   },
 
   /* ---- Composer ---- */
