@@ -19,10 +19,10 @@ type MeTabProps = {
 };
 
 const MENU_ITEMS = [
-  { key: "skills", title: "技能管理", icon: "sparkles-outline", color: colors.iconBgPurple, status: "已接入" },
-  { key: "binding", title: "账号绑定", icon: "link-outline", color: colors.iconBgPrimary, status: "已接入" },
-  { key: "notifications", title: "提醒订阅", icon: "notifications-outline", color: colors.iconBgOrange, status: "原生推送待接入" },
-  { key: "feedback", title: "问题反馈", icon: "chatbubble-ellipses-outline", color: colors.iconBgGreen, status: "已接入" },
+  { key: "skills", title: "技能管理", desc: "查看和管理 AI 技能", icon: "sparkles-outline" as const, color: colors.iconBgPurple },
+  { key: "binding", title: "账号绑定", desc: "多平台数据同步", icon: "link-outline" as const, color: colors.iconBgPrimary },
+  { key: "notifications", title: "推送通知", desc: "日程提醒推送设置", icon: "notifications-outline" as const, color: colors.iconBgOrange },
+  { key: "feedback", title: "问题反馈", desc: "帮助我们改进", icon: "chatbubble-ellipses-outline" as const, color: colors.iconBgGreen },
 ] as const;
 
 export function MeTab({ bottomInset, onNavigate, onLogout }: MeTabProps) {
@@ -43,7 +43,7 @@ export function MeTab({ bottomInset, onNavigate, onLogout }: MeTabProps) {
       setPanel(item.key);
       return;
     }
-    Alert.alert("提醒订阅", "App 端会改成 APNs/FCM 原生推送，这一项后面继续接。");
+    Alert.alert("推送通知", "原生推送功能即将上线，敬请期待。");
   }
 
   return (
@@ -54,46 +54,57 @@ export function MeTab({ bottomInset, onNavigate, onLogout }: MeTabProps) {
         showsVerticalScrollIndicator={false}
       >
         <View style={[styles.inner, { paddingTop: insets.top + 8 }]}>
-          <View style={styles.hero}>
-            <View style={styles.heroGlow} />
+          {/* ---- Profile header ---- */}
+          <View style={styles.profileCard}>
             <View style={styles.avatarRing}>
-              <Ionicons name="person-outline" size={28} color="#ffffff" />
+              <Ionicons name="person" size={26} color="#fff" />
             </View>
-            <Text style={styles.heroName}>{profile?.nickname || "用户"}</Text>
-            <Text style={styles.heroSub}>
-              {profile?.platform || "web"} · 阶段 {profile?.setup_stage ?? 0}
-            </Text>
-            {profile?.email ? <Text style={styles.heroEmail}>{profile.email}</Text> : null}
+            <View style={styles.profileInfo}>
+              <Text style={styles.profileName}>{profile?.nickname || "用户"}</Text>
+              <Text style={styles.profileMeta}>
+                {profile?.email || profile?.platform || "PAI 用户"}
+              </Text>
+            </View>
           </View>
 
-          <View style={styles.card}>
+          {/* ---- Menu ---- */}
+          <View style={styles.menuCard}>
             {MENU_ITEMS.map((item, index) => (
-              <View key={item.title}>
+              <View key={item.key}>
                 <Pressable style={styles.menuRow} onPress={() => handleMenuPress(item)}>
                   <View style={[styles.menuIconWrap, { backgroundColor: item.color }]}>
                     <Ionicons name={item.icon} size={20} color={colors.text} />
                   </View>
-                  <Text style={styles.menuLabel}>{item.title}</Text>
-                  <Text style={styles.menuStatus}>{item.status}</Text>
+                  <View style={styles.menuTexts}>
+                    <Text style={styles.menuLabel}>{item.title}</Text>
+                    <Text style={styles.menuDesc}>{item.desc}</Text>
+                  </View>
                   <Ionicons name="chevron-forward" size={18} color={colors.text4} />
                 </Pressable>
-                {index < MENU_ITEMS.length - 1 ? <View style={styles.line} /> : null}
+                {index < MENU_ITEMS.length - 1 ? <View style={styles.divider} /> : null}
               </View>
             ))}
           </View>
 
-          <View style={styles.card}>
-            <Pressable style={styles.quickAction} onPress={() => onNavigate("home")}>
-              <Ionicons name="home-outline" size={18} color={colors.primary} />
-              <Text style={styles.quickActionText}>返回首页</Text>
+          {/* ---- Quick links ---- */}
+          <View style={styles.linkRow}>
+            <Pressable style={styles.linkCard} onPress={() => onNavigate("chat")}>
+              <Ionicons name="chatbubble-outline" size={20} color={colors.primary} />
+              <Text style={styles.linkText}>对话</Text>
             </Pressable>
-            <Pressable style={styles.quickAction} onPress={() => onNavigate("command")}>
-              <Ionicons name="code-slash-outline" size={18} color={colors.primary} />
-              <Text style={styles.quickActionText}>打开指令面板</Text>
+            <Pressable style={styles.linkCard} onPress={() => onNavigate("ledger")}>
+              <Ionicons name="wallet-outline" size={20} color={colors.accent} />
+              <Text style={styles.linkText}>账单</Text>
+            </Pressable>
+            <Pressable style={styles.linkCard} onPress={() => onNavigate("calendar")}>
+              <Ionicons name="calendar-outline" size={20} color={colors.warning} />
+              <Text style={styles.linkText}>日程</Text>
             </Pressable>
           </View>
 
+          {/* ---- Logout ---- */}
           <Pressable style={styles.logoutBtn} onPress={() => void onLogout()}>
+            <Ionicons name="log-out-outline" size={18} color={colors.text3} />
             <Text style={styles.logoutText}>退出登录</Text>
           </Pressable>
         </View>
@@ -115,107 +126,110 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.pageX,
     gap: 16,
   },
-  hero: {
-    overflow: "hidden",
+
+  /* Profile */
+  profileCard: {
+    flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 22,
-    paddingVertical: 28,
+    gap: 16,
+    padding: 22,
     borderRadius: radii.xl,
     backgroundColor: colors.primary,
   },
-  heroGlow: {
-    position: "absolute",
-    right: -42,
-    top: -38,
-    width: 160,
-    height: 160,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.1)",
-  },
   avatarRing: {
-    width: 74,
-    height: 74,
-    borderRadius: 999,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.2)",
     borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.34)",
-    marginBottom: 12,
+    borderColor: "rgba(255,255,255,0.3)",
   },
-  heroName: {
-    fontSize: 26,
-    fontWeight: "800",
-    color: "#ffffff",
+  profileInfo: {
+    flex: 1,
+    gap: 4,
   },
-  heroSub: {
-    marginTop: 6,
-    fontSize: 13,
-    color: "rgba(255,255,255,0.76)",
+  profileName: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#fff",
   },
-  heroEmail: {
-    marginTop: 8,
-    fontSize: 13,
-    color: "rgba(255,255,255,0.9)",
+  profileMeta: {
+    fontSize: 14,
+    color: "rgba(255,255,255,0.75)",
   },
-  card: {
-    paddingHorizontal: 18,
+
+  /* Menu */
+  menuCard: {
+    paddingHorizontal: 16,
     ...surfaceCard,
   },
   menuRow: {
-    minHeight: 74,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 14,
+    paddingVertical: 16,
   },
   menuIconWrap: {
     width: 42,
     height: 42,
-    borderRadius: radii.md,
+    borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
+  },
+  menuTexts: {
+    flex: 1,
+    gap: 2,
   },
   menuLabel: {
-    flex: 1,
     fontSize: 16,
-    fontWeight: "700",
+    fontWeight: "600",
     color: colors.text,
   },
-  menuStatus: {
-    maxWidth: 110,
-    fontSize: 11,
-    fontWeight: "700",
-    textAlign: "right",
-    color: colors.primary,
+  menuDesc: {
+    fontSize: 12,
+    color: colors.text3,
   },
-  line: {
-    height: 1,
-    marginLeft: 54,
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 56,
     backgroundColor: colors.borderLight,
   },
-  quickAction: {
-    minHeight: 56,
+
+  /* Quick links */
+  linkRow: {
     flexDirection: "row",
-    alignItems: "center",
     gap: 10,
   },
-  quickActionText: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: colors.primary,
+  linkCard: {
+    flex: 1,
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 18,
+    ...surfaceCard,
   },
+  linkText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.text2,
+  },
+
+  /* Logout */
   logoutBtn: {
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    height: 56,
+    gap: 8,
+    height: 50,
     borderRadius: radii.lg,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderLight,
   },
   logoutText: {
     fontSize: 15,
-    fontWeight: "700",
-    color: colors.text2,
+    fontWeight: "600",
+    color: colors.text3,
   },
 });

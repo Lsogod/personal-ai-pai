@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -8,10 +9,18 @@ import {
   Pressable,
   View,
 } from "react-native";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { CalendarDay, fetchCalendar } from "../../lib/api";
+import {
+  CalendarDay,
+  CalendarLedgerItem,
+  CalendarScheduleItem,
+  fetchCalendar,
+  LedgerItem,
+  ScheduleItem,
+  updateSchedule,
+} from "../../lib/api";
 import {
   addMonths,
   buildCalendarGrid,
@@ -22,6 +31,10 @@ import {
 } from "../../lib/date";
 import { useAuthStore } from "../../store/auth";
 import { colors, radii, spacing, surfaceCard } from "../../design/tokens";
+import { CreateLedgerModal } from "./CreateLedgerModal";
+import { CreateScheduleModal } from "./CreateScheduleModal";
+import { EditLedgerModal } from "./EditLedgerModal";
+import { EditScheduleModal } from "./EditScheduleModal";
 
 type CalendarTabProps = {
   bottomInset: number;
@@ -35,6 +48,10 @@ export function CalendarTab({ bottomInset }: CalendarTabProps) {
   const insets = useSafeAreaInsets();
   const [anchorMonth, setAnchorMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [activeDate, setActiveDate] = useState("");
+  const [createLedgerOpen, setCreateLedgerOpen] = useState(false);
+  const [createScheduleOpen, setCreateScheduleOpen] = useState(false);
+  const [editingLedger, setEditingLedger] = useState<LedgerItem | null>(null);
+  const [editingSchedule, setEditingSchedule] = useState<ScheduleItem | null>(null);
 
   const range = useMemo(() => getMonthRange(anchorMonth), [anchorMonth]);
 
@@ -80,18 +97,60 @@ export function CalendarTab({ bottomInset }: CalendarTabProps) {
     return { totalSpend, billCount, scheduleDone, schedulePending };
   }, [calendarDays]);
 
+  const toggleScheduleMutation = useMutation({
+    mutationFn: async (item: CalendarScheduleItem) => {
+      const nextStatus = item.status === "EXECUTED" ? "PENDING" : "EXECUTED";
+      return updateSchedule(
+        item.id,
+        {
+          status: nextStatus,
+        },
+        token!
+      );
+    },
+    onSuccess: refreshAll,
+    onError: (error: Error) => {
+      Alert.alert("更新日程失败", error.message);
+    },
+  });
+
   async function refreshAll() {
-    await queryClient.invalidateQueries({ queryKey: ["calendar", range.startText, range.endText] });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["calendar"] }),
+      queryClient.invalidateQueries({ queryKey: ["ledgers"] }),
+      queryClient.invalidateQueries({ queryKey: ["schedules"] }),
+      queryClient.invalidateQueries({ queryKey: ["stats", "month"] }),
+    ]);
+  }
+
+  function openLedgerEditor(item: CalendarLedgerItem) {
+    setEditingLedger({
+      ...item,
+      created_at: item.transaction_date,
+    });
+  }
+
+  function openScheduleEditor(item: CalendarScheduleItem) {
+    setEditingSchedule({
+      ...item,
+      created_at: item.trigger_time,
+    });
+  }
+
+  function handleToggleSchedule(item: CalendarScheduleItem) {
+    if (toggleScheduleMutation.isPending) return;
+    void toggleScheduleMutation.mutateAsync(item);
   }
 
   return (
-    <ScrollView
-      style={styles.page}
-      contentContainerStyle={{ paddingBottom: bottomInset + 20 }}
-      refreshControl={<RefreshControl refreshing={calendarQuery.isRefetching} onRefresh={() => void refreshAll()} />}
-      showsVerticalScrollIndicator={false}
-    >
-      <View style={[styles.inner, { paddingTop: insets.top + 8 }]}>
+    <>
+      <ScrollView
+        style={styles.page}
+        contentContainerStyle={{ paddingBottom: bottomInset + 148 }}
+        refreshControl={<RefreshControl refreshing={calendarQuery.isRefetching} onRefresh={() => void refreshAll()} />}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={[styles.inner, { paddingTop: insets.top + 8 }]}>
         <View style={styles.toolbar}>
           <Pressable style={styles.navBtn} onPress={() => setAnchorMonth((prev) => addMonths(prev, -1))}>
             <Text style={styles.navBtnText}>‹ 上月</Text>
@@ -105,34 +164,35 @@ export function CalendarTab({ bottomInset }: CalendarTabProps) {
         <View style={styles.card}>
           <View style={styles.weekRow}>
             {WEEK_HEADERS.map((item) => (
-              <Text key={item} style={styles.weekCell}>
-                {item}
-              </Text>
+              <View key={item} style={styles.weekCellWrap}>
+                <Text style={styles.weekCell}>{item}</Text>
+              </View>
             ))}
           </View>
           <View style={styles.dayGrid}>
             {grid.map((cell) =>
-              cell.empty ? (
-                <View key={cell.key} style={[styles.dayCell, styles.dayCellEmpty]} />
-              ) : (
-                <Pressable
-                  key={cell.key}
-                  style={[
-                    styles.dayCell,
-                    cell.date === activeDate && styles.dayCellActive,
-                    cell.isToday && styles.dayCellToday,
-                  ]}
-                  onPress={() => setActiveDate(cell.date)}
-                >
-                  <View style={styles.dayInner}>
-                    <Text style={[styles.dayNum, cell.date === activeDate && styles.dayNumActive]}>{cell.day}</Text>
-                    <View style={styles.dayBadges}>
-                      {cell.ledger_count > 0 ? <View style={[styles.dayBadge, styles.dayBadgeGreen]}><Text style={styles.dayBadgeText}>{cell.ledger_count}</Text></View> : null}
-                      {cell.schedule_count > 0 ? <View style={[styles.dayBadge, styles.dayBadgeBlue]}><Text style={styles.dayBadgeText}>{cell.schedule_count}</Text></View> : null}
+              <View key={cell.key} style={styles.dayCellWrap}>
+                {cell.empty ? (
+                  <View style={[styles.dayCell, styles.dayCellEmpty]} />
+                ) : (
+                  <Pressable
+                    style={[
+                      styles.dayCell,
+                      cell.date === activeDate && styles.dayCellActive,
+                      cell.isToday && styles.dayCellToday,
+                    ]}
+                    onPress={() => setActiveDate(cell.date)}
+                  >
+                    <View style={styles.dayInner}>
+                      <Text style={[styles.dayNum, cell.date === activeDate && styles.dayNumActive]}>{cell.day}</Text>
+                      <View style={styles.dayBadges}>
+                        {cell.ledger_count > 0 ? <View style={[styles.dayBadge, styles.dayBadgeGreen]}><Text style={styles.dayBadgeText}>{cell.ledger_count}</Text></View> : null}
+                        {cell.schedule_count > 0 ? <View style={[styles.dayBadge, styles.dayBadgeBlue]}><Text style={styles.dayBadgeText}>{cell.schedule_count}</Text></View> : null}
+                      </View>
                     </View>
-                  </View>
-                </Pressable>
-              )
+                  </Pressable>
+                )}
+              </View>
             )}
           </View>
         </View>
@@ -153,6 +213,14 @@ export function CalendarTab({ bottomInset }: CalendarTabProps) {
         <View style={styles.card}>
           <View style={styles.detailHeader}>
             <Text style={styles.detailTitle}>{activeDay.date || "选择日期"} 详情</Text>
+            <View style={styles.detailAddBtns}>
+              <Pressable style={[styles.detailAddBtn, styles.detailAddBtnGreen]} onPress={() => setCreateLedgerOpen(true)}>
+                <Text style={styles.detailAddBtnGreenText}>+ 账单</Text>
+              </Pressable>
+              <Pressable style={[styles.detailAddBtn, styles.detailAddBtnBlue]} onPress={() => setCreateScheduleOpen(true)}>
+                <Text style={styles.detailAddBtnBlueText}>+ 日程</Text>
+              </Pressable>
+            </View>
           </View>
 
           <View style={styles.detailSection}>
@@ -170,6 +238,9 @@ export function CalendarTab({ bottomInset }: CalendarTabProps) {
                   </Text>
                 </View>
                 <Text style={styles.detailAmount}>¥{Number(item.amount || 0).toFixed(0)}</Text>
+                <Pressable style={styles.moreBtn} onPress={() => openLedgerEditor(item)}>
+                  <Ionicons name="ellipsis-horizontal" size={18} color={colors.text3} />
+                </Pressable>
               </View>
             ))}
           </View>
@@ -182,21 +253,56 @@ export function CalendarTab({ bottomInset }: CalendarTabProps) {
             {activeDay.schedules.length === 0 ? <Text style={styles.emptyText}>当天无日程</Text> : null}
             {activeDay.schedules.map((item) => (
               <View key={item.id} style={styles.detailRow}>
-                <View style={[styles.scheduleCheck, item.status === "EXECUTED" && styles.scheduleCheckDone]}>
+                <Pressable style={[styles.scheduleCheck, item.status === "EXECUTED" && styles.scheduleCheckDone]} onPress={() => handleToggleSchedule(item)}>
                   {item.status === "EXECUTED" ? <Ionicons name="checkmark" size={14} color="#ffffff" /> : null}
-                </View>
+                </Pressable>
                 <View style={styles.detailMain}>
                   <Text style={[styles.detailContent, item.status === "EXECUTED" && styles.doneText]}>{item.content}</Text>
                   <Text style={styles.detailMeta}>
                     {formatHmLocal(item.trigger_time)} · {getScheduleStatusLabel(item.status)}
                   </Text>
                 </View>
+                <Pressable style={styles.moreBtn} onPress={() => openScheduleEditor(item)}>
+                  <Ionicons name="ellipsis-horizontal" size={18} color={colors.text3} />
+                </Pressable>
               </View>
             ))}
           </View>
         </View>
-      </View>
-    </ScrollView>
+        </View>
+      </ScrollView>
+
+      <CreateLedgerModal
+        visible={createLedgerOpen}
+        token={token}
+        onClose={() => setCreateLedgerOpen(false)}
+        onCreated={refreshAll}
+      />
+
+      <CreateScheduleModal
+        visible={createScheduleOpen}
+        token={token}
+        initialDate={activeDate}
+        onClose={() => setCreateScheduleOpen(false)}
+        onCreated={refreshAll}
+      />
+
+      <EditLedgerModal
+        visible={!!editingLedger}
+        token={token}
+        ledger={editingLedger}
+        onClose={() => setEditingLedger(null)}
+        onChanged={refreshAll}
+      />
+
+      <EditScheduleModal
+        visible={!!editingSchedule}
+        token={token}
+        schedule={editingSchedule}
+        onClose={() => setEditingSchedule(null)}
+        onChanged={refreshAll}
+      />
+    </>
   );
 }
 
@@ -246,10 +352,12 @@ const styles = StyleSheet.create({
   },
   weekRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
+  },
+  weekCellWrap: {
+    width: "14.2857%",
+    paddingHorizontal: 3,
   },
   weekCell: {
-    width: `${100 / 7}%`,
     textAlign: "center",
     fontSize: 12,
     fontWeight: "700",
@@ -258,10 +366,14 @@ const styles = StyleSheet.create({
   dayGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 6,
+  },
+  dayCellWrap: {
+    width: "14.2857%",
+    paddingHorizontal: 3,
+    paddingVertical: 3,
   },
   dayCell: {
-    width: "13.5%",
+    width: "100%",
     minHeight: 58,
     borderRadius: radii.sm,
     paddingVertical: 6,
@@ -349,11 +461,38 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: 10,
   },
   detailTitle: {
     fontSize: 18,
     fontWeight: "700",
     color: colors.text,
+  },
+  detailAddBtns: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  detailAddBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: radii.full,
+  },
+  detailAddBtnGreen: {
+    backgroundColor: colors.accentLight,
+  },
+  detailAddBtnBlue: {
+    backgroundColor: colors.primaryLight,
+  },
+  detailAddBtnGreenText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#166534",
+  },
+  detailAddBtnBlueText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#1e40af",
   },
   detailSection: {
     gap: 8,
@@ -404,6 +543,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "800",
     color: colors.primary,
+  },
+  moreBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
   },
   scheduleCheck: {
     width: 22,
