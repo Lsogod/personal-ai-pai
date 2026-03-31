@@ -10,6 +10,7 @@ services:
     depends_on:
       - db
       - redis
+      - milvus
     volumes:
       - ./backend/skills:/app/skills
       - ./logs:/app/logs
@@ -24,6 +25,22 @@ services:
     depends_on:
       - db
       - redis
+      - milvus
+    volumes:
+      - ./backend/skills:/app/skills
+      - ./logs:/app/logs
+
+  memory_index_worker:
+    build: ./backend
+    image: pai-backend:v1.0
+    container_name: pai_memory_index_worker
+    restart: always
+    command: ["python", "-m", "app.memory_index_worker"]
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+      - milvus
     volumes:
       - ./backend/skills:/app/skills
       - ./logs:/app/logs
@@ -55,6 +72,51 @@ services:
     restart: always
     command: redis-stack-server --appendonly yes --protected-mode no
 
+  milvus-etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    container_name: pai_milvus_etcd
+    restart: always
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command:
+      - etcd
+      - -advertise-client-urls=http://milvus-etcd:2379
+      - -listen-client-urls=http://0.0.0.0:2379
+      - --data-dir=/etcd
+    volumes:
+      - milvus_etcd_data:/etcd
+
+  milvus-minio:
+    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    container_name: pai_milvus_minio
+    restart: always
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: minio server /minio_data
+    volumes:
+      - milvus_minio_data:/minio_data
+
+  milvus:
+    image: milvusdb/milvus:v2.5.27
+    container_name: pai_milvus
+    restart: always
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+    depends_on:
+      - milvus-etcd
+      - milvus-minio
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - milvus_data:/var/lib/milvus
+
   gewechat:
     image: registry.cn-hangzhou.aliyuncs.com/gewe/gewe:latest
     container_name: pai_gewechat
@@ -77,3 +139,6 @@ services:
 
 volumes:
   pg_data:
+  milvus_etcd_data:
+  milvus_minio_data:
+  milvus_data:

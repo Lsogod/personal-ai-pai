@@ -8,15 +8,16 @@
 
 ## 概览
 
-系统为每位用户维护独立的长期记忆，跨会话持久化，无需用户手动操作。当前实现以 `PostgreSQL` 作为长期记忆真值库；记忆在对话中自动提取，也可由 Agent 显式写入，查询时按相关性评分注入 prompt。
+系统为每位用户维护独立的长期记忆，跨会话持久化，无需用户手动操作。当前实现采用 `PostgreSQL` 保存长期记忆真值，`Milvus` 保存向量索引；记忆在对话中自动提取，也可由 Agent 显式写入，查询时按相关性从 Milvus 召回，再回 PostgreSQL 取真值内容。
 
 ```
 用户消息 ──┬──→ LangGraph 节点处理 ──→ 回复
            │         ↑
-           │    相关记忆注入（top-k）
+           │    相关记忆注入（Milvus 召回 top-k）
            │
-           └──→ 异步提取管道 ──→ DB
-                  Agent 工具调用 ──→ DB
+           ├──→ 异步提取管道 ──→ PostgreSQL
+           ├──→ Agent 工具调用 ──→ PostgreSQL
+           └──→ memory_index_worker ──→ Embedding ──→ Milvus
 ```
 
 ---
@@ -51,6 +52,12 @@ long_term_memories
 ├── is_active       (bool)
 ├── last_accessed_at (nullable, 检索时更新)
 ├── expires_at      (nullable, TTL)
+├── vector_status   (DIRTY / SYNCED / FAILED)
+├── vector_synced_at
+├── vector_error
+├── vector_model
+├── vector_version
+├── vector_text_hash
 ├── created_at
 └── updated_at
 
@@ -126,46 +133,45 @@ Agent 在对话中判断出现值得记住的信息时，直接调用工具：
   写入后强去重：≥0.9 相似度的冗余副本删除
 ```
 
+### 向量同步
+
+长期记忆先落 PostgreSQL，再标记 `vector_status=DIRTY`。独立 `memory_index_worker` 会定时扫描 `DIRTY / FAILED` 记录：
+
+1. 构造索引文本：`[{memory_type}] {memory_key}: {content}`
+2. 调用 embedding 模型生成向量
+3. `upsert` 到 Milvus collection
+4. 成功后把 PostgreSQL 中对应行标记为 `SYNCED`
+
 ### memory_worker 补扫
 
 独立后台进程，定时扫描 `memory_status` 为 PENDING 或 FAILED 的消息，重新执行提取管道，确保最终一致性。
 
 ---
 
-## 4. 读取：相关性检索
+## 4. 读取：Milvus 召回 + PostgreSQL 回表
 
-每轮对话时，以用户消息为查询词进行记忆检索（`retrieve_relevant_long_term_memories`），再回到 PostgreSQL 取真值内容：
+每轮对话时，系统根据 `LONG_TERM_MEMORY_RETRIEVE_MODE` 决定读取方式：
 
-```
-① DB 取候选池
-   WHERE user_id = ? AND 未过期
-   ORDER BY importance DESC, updated_at DESC
-   LIMIT 80（scan_limit）
+- `full_inject`：直接注入当前用户全部有效长期记忆
+- `dense`：优先调用 `retrieve_relevant_long_term_memories(...)`
 
-② 逐条评分
-   score = token_overlap × 0.7 + importance × 0.2 + recency × 0.1
+当模式为 `dense` 时，读取流程如下：
 
-③ 筛选
-   词汇重叠分 ≥ 0.12 的优先入选
-   不足 top_k 时用剩余高分记忆补齐
-   排除 identity 类记忆
-
-④ 返回 top-20 注入 prompt
-   更新 last_accessed_at
+```text
+① 将 query = 用户当前问题 + 会话摘要
+② 用 embedding 模型生成 query vector
+③ 去 Milvus 搜索 top-N memory_id
+④ 回 PostgreSQL 取这些 memory_id 的真值内容
+⑤ 应用层按 retrieval_score / importance / confidence / recency / exact_key_bonus 重排
+⑥ 返回 top-k 注入 prompt
 ```
 
-### Token 匹配算法
+这意味着：
 
-```
-英文: \w{2,} 词组提取
-中文: 2 字滑动窗口 bigram
+- `PostgreSQL` 决定“这条记忆真实是什么”
+- `Milvus` 决定“当前最该召回哪几条记忆”
 
-"周末想吃火锅" → {"周末", "末想", "想吃", "吃火", "火锅"}
-
-score = max(Jaccard, Containment × 0.92)
-```
-
-无需 embedding API，纯本地计算，支持中英文混合。
+如果向量检索失败，系统会自动回退到词法扫描，不会直接中断主对话链路。
 
 ---
 
@@ -226,6 +232,14 @@ PENDING → PROCESSED  （提取成功）
 | `LONG_TERM_MEMORY_EXTRACT_CONTEXT_MAX_CHARS` | `24000` | 提取上下文窗口 |
 | `LONG_TERM_MEMORY_SCAN_ENABLED` | `true` | memory_worker 开关 |
 | `LONG_TERM_MEMORY_SCAN_INTERVAL_SEC` | `120` | worker 扫描间隔 |
+| `MEMORY_INDEX_WORKER_ENABLED` | `false` | 向量索引同步 worker 开关 |
+| `MEMORY_INDEX_WORKER_INTERVAL_SEC` | `30` | 向量同步轮询间隔 |
+| `MEMORY_INDEX_WORKER_BATCH_SIZE` | `32` | 每轮同步批量大小 |
+| `MEMORY_EMBEDDING_MODEL` | `text-embedding-3-small` | 长期记忆 embedding 模型 |
+| `MEMORY_EMBEDDING_DIM` | `1536` | 向量维度 |
+| `MEMORY_MILVUS_ENABLED` | `false` | 是否启用 Milvus 检索 |
+| `MEMORY_MILVUS_URI` | - | Milvus 连接地址 |
+| `MEMORY_MILVUS_COLLECTION` | `memory_text_v1` | 记忆向量 collection |
 
 ---
 
@@ -235,10 +249,13 @@ PENDING → PROCESSED  （提取成功）
 |------|------|
 | `backend/app/models/memory.py` | 数据模型定义 |
 | `backend/app/services/memory.py` | 核心逻辑：提取、精炼、写入、检索、去重、清洗 |
+| `backend/app/services/memory_embeddings.py` | 记忆 embedding 封装 |
+| `backend/app/services/memory_vector_store.py` | Milvus collection / upsert / search |
 | `backend/app/services/message_handler.py` | 记忆注入 + 异步提取调度 |
 | `backend/app/services/tool_executor.py` | memory_save/append/delete/list 工具实现 |
 | `backend/app/services/toolsets.py` | 节点工具权限注册 |
 | `backend/app/memory_worker.py` | 后台补扫进程 |
+| `backend/app/memory_index_worker.py` | 后台同步向量索引 |
 | `backend/app/core/config.py` | 配置参数 |
 
 ---
@@ -247,5 +264,5 @@ PENDING → PROCESSED  （提取成功）
 
 | 日期 | 变更 |
 |------|------|
-| 2026-03-31 | 文档补充“短期规则不提取为长期记忆”的边界说明 |
+| 2026-03-31 | 接入 PostgreSQL 真值 + Milvus 检索 + memory_index_worker，同步补充“短期规则不提取”为长期记忆的边界说明 |
 | 2026-03-28 | 全量注入改为相关性检索（top-20）；min_confidence 0.75→0.5；TTL 180→730 天；debounce 12s→0；上下文窗口 8000→24000；schedule/ledger 节点新增记忆工具 |

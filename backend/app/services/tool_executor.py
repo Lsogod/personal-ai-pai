@@ -19,8 +19,14 @@ from app.models.schedule import Schedule
 from app.models.user import User
 from app.services.admin_tools import is_tool_enabled
 from app.services.conversations import ensure_active_conversation, list_conversations
-from app.services.memory import find_active_long_term_memory, list_long_term_memories, upsert_long_term_memories
+from app.services.memory import (
+    find_active_long_term_memory,
+    list_long_term_memories,
+    mark_long_term_memory_vector_dirty,
+    upsert_long_term_memories,
+)
 from app.services.mcp_fetch import get_mcp_client_for_tool, get_mcp_fetch_client
+from app.services.memory_vector_store import delete_memory_vectors
 from app.services.runtime_context import get_scheduler, get_session, get_tool_message_id
 from app.services.scheduler_tasks import send_reminder_job
 from app.services.tool_registry import (
@@ -863,6 +869,7 @@ async def execute_capability(
                 target.conversation_id = conversation_id
                 target.source_message_id = _resolve_user_id(params.get("source_message_id") or get_tool_message_id()) or None
                 target.updated_at = datetime.now(ZoneInfo("UTC"))
+                mark_long_term_memory_vector_dirty(target)
                 session.add(target)
                 await session.commit()
                 await session.refresh(target)
@@ -903,8 +910,14 @@ async def execute_capability(
                     return _result(False, error="target memory not found")
                 payload = _long_term_memory_to_payload(target)
                 source_message_id = _resolve_user_id(params.get("source_message_id") or get_tool_message_id()) or None
+                deleted_memory_id = int(target.id or 0) or None
                 await session.delete(target)
                 await session.commit()
+                if deleted_memory_id:
+                    try:
+                        await delete_memory_vectors([deleted_memory_id])
+                    except Exception:
+                        pass
                 await _mark_source_message_memory_processed(
                     session=session,
                     user_id=uid,

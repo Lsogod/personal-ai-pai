@@ -123,8 +123,8 @@ flowchart TB
 - **WebSocket 实时推送** — 跨平台消息同步 & 定时提醒通知
 - **系统级 MCP（Fetch）** — 统一网页抓取工具，可在对话中自然语言触发或命令触发
 - **真流式输出（LangChain `astream`）** — 仅流式推送终态自然语言节点，执行细节写入后端日志
-- **分层记忆系统** — 会话短期上下文 + 用户级长期记忆（按用户消息相关性评分注入 top-k 记忆，排除身份档案项）
-- **长期记忆双通道写入** — Agent 显式工具调用 + 对话后异步抽取 + `memory_worker` 定时补扫未处理消息（消息级状态追踪）
+- **分层记忆系统** — 会话短期上下文 + 用户级长期记忆（PostgreSQL 真值库 + Milvus dense 检索，可按模式切换为全量注入，排除身份档案项）
+- **长期记忆双通道写入** — Agent 显式工具调用 + 对话后异步抽取 + `memory_worker` 定时补扫未处理消息，`memory_index_worker` 异步同步向量索引
 - **长期记忆提取边界** — 只保留稳定偏好、长期事实、长期目标和长期约束；短期提醒、短期预算规则、带明确时间窗的要求不进入长期记忆
 - **管理后台（`/admin`）** — 用户/会话回放/工具开关/长期记忆清洗/首页弹窗配置
 - **Docker Compose 一键部署** — 含 PostgreSQL 15、Redis 7、GeWeChat、NapCat、memory_worker 及前后端
@@ -139,7 +139,9 @@ flowchart TB
 
 ### 🧠 记忆系统
 
-系统为每位用户维护独立的长期记忆，跨会话持久化。当前实现以 `PostgreSQL` 作为长期记忆真值库，支持双通道写入（Agent 显式调用 + 异步提取）、相关性检索注入、语义去重与定期清洗；短期提醒和短期条件规则不会作为长期记忆保留。
+系统为每位用户维护独立的长期记忆，跨会话持久化。当前实现采用 `PostgreSQL` 作为业务真值库，`Milvus` 作为向量检索层；支持双通道写入（Agent 显式调用 + 异步提取）、相关记忆注入、语义去重与定期清洗。
+
+短期提醒、短期预算规则和带明确时间窗的要求不会作为长期记忆保留；向量索引由 `memory_index_worker` 异步同步。
 
 详见 **[docs/memory-system.md](docs/memory-system.md)**。
 
@@ -476,6 +478,14 @@ cp miniapp/config.local.example.js miniapp/config.local.js
 | `LONG_TERM_MEMORY_SCAN_INTERVAL_SEC` | - | `120` | 后台扫描间隔秒数 |
 | `LONG_TERM_MEMORY_SCAN_MAX_CONVERSATIONS` | - | `80` | 每轮扫描最大会话数 |
 | `LONG_TERM_MEMORY_SCAN_MAX_MESSAGES_PER_CONVERSATION` | - | `30` | 每会话每轮扫描最大消息数 |
+| `MEMORY_INDEX_WORKER_ENABLED` | - | `false` | 是否启用向量索引同步 worker |
+| `MEMORY_INDEX_WORKER_INTERVAL_SEC` | - | `30` | 向量索引同步轮询间隔 |
+| `MEMORY_INDEX_WORKER_BATCH_SIZE` | - | `32` | 每轮同步的记忆条数上限 |
+| `MEMORY_EMBEDDING_MODEL` | - | `text-embedding-3-small` | 长期记忆 embedding 模型 |
+| `MEMORY_EMBEDDING_DIM` | - | `1536` | embedding 维度 |
+| `MEMORY_MILVUS_ENABLED` | - | `false` | 是否启用 Milvus 检索 |
+| `MEMORY_MILVUS_URI` | - | - | Milvus 连接地址 |
+| `MEMORY_MILVUS_COLLECTION` | - | `memory_text_v1` | 记忆向量 collection 名称 |
 | `ADMIN_TOKEN` | - | - | 管理 API 令牌 |
 | `REDIS_URL` | - | `redis://redis:6379/0` | Redis 连接 |
 | `TIMEZONE` | - | `Asia/Shanghai` | 时区 |
