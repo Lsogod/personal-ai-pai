@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -87,6 +88,17 @@ function getCodePurpose(mode: AuthMode): "login" | "register" | "reset_password"
 
 export function LoginScreen() {
   const setToken = useAuthStore((state) => state.setToken);
+  const logoScale = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(logoScale, { toValue: 1.06, duration: 1600, useNativeDriver: true }),
+        Animated.timing(logoScale, { toValue: 1, duration: 1600, useNativeDriver: true }),
+      ])
+    ).start();
+  }, [logoScale]);
+
   const [mode, setMode] = useState<AuthMode>("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -209,9 +221,9 @@ export function LoginScreen() {
         >
           <View style={styles.contentWrap}>
             <View style={styles.hero}>
-              <View style={styles.logoBox}>
+              <Animated.View style={[styles.logoBox, { transform: [{ scale: logoScale }] }]}>
                 <Text style={styles.logoEmoji}>✨</Text>
-              </View>
+              </Animated.View>
               <Text style={styles.brand}>PAI</Text>
               <Text style={styles.subtitle}>你的个人 AI 助手</Text>
             </View>

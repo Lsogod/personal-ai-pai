@@ -614,6 +614,8 @@ export function CalendarTab({ bottomInset }: CalendarTabProps) {
     );
   }
 
+  const [fabOpen, setFabOpen] = useState(false);
+
   return (
     <>
       <View style={styles.page}>
@@ -665,6 +667,39 @@ export function CalendarTab({ bottomInset }: CalendarTabProps) {
           <View style={[styles.pagerPage, { width: pageWidth }]}>{renderListPage()}</View>
         </Animated.ScrollView>
       </View>
+
+      {/* FAB with expandable menu */}
+      {fabOpen ? (
+        <Pressable style={styles.fabOverlay} onPress={() => setFabOpen(false)}>
+          <View style={[styles.fabMenu, { bottom: bottomInset + 88 }]}>
+            <Pressable
+              style={styles.fabMenuItem}
+              onPress={() => { setFabOpen(false); setCreateLedgerOpen(true); }}
+            >
+              <View style={[styles.fabMenuIcon, { backgroundColor: colors.accentLight }]}>
+                <Ionicons name="wallet-outline" size={18} color={colors.accent} />
+              </View>
+              <Text style={styles.fabMenuLabel}>记一笔</Text>
+            </Pressable>
+            <Pressable
+              style={styles.fabMenuItem}
+              onPress={() => { setFabOpen(false); setCreateScheduleOpen(true); }}
+            >
+              <View style={[styles.fabMenuIcon, { backgroundColor: colors.primaryLight }]}>
+                <Ionicons name="alarm-outline" size={18} color={colors.primary} />
+              </View>
+              <Text style={styles.fabMenuLabel}>新日程</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      ) : null}
+
+      <Pressable
+        style={[styles.fab, { bottom: bottomInset + 24 }]}
+        onPress={() => setFabOpen((prev) => !prev)}
+      >
+        <Ionicons name={fabOpen ? "close" : "add"} size={24} color="#fff" />
+      </Pressable>
 
       <CreateLedgerModal
         visible={createLedgerOpen}
@@ -1232,5 +1267,53 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "800",
     color: colors.primary,
+  },
+  fab: {
+    position: "absolute",
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadowSm,
+    zIndex: 20,
+  },
+  fabOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 15,
+    backgroundColor: "rgba(0,0,0,0.18)",
+  },
+  fabMenu: {
+    position: "absolute",
+    right: 20,
+    gap: 10,
+    alignItems: "flex-end",
+  },
+  fabMenuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingLeft: 16,
+    paddingRight: 6,
+    paddingVertical: 6,
+    borderRadius: radii.full,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    ...shadowSm,
+  },
+  fabMenuIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fabMenuLabel: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.text,
   },
 });

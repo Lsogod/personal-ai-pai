@@ -33,10 +33,64 @@ IDENTITY_MEMORY_KEYS = {
     "ai_name",
     "ai_emoji",
     "assistant_name",
+    "birthday",
+    "birthdate",
+    "residence_city",
+    "residence-country",
+    "residence_country",
+    "residence-province",
+    "residence_province",
 }
 MEMORY_CONSOLIDATE_SCAN_LIMIT = 160
 SEMANTIC_DUPLICATE_THRESHOLD = 0.82
 SEMANTIC_MERGE_STRICT_THRESHOLD = 0.9
+DISALLOWED_MEMORY_KEY_PREFIXES = (
+    "weather-date_",
+    "tool-",
+    "system-",
+    "reminder-last_",
+    "finance-monthly_",
+    "finance-weekly_",
+    "finance-daily_",
+)
+DISALLOWED_MEMORY_KEY_SUBSTRINGS = (
+    "expense_category_mapping",
+    "time_format",
+    "stream_output",
+    "streaming_output",
+    "available_general",
+    "available_mcp",
+)
+DISALLOWED_MEMORY_CONTENT_MARKERS = (
+    "mcp_list_tools",
+    "mcp_call_tool",
+    "maps_weather",
+    "fetch_url",
+    "fetch,",
+    "ledger_insert",
+    "ledger_update",
+    "ledger_delete",
+    "ledger_list",
+    "ledger_text2sql",
+    "schedule_insert",
+    "schedule_update",
+    "schedule_delete",
+    "schedule_list",
+    "query_user_profile",
+    "update_user_profile",
+    "技术实现限制",
+    "当前可用工具",
+    "默认不启用流式输出",
+)
+WEATHER_SNAPSHOT_MARKERS = ("℃", "最高温", "最低温", "气温", "阵雨", "多云", "转晴", "南风", "北风", "西风", "东风")
+PROFILE_NUMERIC_ONLY_KEYS = (
+    "residence_city",
+    "residence_country",
+    "residence_province",
+    "birthday",
+    "birthdate",
+    "time_format",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -316,6 +370,17 @@ def _normalize_key(value: str) -> str:
     return key[:160]
 
 
+def _normalize_key_for_match(value: str) -> str:
+    key = (value or "").strip().lower()
+    key = re.sub(r"[^a-z0-9_\-\u4e00-\u9fff:]+", "_", key)
+    key = key.replace(".", "_").replace("-", "_").replace(":", "_")
+    key = re.sub(r"_{2,}", "_", key).strip("_")
+    return key[:200]
+
+
+NORMALIZED_IDENTITY_MEMORY_KEYS = {_normalize_key_for_match(item) for item in IDENTITY_MEMORY_KEYS}
+
+
 def _is_identity_memory_candidate(
     *,
     memory_type: str,
@@ -326,7 +391,10 @@ def _is_identity_memory_candidate(
     user_ai_emoji: str = "",
 ) -> bool:
     key_tail = (memory_key.split(":", 1)[-1] if memory_key else "").strip().lower()
+    normalized_key = _normalize_key_for_match(memory_key)
     if key_tail in IDENTITY_MEMORY_KEYS:
+        return True
+    if normalized_key in NORMALIZED_IDENTITY_MEMORY_KEYS:
         return True
     if memory_type == "profile":
         return True
@@ -341,6 +409,57 @@ def _is_identity_memory_candidate(
     if ai_name and ai_name in c:
         return True
     if ai_emoji and ai_emoji in c:
+        return True
+    return False
+
+
+def _is_disallowed_long_term_memory(
+    *,
+    memory_type: str,
+    memory_key: str,
+    content: str,
+) -> bool:
+    normalized_key = _normalize_key_for_match(memory_key)
+    content_text = str(content or "").strip()
+    content_lower = content_text.lower()
+    _ = memory_type  # reserved for future finer-grained rules
+
+    if any(normalized_key.startswith(_normalize_key_for_match(prefix)) for prefix in DISALLOWED_MEMORY_KEY_PREFIXES):
+        return True
+    if any(part in normalized_key for part in (_normalize_key_for_match(item) for item in DISALLOWED_MEMORY_KEY_SUBSTRINGS)):
+        return True
+    if any(marker in content_lower for marker in (item.lower() for item in DISALLOWED_MEMORY_CONTENT_MARKERS)):
+        return True
+    if "weather" in normalized_key and any(marker in content_text for marker in WEATHER_SNAPSHOT_MARKERS):
+        return True
+    if re.fullmatch(r"\d+(?:\.\d+)?", content_text) and any(slot in normalized_key for slot in PROFILE_NUMERIC_ONLY_KEYS):
+        return True
+    return False
+
+
+def _should_exclude_memory_row(
+    *,
+    memory_type: str,
+    memory_key: str,
+    content: str,
+    user_nickname: str = "",
+    user_ai_name: str = "",
+    user_ai_emoji: str = "",
+) -> bool:
+    if _is_identity_memory_candidate(
+        memory_type=memory_type,
+        memory_key=memory_key,
+        content=content,
+        user_nickname=user_nickname,
+        user_ai_name=user_ai_name,
+        user_ai_emoji=user_ai_emoji,
+    ):
+        return True
+    if _is_disallowed_long_term_memory(
+        memory_type=memory_type,
+        memory_key=memory_key,
+        content=content,
+    ):
         return True
     return False
 
@@ -763,6 +882,7 @@ async def upsert_long_term_memories(
     processed = 0
     dropped_empty = 0
     dropped_identity = 0
+    dropped_disallowed = 0
     dropped_low_confidence = 0
     key_cache: dict[tuple[str, str], str] = {}
     deleted_memory_ids: list[int] = []
@@ -808,7 +928,7 @@ async def upsert_long_term_memories(
                 merge_target_id = int(raw.get("merge_target_id"))
         except Exception:
             merge_target_id = None
-        if _is_identity_memory_candidate(
+        if _should_exclude_memory_row(
             memory_type=memory_type,
             memory_key=memory_key,
             content=content,
@@ -816,7 +936,10 @@ async def upsert_long_term_memories(
             user_ai_name=user_ai_name,
             user_ai_emoji=user_ai_emoji,
         ):
-            dropped_identity += 1
+            if _is_disallowed_long_term_memory(memory_type=memory_type, memory_key=memory_key, content=content):
+                dropped_disallowed += 1
+            else:
+                dropped_identity += 1
             continue
 
         if op == "delete":
@@ -926,12 +1049,13 @@ async def upsert_long_term_memories(
         except Exception:
             logger.exception("memory vector delete failed after upsert")
     logger.info(
-        "long-term memory upsert summary: user_id=%s conversation_id=%s input=%s processed=%s dropped_identity=%s dropped_empty=%s dropped_low_confidence=%s",
+        "long-term memory upsert summary: user_id=%s conversation_id=%s input=%s processed=%s dropped_identity=%s dropped_disallowed=%s dropped_empty=%s dropped_low_confidence=%s",
         user_id,
         conversation_id,
         len(vetted),
         processed,
         dropped_identity,
+        dropped_disallowed,
         dropped_empty,
         dropped_low_confidence,
     )
@@ -1150,14 +1274,14 @@ async def list_long_term_memories(
 
     result: list[dict[str, Any]] = []
     for row in rows:
-        if _is_identity_memory_candidate(
+        row.last_accessed_at = now
+        session.add(row)
+        if _should_exclude_memory_row(
             memory_type=str(row.memory_type or ""),
             memory_key=str(row.memory_key or ""),
             content=str(row.content or ""),
         ):
             continue
-        row.last_accessed_at = now
-        session.add(row)
         result.append(
             {
                 "id": row.id,
@@ -1200,7 +1324,7 @@ async def find_active_long_term_memory(
                 row is not None
                 and int(row.user_id or 0) == int(user_id)
                 and (row.expires_at is None or row.expires_at > now)
-                and not _is_identity_memory_candidate(
+                and not _should_exclude_memory_row(
                     memory_type=str(row.memory_type or ""),
                     memory_key=str(row.memory_key or ""),
                     content=str(row.content or ""),
@@ -1216,7 +1340,7 @@ async def find_active_long_term_memory(
             or_(LongTermMemory.expires_at.is_(None), LongTermMemory.expires_at > now),
         )
         row = (await session.execute(stmt)).scalar_one_or_none()
-        if row is not None and not _is_identity_memory_candidate(
+        if row is not None and not _should_exclude_memory_row(
             memory_type=str(row.memory_type or ""),
             memory_key=str(row.memory_key or ""),
             content=str(row.content or ""),
@@ -1240,7 +1364,7 @@ async def find_active_long_term_memory(
     rows = list((await session.execute(stmt)).scalars().all())
     filtered_rows: list[LongTermMemory] = []
     for row in rows:
-        if _is_identity_memory_candidate(
+        if _should_exclude_memory_row(
             memory_type=str(row.memory_type or ""),
             memory_key=str(row.memory_key or ""),
             content=str(row.content or ""),
@@ -1322,7 +1446,7 @@ async def retrieve_relevant_long_term_memories(
                 if ranked:
                     result: list[dict[str, Any]] = []
                     for row, _score in sorted(ranked, key=lambda item: item[1], reverse=True)[:top_k]:
-                        if _is_identity_memory_candidate(
+                        if _should_exclude_memory_row(
                             memory_type=str(row.memory_type or ""),
                             memory_key=str(row.memory_key or ""),
                             content=str(row.content or ""),
@@ -1378,7 +1502,7 @@ async def retrieve_relevant_long_term_memories(
         ranked = [item[0] for item in scored_sorted[:top_k]]
     result: list[dict[str, Any]] = []
     for row in ranked:
-        if _is_identity_memory_candidate(
+        if _should_exclude_memory_row(
             memory_type=str(row.memory_type or ""),
             memory_key=str(row.memory_key or ""),
             content=str(row.content or ""),
@@ -1426,3 +1550,39 @@ async def deactivate_all_identity_memories(session: AsyncSession) -> int:
         except Exception:
             logger.exception("memory vector delete failed during global identity cleanup")
     return changed
+
+
+async def cleanup_disallowed_long_term_memories(
+    session: AsyncSession,
+    *,
+    user_id: int | None = None,
+) -> int:
+    stmt = select(LongTermMemory)
+    if user_id is not None:
+        stmt = stmt.where(LongTermMemory.user_id == int(user_id))
+    rows = list((await session.execute(stmt)).scalars().all())
+    if not rows:
+        return 0
+
+    deleted = 0
+    deleted_memory_ids: list[int] = []
+    for row in rows:
+        if not _is_disallowed_long_term_memory(
+            memory_type=str(row.memory_type or ""),
+            memory_key=str(row.memory_key or ""),
+            content=str(row.content or ""),
+        ):
+            continue
+        if row.id is not None:
+            deleted_memory_ids.append(int(row.id))
+        await session.delete(row)
+        deleted += 1
+
+    if deleted > 0:
+        await session.commit()
+    if deleted_memory_ids:
+        try:
+            await delete_memory_vectors(deleted_memory_ids)
+        except Exception:
+            logger.exception("memory vector delete failed during disallowed cleanup")
+    return deleted
