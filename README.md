@@ -112,8 +112,8 @@ flowchart TB
 - **WebSocket 实时推送** — 跨平台消息同步 & 定时提醒通知
 - **系统级 MCP（Fetch）** — 统一网页抓取工具，可在对话中自然语言触发或命令触发
 - **真流式输出（LangChain `astream_events`）** — Agent 工具调用实时推送工具步骤事件，终态文本流式输出
-- **分层记忆系统** — 会话短期上下文 + 用户级长期记忆（全量注入有效记忆，排除身份档案项）
-- **长期记忆双通道写入** — Agent 显式工具调用 + 对话后异步抽取 + `memory_worker` 定时补扫（消息级状态追踪）
+- **分层记忆系统** — 会话短期上下文 + 用户级长期记忆（PostgreSQL 真值库 + Milvus dense 检索，排除身份档案项）
+- **长期记忆双通道写入** — Agent 显式工具调用 + 对话后异步抽取；`memory_worker` 补扫消息，`memory_index_worker` 异步同步向量索引
 - **管理后台（`/admin`）** — 用户/会话回放/工具开关/长期记忆清洗/首页弹窗配置
 - **Docker Compose 一键部署** — 含 PostgreSQL 15、Redis 7、GeWeChat、NapCat、memory_worker 及前后端
 
@@ -127,7 +127,7 @@ flowchart TB
 
 ### 🧠 记忆系统
 
-系统为每位用户维护独立的长期记忆，跨会话持久化。支持双通道写入（Agent 显式调用 + 异步提取）、全量记忆注入、语义去重与定期清洗。
+系统为每位用户维护独立的长期记忆，跨会话持久化。当前实现采用 `PostgreSQL` 作为业务真值库，`Milvus` 作为向量检索层；支持双通道写入（Agent 显式调用 + 异步提取）、相关记忆注入、语义去重与定期清洗。
 
 详见 **[docs/memory-system.md](docs/memory-system.md)**。
 
@@ -465,7 +465,7 @@ cp miniapp/config.local.example.js miniapp/config.local.js
 | `LONG_TERM_MEMORY_ENABLED` | - | `true` | 是否启用长期记忆 |
 | `LONG_TERM_MEMORY_MIN_CONFIDENCE` | - | `0.75` | 写入长期记忆的最小置信度 |
 | `LONG_TERM_MEMORY_MAX_WRITE_ITEMS` | - | `6` | 单轮最多写入记忆条数 |
-| `LONG_TERM_MEMORY_RETRIEVE_LIMIT` | - | `6` | 记忆检索条数上限（当前主链路全量注入时仅作保留配置） |
+| `LONG_TERM_MEMORY_RETRIEVE_LIMIT` | - | `6` | 相关记忆注入 prompt 的条数上限 |
 | `LONG_TERM_MEMORY_RETRIEVE_SCAN_LIMIT` | - | `80` | 检索候选扫描上限 |
 | `LONG_TERM_MEMORY_DEFAULT_TTL_DAYS` | - | `180` | 默认记忆过期天数 |
 | `LONG_TERM_MEMORY_SCAN_ENABLED` | - | `true` | 是否启用长期记忆后台扫描 |
@@ -473,6 +473,14 @@ cp miniapp/config.local.example.js miniapp/config.local.js
 | `LONG_TERM_MEMORY_SCAN_INTERVAL_SEC` | - | `120` | 后台扫描间隔秒数 |
 | `LONG_TERM_MEMORY_SCAN_MAX_CONVERSATIONS` | - | `80` | 每轮扫描最大会话数 |
 | `LONG_TERM_MEMORY_SCAN_MAX_MESSAGES_PER_CONVERSATION` | - | `30` | 每会话每轮扫描最大消息数 |
+| `MEMORY_INDEX_WORKER_ENABLED` | - | `false` | 是否启用向量索引同步 worker |
+| `MEMORY_INDEX_WORKER_INTERVAL_SEC` | - | `30` | 向量索引同步轮询间隔 |
+| `MEMORY_INDEX_WORKER_BATCH_SIZE` | - | `32` | 每轮同步的记忆条数上限 |
+| `MEMORY_EMBEDDING_MODEL` | - | `text-embedding-3-small` | 长期记忆 embedding 模型 |
+| `MEMORY_EMBEDDING_DIM` | - | `1536` | embedding 维度 |
+| `MEMORY_MILVUS_ENABLED` | - | `false` | 是否启用 Milvus 检索 |
+| `MEMORY_MILVUS_URI` | - | - | Milvus 连接地址 |
+| `MEMORY_MILVUS_COLLECTION` | - | `memory_text_v1` | 记忆向量 collection 名称 |
 | `ADMIN_TOKEN` | - | - | 管理 API 令牌 |
 | `REDIS_URL` | - | `redis://redis:6379/0` | Redis 连接 |
 | `TIMEZONE` | - | `Asia/Shanghai` | 时区 |

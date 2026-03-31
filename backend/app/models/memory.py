@@ -3,8 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, Column, DateTime, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
+
+MEMORY_VECTOR_STATUS_DIRTY = "DIRTY"
+MEMORY_VECTOR_STATUS_SYNCED = "SYNCED"
+MEMORY_VECTOR_STATUS_FAILED = "FAILED"
 
 
 class LongTermMemory(SQLModel, table=True):
@@ -23,6 +27,30 @@ class LongTermMemory(SQLModel, table=True):
     content: str = Field(default="", max_length=1000)
     importance: int = Field(default=3, index=True)
     confidence: float = Field(default=0.8)
+    vector_status: str = Field(
+        default=MEMORY_VECTOR_STATUS_DIRTY,
+        sa_column=Column(String(20), nullable=False, default=MEMORY_VECTOR_STATUS_DIRTY, index=True),
+    )
+    vector_synced_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    vector_error: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String(500), nullable=True),
+    )
+    vector_model: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String(160), nullable=True),
+    )
+    vector_version: int = Field(
+        default=1,
+        sa_column=Column(Integer, nullable=False, default=1),
+    )
+    vector_text_hash: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
 
     is_active: bool = Field(
         default=True,

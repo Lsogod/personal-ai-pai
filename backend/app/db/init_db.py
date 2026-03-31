@@ -60,6 +60,35 @@ async def init_db() -> None:
             await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_messages_memory_status ON messages (memory_status)"))
             await conn.execute(
                 text(
+                    "ALTER TABLE long_term_memories "
+                    "ADD COLUMN IF NOT EXISTS vector_status VARCHAR(20) DEFAULT 'DIRTY'"
+                )
+            )
+            await conn.execute(text("ALTER TABLE long_term_memories ADD COLUMN IF NOT EXISTS vector_synced_at TIMESTAMPTZ"))
+            await conn.execute(text("ALTER TABLE long_term_memories ADD COLUMN IF NOT EXISTS vector_error VARCHAR(500)"))
+            await conn.execute(text("ALTER TABLE long_term_memories ADD COLUMN IF NOT EXISTS vector_model VARCHAR(160)"))
+            await conn.execute(
+                text("ALTER TABLE long_term_memories ADD COLUMN IF NOT EXISTS vector_version INTEGER DEFAULT 1")
+            )
+            await conn.execute(text("ALTER TABLE long_term_memories ADD COLUMN IF NOT EXISTS vector_text_hash VARCHAR(64)"))
+            await conn.execute(
+                text(
+                    "UPDATE long_term_memories "
+                    "SET vector_status = 'DIRTY' "
+                    "WHERE vector_status IS NULL OR TRIM(vector_status) = ''"
+                )
+            )
+            await conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_long_term_memories_vector_status ON long_term_memories (vector_status)")
+            )
+            await conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_long_term_memories_user_vector_status "
+                    "ON long_term_memories (user_id, vector_status)"
+                )
+            )
+            await conn.execute(
+                text(
                     "CREATE INDEX IF NOT EXISTS ix_messages_memory_pending_scan "
                     "ON messages (conversation_id, id) "
                     "WHERE role = 'user' AND (memory_status IS NULL OR memory_status IN ('PENDING', 'FAILED'))"

@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -72,6 +73,7 @@ class Settings(BaseSettings):
     preload_graph_on_startup: bool = False
 
     long_term_memory_enabled: bool = True
+    long_term_memory_retrieve_mode: str = "full_inject"
     long_term_memory_min_confidence: float = 0.75
     long_term_memory_max_write_items: int = 6
     long_term_memory_retrieve_limit: int = 6
@@ -87,6 +89,17 @@ class Settings(BaseSettings):
     long_term_memory_scan_interval_sec: int = 120
     long_term_memory_scan_max_conversations: int = 80
     long_term_memory_scan_max_messages_per_conversation: int = 30
+    memory_index_worker_enabled: bool = False
+    memory_index_worker_interval_sec: int = 30
+    memory_index_worker_batch_size: int = 32
+    memory_embedding_model: str = "text-embedding-3-small"
+    memory_embedding_dim: int = 1536
+    memory_vector_version: int = 1
+    milvus_enabled: bool = Field(default=False, validation_alias="MEMORY_MILVUS_ENABLED")
+    milvus_uri: str = Field(default="", validation_alias="MEMORY_MILVUS_URI")
+    milvus_token: str = Field(default="", validation_alias="MEMORY_MILVUS_TOKEN")
+    milvus_collection: str = Field(default="memory_text_v1", validation_alias="MEMORY_MILVUS_COLLECTION")
+    milvus_search_limit: int = 24
     startup_preload_timeout_sec: int = 8
 
     admin_token: str = ""

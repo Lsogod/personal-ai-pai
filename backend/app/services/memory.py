@@ -14,7 +14,14 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.models.memory import LongTermMemory
+from app.models.memory import (
+    MEMORY_VECTOR_STATUS_DIRTY,
+    MEMORY_VECTOR_STATUS_FAILED,
+    MEMORY_VECTOR_STATUS_SYNCED,
+    LongTermMemory,
+)
+from app.services.memory_embeddings import embed_memory_query, embed_memory_texts
+from app.services.memory_vector_store import delete_memory_vectors, milvus_enabled, search_memory_vectors, upsert_memory_vectors
 from app.services.llm import get_llm
 
 VALID_MEMORY_TYPES = {"profile", "preference", "fact", "goal", "project", "constraint"}
@@ -32,6 +39,48 @@ SEMANTIC_DUPLICATE_THRESHOLD = 0.82
 SEMANTIC_MERGE_STRICT_THRESHOLD = 0.9
 
 logger = logging.getLogger(__name__)
+
+
+def build_memory_index_text(memory_type: str, memory_key: str, content: str) -> str:
+    return f"[{(memory_type or 'fact').strip() or 'fact'}] {(memory_key or '').strip()}: {(content or '').strip()}".strip()
+
+
+def _memory_vector_text_hash(text: str) -> str:
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
+def _mark_memory_vector_dirty(row: LongTermMemory) -> None:
+    text = build_memory_index_text(str(row.memory_type or "fact"), str(row.memory_key or ""), str(row.content or ""))
+    row.vector_status = MEMORY_VECTOR_STATUS_DIRTY
+    row.vector_synced_at = None
+    row.vector_error = None
+    row.vector_model = str(get_settings().memory_embedding_model or "")
+    row.vector_version = max(1, int(get_settings().memory_vector_version or 1))
+    row.vector_text_hash = _memory_vector_text_hash(text)
+
+
+def mark_long_term_memory_vector_dirty(row: LongTermMemory) -> None:
+    _mark_memory_vector_dirty(row)
+
+
+def _memory_recency_score(row: LongTermMemory, now: datetime) -> float:
+    updated_at = getattr(row, "updated_at", None)
+    if updated_at is None:
+        return 0.0
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    age_hours = max(0.0, (now - updated_at).total_seconds() / 3600.0)
+    return max(0.0, 1.0 - min(age_hours / (24.0 * 30.0), 1.0))
+
+
+def _memory_exact_key_bonus(query: str, row: LongTermMemory) -> float:
+    key = str(getattr(row, "memory_key", "") or "").strip().lower()
+    if not key:
+        return 0.0
+    query_l = (query or "").strip().lower()
+    if not query_l:
+        return 0.0
+    return 1.0 if key in query_l else 0.0
 
 
 def _to_client_tz_iso(value: datetime | None) -> str:
@@ -188,6 +237,64 @@ async def _infer_memory_key_via_llm(
         return _normalize_key(str(getattr(parsed, "key", "") or ""))
     except Exception:
         return ""
+
+
+async def list_pending_memory_vector_rows(
+    session: AsyncSession,
+    *,
+    batch_size: int,
+) -> list[LongTermMemory]:
+    stmt = (
+        select(LongTermMemory)
+        .where(LongTermMemory.vector_status.in_([MEMORY_VECTOR_STATUS_DIRTY, MEMORY_VECTOR_STATUS_FAILED]))
+        .order_by(LongTermMemory.updated_at.asc(), LongTermMemory.id.asc())
+        .limit(max(1, batch_size))
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def sync_long_term_memory_vectors(
+    session: AsyncSession,
+    *,
+    batch_size: int,
+) -> dict[str, int]:
+    if not milvus_enabled():
+        return {"scanned": 0, "synced": 0, "failed": 0}
+
+    rows = await list_pending_memory_vector_rows(session, batch_size=batch_size)
+    if not rows:
+        return {"scanned": 0, "synced": 0, "failed": 0}
+
+    texts = [
+        build_memory_index_text(str(row.memory_type or "fact"), str(row.memory_key or ""), str(row.content or ""))
+        for row in rows
+    ]
+    try:
+        vectors = await embed_memory_texts(texts)
+        await upsert_memory_vectors(rows, vectors)
+    except Exception as exc:
+        logger.exception("memory vector sync batch failed")
+        error_text = str(exc)[:500]
+        for row in rows:
+            row.vector_status = MEMORY_VECTOR_STATUS_FAILED
+            row.vector_error = error_text
+            session.add(row)
+        await session.commit()
+        return {"scanned": len(rows), "synced": 0, "failed": len(rows)}
+
+    now = datetime.now(timezone.utc)
+    model_name = str(get_settings().memory_embedding_model or "")
+    version = max(1, int(get_settings().memory_vector_version or 1))
+    for row, text in zip(rows, texts, strict=False):
+        row.vector_status = MEMORY_VECTOR_STATUS_SYNCED
+        row.vector_synced_at = now
+        row.vector_error = None
+        row.vector_model = model_name
+        row.vector_version = version
+        row.vector_text_hash = _memory_vector_text_hash(text)
+        session.add(row)
+    await session.commit()
+    return {"scanned": len(rows), "synced": len(rows), "failed": 0}
 
 
 def _is_reserved_identity_memory_type(memory_type: str) -> bool:
@@ -484,8 +591,16 @@ async def extract_memory_candidates(
             "从用户输入 + 完整会话上下文综合提取候选记忆，不要只看当前单句。"
             "助手回复仅作上下文，不是事实来源。"
             "仅保留在 30 天后仍可能有价值的候选。"
+            "只有稳定偏好、长期事实、长期目标、长期项目、长期约束才允许进入长期记忆。"
             "尽量保持用户原始措辞与语言，不要随意翻译记忆内容。"
             "不要保存短期状态、一次性任务进度、天气快照、日/周汇总、运维/系统/工具内部信息。"
+            "不要把提醒、待办、计划执行步骤、某天/某周/某月临时要求提取成长期记忆。"
+            "带有明确短期时间窗的内容，例如“今天/明天/后天/这周/本周/这个月/月底前/临时/这次”，默认不提取。"
+            "带有条件触发且仅针对短期窗口的规则，例如“如果今天花费超过100，明天提醒少花”，默认不提取。"
+            "天气类信息只有在表达长期偏好时才提取，例如“下雨时提醒我带伞”可以；"
+            "“明后天有雨时提醒我带伞”属于短期提醒，不要提取为长期记忆。"
+            "预算类信息只有在表达长期消费规则时才提取，例如“以后单日消费超过100要提醒我克制”可以；"
+            "“如果今天已经花了100，明天提醒只能花50”属于短期约束，不要提取为长期记忆。"
             "不要保存原始数据库日志；应抽象为可复用的用户语义信息。"
             "不要输出身份档案记忆（昵称/姓名/助手名/emoji）。"
             "若用户明确表达“希望你记住/以后按此执行”，应优先提取对应长期规则或偏好，"
@@ -650,6 +765,7 @@ async def upsert_long_term_memories(
     dropped_identity = 0
     dropped_low_confidence = 0
     key_cache: dict[tuple[str, str], str] = {}
+    deleted_memory_ids: list[int] = []
     for raw in vetted[: max(1, settings.long_term_memory_max_write_items)]:
         op = str(raw.get("op") or "save").strip().lower()
         memory_type = _normalize_memory_type(str(raw.get("memory_type") or "fact"))
@@ -714,6 +830,8 @@ async def upsert_long_term_memories(
                 )
                 existing = (await session.execute(stmt)).scalar_one_or_none()
             if existing:
+                if existing.id is not None:
+                    deleted_memory_ids.append(int(existing.id))
                 await session.delete(existing)
                 if existing in working_rows:
                     working_rows.remove(existing)
@@ -754,6 +872,7 @@ async def upsert_long_term_memories(
             existing.conversation_id = conversation_id
             existing.source_message_id = source_message_id
             existing.updated_at = now
+            _mark_memory_vector_dirty(existing)
             session.add(existing)
             if existing.id is not None:
                 existing_by_id[int(existing.id)] = existing
@@ -771,6 +890,7 @@ async def upsert_long_term_memories(
                 if dup in working_rows:
                     working_rows.remove(dup)
                 if dup.id is not None:
+                    deleted_memory_ids.append(int(dup.id))
                     existing_by_id.pop(int(dup.id), None)
                     await session.delete(dup)
                 else:
@@ -793,12 +913,18 @@ async def upsert_long_term_memories(
             confidence=confidence,
             expires_at=expires_at,
         )
+        _mark_memory_vector_dirty(new_row)
         session.add(new_row)
         working_rows.append(new_row)
         processed += 1
 
     if processed > 0:
         await session.commit()
+    if deleted_memory_ids:
+        try:
+            await delete_memory_vectors(deleted_memory_ids)
+        except Exception:
+            logger.exception("memory vector delete failed after upsert")
     logger.info(
         "long-term memory upsert summary: user_id=%s conversation_id=%s input=%s processed=%s dropped_identity=%s dropped_empty=%s dropped_low_confidence=%s",
         user_id,
@@ -867,6 +993,7 @@ async def consolidate_user_long_term_memories(
     by_id = {int(row.id): row for row in rows if row.id is not None}
     updated = 0
     merged = 0
+    deleted_memory_ids: list[int] = []
 
     # First pass: explicit deletions
     parsed: list[dict[str, Any]] = []
@@ -882,6 +1009,8 @@ async def consolidate_user_long_term_memories(
         keep = bool(raw_dict.get("keep") is True)
         if not keep:
             row = by_id[rid]
+            if row.id is not None:
+                deleted_memory_ids.append(int(row.id))
             await session.delete(row)
             deleted += 1
 
@@ -924,8 +1053,11 @@ async def consolidate_user_long_term_memories(
             target.confidence = confidence
             target.expires_at = expires_at
             target.updated_at = now
+            _mark_memory_vector_dirty(target)
             session.add(target)
             updated += 1
+            if source.id is not None:
+                deleted_memory_ids.append(int(source.id))
             await session.delete(source)
             deleted += 1
             merged += 1
@@ -937,11 +1069,17 @@ async def consolidate_user_long_term_memories(
         source.confidence = confidence
         source.expires_at = expires_at
         source.updated_at = now
+        _mark_memory_vector_dirty(source)
         session.add(source)
         updated += 1
 
     if updated > 0 or deleted > 0:
         await session.commit()
+    if deleted_memory_ids:
+        try:
+            await delete_memory_vectors(deleted_memory_ids)
+        except Exception:
+            logger.exception("memory vector delete failed after consolidation")
     return {
         "reviewed": len(rows),
         "updated": updated,
@@ -963,6 +1101,7 @@ async def deactivate_identity_memories_for_user(
         return 0
 
     changed = 0
+    deleted_memory_ids: list[int] = []
     now = datetime.now(timezone.utc)
     for row in rows:
         if _is_identity_memory_candidate(
@@ -970,8 +1109,17 @@ async def deactivate_identity_memories_for_user(
             memory_key=str(row.memory_key or ""),
             content=str(row.content or ""),
         ):
+            if row.id is not None:
+                deleted_memory_ids.append(int(row.id))
             await session.delete(row)
             changed += 1
+    if changed > 0:
+        await session.commit()
+    if deleted_memory_ids:
+        try:
+            await delete_memory_vectors(deleted_memory_ids)
+        except Exception:
+            logger.exception("memory vector delete failed during identity cleanup")
     return changed
 
 
@@ -1136,6 +1284,67 @@ async def retrieve_relevant_long_term_memories(
         return []
 
     top_k = limit or settings.long_term_memory_retrieve_limit
+    retrieve_mode = str(settings.long_term_memory_retrieve_mode or "full_inject").strip().lower()
+    if retrieve_mode == "dense" and milvus_enabled():
+        try:
+            query_vector = await embed_memory_query(query)
+            raw_hits = await search_memory_vectors(
+                user_id=user_id,
+                query_vector=query_vector,
+                limit=max(top_k, int(settings.milvus_search_limit or 24)),
+            )
+            memory_ids = [
+                int(item.get("memory_id") or item.get("id") or 0)
+                for item in raw_hits
+                if int(item.get("memory_id") or item.get("id") or 0) > 0
+            ]
+            if memory_ids:
+                stmt = select(LongTermMemory).where(LongTermMemory.id.in_(memory_ids))
+                rows = list((await session.execute(stmt)).scalars().all())
+                rows_by_id = {int(row.id): row for row in rows if row.id is not None}
+                now = datetime.now(timezone.utc)
+                ranked: list[tuple[LongTermMemory, float]] = []
+                for index, item in enumerate(raw_hits):
+                    memory_id = int(item.get("memory_id") or item.get("id") or 0)
+                    row = rows_by_id.get(memory_id)
+                    if row is None:
+                        continue
+                    retrieval_score = max(0.0, 1.0 - min(float(item.get("score") or 0.0), 2.0) / 2.0)
+                    final_score = (
+                        0.60 * retrieval_score
+                        + 0.15 * (max(1, min(5, int(row.importance or 3))) / 5.0)
+                        + 0.10 * max(0.0, min(1.0, float(row.confidence or 0.0)))
+                        + 0.10 * _memory_recency_score(row, now)
+                        + 0.05 * _memory_exact_key_bonus(query, row)
+                        - (index * 0.0001)
+                    )
+                    ranked.append((row, final_score))
+                if ranked:
+                    result: list[dict[str, Any]] = []
+                    for row, _score in sorted(ranked, key=lambda item: item[1], reverse=True)[:top_k]:
+                        if _is_identity_memory_candidate(
+                            memory_type=str(row.memory_type or ""),
+                            memory_key=str(row.memory_key or ""),
+                            content=str(row.content or ""),
+                        ):
+                            continue
+                        row.last_accessed_at = now
+                        session.add(row)
+                        result.append(
+                            {
+                                "id": row.id,
+                                "memory_key": str(row.memory_key or ""),
+                                "memory_type": row.memory_type,
+                                "content": row.content,
+                                "importance": row.importance,
+                                "confidence": round(float(row.confidence), 3),
+                            }
+                        )
+                    await session.commit()
+                    return result
+        except Exception:
+            logger.exception("dense memory retrieval failed; falling back to lexical scan")
+
     scan_limit = max(top_k, settings.long_term_memory_retrieve_scan_limit)
     now = datetime.now(timezone.utc)
     stmt = (
@@ -1198,14 +1407,22 @@ async def deactivate_all_identity_memories(session: AsyncSession) -> int:
         return 0
 
     changed = 0
+    deleted_memory_ids: list[int] = []
     for row in rows:
         if _is_identity_memory_candidate(
             memory_type=str(row.memory_type or ""),
             memory_key=str(row.memory_key or ""),
             content=str(row.content or ""),
         ):
+            if row.id is not None:
+                deleted_memory_ids.append(int(row.id))
             await session.delete(row)
             changed += 1
     if changed > 0:
         await session.commit()
+    if deleted_memory_ids:
+        try:
+            await delete_memory_vectors(deleted_memory_ids)
+        except Exception:
+            logger.exception("memory vector delete failed during global identity cleanup")
     return changed
