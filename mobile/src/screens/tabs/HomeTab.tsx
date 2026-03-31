@@ -13,20 +13,23 @@ type HomeTabProps = {
   onNavigate: (tab: TabKey) => void;
 };
 
-const QUICK_ENTRIES = [
-  { key: "ledger", label: "记一笔", desc: "跳到账单概览", icon: "receipt-outline", bg: colors.iconBgGreen },
-  { key: "calendar", label: "新增日程", desc: "查看本月安排", icon: "calendar-outline", bg: colors.iconBgPrimary },
-  { key: "me", label: "我的", desc: "账号与设置", icon: "person-outline", bg: colors.iconBgPurple },
+function getGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 6) return "夜深了";
+  if (h < 11) return "早上好";
+  if (h < 14) return "中午好";
+  if (h < 18) return "下午好";
+  return "晚上好";
+}
+
+const QUICK_ACTIONS = [
+  { key: "ledger", icon: "wallet-outline" as const, label: "账单", desc: "收支和明细", bg: colors.accentLight, color: colors.accent },
+  { key: "calendar", icon: "calendar-outline" as const, label: "日程", desc: "提醒和安排", bg: colors.warningLight, color: colors.warning },
+  { key: "chat", icon: "sparkles-outline" as const, label: "助手", desc: "记账提醒都能说", bg: colors.primaryLight, color: colors.primary },
+  { key: "me", icon: "person-outline" as const, label: "我的", desc: "账号设置", bg: colors.iconBgPurple, color: "#9333ea" },
 ] as const;
 
-const CAPABILITIES = [
-  { title: "账单管理", desc: "支持分类、明细、月度概览和最近记录查看。", icon: "wallet-outline", bg: colors.iconBgPrimary },
-  { title: "日程提醒", desc: "月视图查看提醒状态，按天聚合账单与日程。", icon: "time-outline", bg: colors.iconBgPink },
-  { title: "多端同步", desc: "保留统一后端，移动端与 Web/小程序共用同一份数据。", icon: "sync-outline", bg: colors.iconBgGreen },
-  { title: "个人中心", desc: "账户信息、绑定入口和后续原生推送设置统一收口。", icon: "construct-outline", bg: colors.iconBgOrange },
-] as const;
-
-export function HomeTab({ bottomInset, onNavigate }: HomeTabProps) {
+export function StatsTab({ bottomInset, onNavigate }: HomeTabProps) {
   const token = useAuthStore((state) => state.token);
   const insets = useSafeAreaInsets();
 
@@ -43,6 +46,7 @@ export function HomeTab({ bottomInset, onNavigate }: HomeTabProps) {
   });
 
   const nickname = profileQuery.data?.nickname || "你";
+  const aiEmoji = profileQuery.data?.ai_emoji || "✨";
   const total = Number(statsQuery.data?.total || 0).toFixed(0);
   const count = Number(statsQuery.data?.count || 0);
 
@@ -51,78 +55,94 @@ export function HomeTab({ bottomInset, onNavigate }: HomeTabProps) {
       style={styles.page}
       contentContainerStyle={[
         styles.content,
-        { paddingTop: insets.top + 6, paddingBottom: bottomInset + 24 },
+        { paddingTop: insets.top + 12, paddingBottom: bottomInset + 20 },
       ]}
       showsVerticalScrollIndicator={false}
     >
-      <View style={styles.hero}>
-        <View style={styles.heroGlow} />
-        <View style={styles.heroBadge}>
-          <View style={styles.heroBadgeDot} />
-          <Text style={styles.heroBadgeText}>PAI</Text>
-        </View>
-        <Text style={styles.heroTitle}>你的个人效率工具</Text>
-        <Text style={styles.heroDesc}>
-          {nickname}，现在这版移动端按小程序的信息结构重做，登录仍然沿用邮箱体系，账单与日程继续走统一后端。
-        </Text>
-        <View style={styles.heroMetaRow}>
-          <View style={styles.heroMetaPill}>
-            <Text style={styles.heroMetaLabel}>本月支出</Text>
-            <Text style={styles.heroMetaValue}>¥{total}</Text>
+      <View style={styles.heroCard}>
+        <View style={styles.heroTop}>
+          <View>
+            <Text style={styles.heroEyebrow}>{getGreeting()} · {nickname}</Text>
+            <Text style={styles.heroTitle}>统计总览</Text>
           </View>
-          <View style={styles.heroMetaPill}>
-            <Text style={styles.heroMetaLabel}>记录数</Text>
-            <Text style={styles.heroMetaValue}>{count} 笔</Text>
-          </View>
+          <Pressable style={styles.heroAvatarBtn} onPress={() => onNavigate("me")}>
+            <Text style={styles.heroAvatarEmoji}>{aiEmoji}</Text>
+          </Pressable>
         </View>
-        <View style={styles.heroActions}>
-          <Pressable style={styles.heroPrimaryBtn} onPress={() => onNavigate("command")}>
-            <Text style={styles.heroPrimaryText}>打开指令面板</Text>
-          </Pressable>
-          <Pressable style={styles.heroSecondaryBtn} onPress={() => onNavigate("me")}>
-            <Text style={styles.heroSecondaryText}>个人中心</Text>
-          </Pressable>
+        <Text style={styles.heroDesc}>这里不再放首页，直接把月度统计、快捷入口和助手工作台合到一个统计页。</Text>
+        <View style={styles.heroMetrics}>
+          <View style={styles.heroMetric}>
+            <Text style={styles.heroMetricValue}>¥{total}</Text>
+            <Text style={styles.heroMetricLabel}>本月支出</Text>
+          </View>
+          <View style={styles.heroMetric}>
+            <Text style={styles.heroMetricValue}>{count}</Text>
+            <Text style={styles.heroMetricLabel}>记录笔数</Text>
+          </View>
+          <View style={styles.heroMetric}>
+            <Text style={styles.heroMetricValue}>
+              {count > 0 ? `¥${(Number(total) / new Date().getDate()).toFixed(0)}` : "—"}
+            </Text>
+            <Text style={styles.heroMetricLabel}>日均</Text>
+          </View>
         </View>
       </View>
 
       <View style={styles.section}>
-        <View style={styles.sectionHead}>
-          <Text style={styles.sectionTitle}>常用入口</Text>
-        </View>
-        <View style={styles.entryGrid}>
-          {QUICK_ENTRIES.map((item) => (
-            <Pressable key={item.label} style={styles.entryCard} onPress={() => onNavigate(item.key as TabKey)}>
-              <View style={[styles.entryIconWrap, { backgroundColor: item.bg }]}>
-                <Ionicons name={item.icon} size={22} color={colors.text} />
+        <Text style={styles.sectionTitle}>工作台</Text>
+        <View style={styles.actionGrid}>
+          {QUICK_ACTIONS.map((item) => (
+            <Pressable key={item.key} style={styles.actionCard} onPress={() => onNavigate(item.key as TabKey)}>
+              <View style={[styles.actionIcon, { backgroundColor: item.bg }]}>
+                <Ionicons name={item.icon} size={22} color={item.color} />
               </View>
-              <Text style={styles.entryName}>{item.label}</Text>
-              <Text style={styles.entryDesc}>{item.desc}</Text>
+              <Text style={styles.actionLabel}>{item.label}</Text>
+              <Text style={styles.actionDesc}>{item.desc}</Text>
             </Pressable>
           ))}
         </View>
       </View>
 
       <View style={styles.section}>
-        <View style={styles.sectionHead}>
-          <Text style={styles.sectionTitle}>核心能力</Text>
-          <Pressable onPress={() => onNavigate("command")}>
-            <Text style={styles.sectionMore}>查看指令</Text>
-          </Pressable>
-        </View>
-        <View style={styles.capGrid}>
-          {CAPABILITIES.map((item) => (
-            <View key={item.title} style={styles.capCard}>
-              <View style={[styles.capIcon, { backgroundColor: item.bg }]}>
-                <Ionicons name={item.icon} size={22} color={colors.text} />
-              </View>
-              <Text style={styles.capName}>{item.title}</Text>
-              <Text style={styles.capDesc}>{item.desc}</Text>
+        <Text style={styles.sectionTitle}>助手入口</Text>
+        <Pressable style={styles.aiCard} onPress={() => onNavigate("chat")}>
+          <View style={styles.aiCardInner}>
+            <View style={styles.aiAvatarLarge}>
+              <Text style={{ fontSize: 28 }}>{aiEmoji}</Text>
             </View>
-          ))}
-        </View>
+            <View style={styles.aiCardContent}>
+              <Text style={styles.aiCardTitle}>打开 PAI 助手</Text>
+              <Text style={styles.aiCardDesc}>直接说自然语言，记账、提醒、查询和创作都在这里完成。</Text>
+            </View>
+            <View style={styles.aiCardArrow}>
+              <Ionicons name="arrow-forward" size={18} color="rgba(255,255,255,0.8)" />
+            </View>
+          </View>
+        </Pressable>
       </View>
 
-      <Text style={styles.footer}>PAI · React Native 原生版（小程序 UI/UX 对齐中）</Text>
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>核心指标</Text>
+        <View style={styles.statsRow}>
+          <Pressable style={styles.statCard} onPress={() => onNavigate("ledger")}>
+            <Ionicons name="trending-up" size={20} color={colors.accent} />
+            <Text style={styles.statValue}>¥{total}</Text>
+            <Text style={styles.statLabel}>总支出</Text>
+          </Pressable>
+          <Pressable style={styles.statCard} onPress={() => onNavigate("ledger")}>
+            <Ionicons name="receipt-outline" size={20} color={colors.primary} />
+            <Text style={styles.statValue}>{count}</Text>
+            <Text style={styles.statLabel}>记录数</Text>
+          </Pressable>
+          <Pressable style={styles.statCard} onPress={() => onNavigate("calendar")}>
+            <Ionicons name="checkmark-circle-outline" size={20} color={colors.warning} />
+            <Text style={styles.statValue}>
+              {count > 0 ? `¥${(Number(total) / new Date().getDate()).toFixed(0)}` : "—"}
+            </Text>
+            <Text style={styles.statLabel}>日均</Text>
+          </Pressable>
+        </View>
+      </View>
     </ScrollView>
   );
 }
@@ -134,201 +154,172 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: spacing.pageX,
-    gap: 20,
+    gap: 22,
   },
-  hero: {
-    padding: 24,
-    backgroundColor: colors.primary,
+  heroCard: {
+    gap: 14,
+    padding: 22,
     borderRadius: radii.xl,
-    overflow: "hidden",
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    ...shadowSm,
   },
-  heroGlow: {
-    position: "absolute",
-    right: -36,
-    top: -28,
-    width: 170,
-    height: 170,
-    borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.1)",
-  },
-  heroBadge: {
-    alignSelf: "flex-start",
+  heroTop: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: radii.full,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    marginBottom: 14,
+    justifyContent: "space-between",
   },
-  heroBadgeDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 999,
-    backgroundColor: "#6ee7b7",
-  },
-  heroBadgeText: {
-    fontSize: 12,
+  heroEyebrow: {
+    fontSize: 13,
     fontWeight: "700",
-    letterSpacing: 1.2,
-    color: "#ffffff",
+    color: colors.text3,
   },
   heroTitle: {
+    marginTop: 4,
     fontSize: 28,
     fontWeight: "800",
-    color: "#ffffff",
-    marginBottom: 8,
+    color: colors.text,
+  },
+  heroAvatarBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.primaryLight,
+  },
+  heroAvatarEmoji: {
+    fontSize: 24,
   },
   heroDesc: {
     fontSize: 14,
     lineHeight: 21,
-    color: "rgba(255,255,255,0.92)",
-    marginBottom: 18,
+    color: colors.text3,
   },
-  heroMetaRow: {
+  heroMetrics: {
     flexDirection: "row",
     gap: 10,
-    marginBottom: 18,
   },
-  heroMetaPill: {
+  heroMetric: {
     flex: 1,
-    padding: 12,
-    borderRadius: radii.lg,
-    backgroundColor: "rgba(255,255,255,0.12)",
+    gap: 4,
+    padding: 14,
+    borderRadius: radii.md,
+    backgroundColor: colors.bg,
   },
-  heroMetaLabel: {
-    fontSize: 12,
-    color: "rgba(255,255,255,0.75)",
-    marginBottom: 4,
-  },
-  heroMetaValue: {
-    fontSize: 19,
+  heroMetricValue: {
+    fontSize: 18,
     fontWeight: "800",
-    color: "#ffffff",
+    color: colors.text,
   },
-  heroActions: {
+  heroMetricLabel: {
+    fontSize: 12,
+    color: colors.text3,
+  },
+  aiCard: {
+    borderRadius: radii.xl,
+    backgroundColor: colors.primary,
+    overflow: "hidden",
+  },
+  aiCardInner: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
+    alignItems: "center",
+    padding: 20,
+    gap: 14,
   },
-  heroPrimaryBtn: {
-    flex: 1,
-    minWidth: 140,
+  aiAvatarLarge: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "rgba(255,255,255,0.2)",
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: radii.md,
-    backgroundColor: "#ffffff",
-    paddingVertical: 14,
-    ...shadowSm,
   },
-  heroPrimaryText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: colors.primary,
-  },
-  heroSecondaryBtn: {
+  aiCardContent: {
     flex: 1,
-    minWidth: 140,
+  },
+  aiCardTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#fff",
+  },
+  aiCardDesc: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.8)",
+    marginTop: 4,
+  },
+  aiCardArrow: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.15)",
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: radii.md,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.24)",
-    paddingVertical: 14,
   },
-  heroSecondaryText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#ffffff",
-  },
+
+  /* Section */
   section: {
     gap: 12,
   },
-  sectionHead: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: colors.text,
     paddingHorizontal: 2,
   },
-  sectionTitle: {
-    fontSize: 20,
+
+  /* Quick actions */
+  actionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  actionCard: {
+    width: "48%",
+    flexGrow: 1,
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 20,
+    paddingHorizontal: 10,
+    ...surfaceCard,
+  },
+  actionIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  actionLabel: {
+    fontSize: 15,
     fontWeight: "700",
     color: colors.text,
   },
-  sectionMore: {
+  actionDesc: {
     fontSize: 12,
-    fontWeight: "700",
-    color: colors.primary,
-    backgroundColor: colors.primaryLight,
-    borderRadius: radii.full,
-    overflow: "hidden",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    color: colors.text3,
   },
-  entryGrid: {
+
+  /* Stats */
+  statsRow: {
     flexDirection: "row",
     gap: 10,
   },
-  entryCard: {
+  statCard: {
     flex: 1,
     alignItems: "center",
-    gap: 7,
-    paddingHorizontal: 10,
+    gap: 8,
     paddingVertical: 18,
     ...surfaceCard,
   },
-  entryIconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: radii.md,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  entryName: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: colors.text2,
-  },
-  entryDesc: {
-    fontSize: 11,
-    lineHeight: 16,
-    textAlign: "center",
-    color: colors.text4,
-  },
-  capGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-  },
-  capCard: {
-    width: "48%",
-    padding: 18,
-    gap: 10,
-    ...surfaceCard,
-  },
-  capIcon: {
-    width: 46,
-    height: 46,
-    borderRadius: radii.md,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  capName: {
-    fontSize: 16,
-    fontWeight: "700",
+  statValue: {
+    fontSize: 20,
+    fontWeight: "800",
     color: colors.text,
   },
-  capDesc: {
+  statLabel: {
     fontSize: 12,
-    lineHeight: 18,
     color: colors.text3,
-  },
-  footer: {
-    textAlign: "center",
-    color: colors.text4,
-    fontSize: 12,
-    paddingTop: 4,
   },
 });

@@ -51,8 +51,8 @@ export function FeedbackPanel({ visible, token, onClose }: FeedbackPanelProps) {
   return (
     <PanelModal visible={visible} title="问题反馈" onClose={onClose}>
       <View style={styles.hero}>
-        <Text style={styles.heroTitle}>把原生端问题直接提上来</Text>
-        <Text style={styles.heroDesc}>这里沿用小程序同一条反馈接口，便于统一收集 UI、交互和功能问题。</Text>
+        <Text style={styles.heroTitle}>问题反馈</Text>
+        <Text style={styles.heroDesc}>遇到 bug 或有改进建议？在这里提交，我们会尽快处理。</Text>
       </View>
 
       {profileQuery.isLoading ? (

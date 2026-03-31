@@ -33,7 +33,7 @@ export function SkillsPanel({ visible, token, onClose }: SkillsPanelProps) {
     <PanelModal visible={visible} title="技能管理" onClose={onClose}>
       <View style={styles.hero}>
         <Text style={styles.heroTitle}>当前账号技能清单</Text>
-        <Text style={styles.heroDesc}>先把小程序里已有的技能列表接到原生端，后续再补编辑和发布动作。</Text>
+        <Text style={styles.heroDesc}>查看和管理你的 AI 技能列表。</Text>
       </View>
 
       <Pressable style={styles.refreshBtn} onPress={() => void skillsQuery.refetch()}>

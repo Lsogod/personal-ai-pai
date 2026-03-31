@@ -19,9 +19,9 @@ import { useAuthStore } from "../store/auth";
 
 function validate(email: string, password: string) {
   const trimmedEmail = email.trim();
-  if (!trimmedEmail) return "请输入邮箱地址。";
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) return "请输入有效的邮箱地址。";
-  if (!password.trim()) return "请输入密码。";
+  if (!trimmedEmail) return "请输入邮箱地址";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) return "请输入有效的邮箱地址";
+  if (!password.trim()) return "请输入密码";
   return null;
 }
 
@@ -32,27 +32,21 @@ export function LoginScreen() {
   const [localError, setLocalError] = useState<string | null>(null);
 
   const configHint = useMemo(() => {
-    if (API_BASE) {
-      return `当前后端：${API_BASE}`;
-    }
+    if (API_BASE) return API_BASE;
     return API_BASE_HELP;
   }, []);
 
   const loginMutation = useMutation({
     mutationFn: async () => {
       const error = validate(email, password);
-      if (error) {
-        throw new Error(error);
-      }
+      if (error) throw new Error(error);
       return loginWithPassword(email, password);
     },
     onSuccess: async (data) => {
       setLocalError(null);
       await setToken(data.access_token);
     },
-    onError: (error: Error) => {
-      setLocalError(error.message);
-    },
+    onError: (error: Error) => setLocalError(error.message),
   });
 
   return (
@@ -67,31 +61,27 @@ export function LoginScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.contentWrap}>
+            {/* Logo & brand */}
             <View style={styles.hero}>
               <View style={styles.logoBox}>
-                <Text style={styles.logoText}>PAI</Text>
+                <Text style={styles.logoEmoji}>✨</Text>
               </View>
-              <Text style={styles.brand}>原生移动客户端</Text>
-              <Text style={styles.subtitle}>登录后可多端同步数据，界面结构按现有小程序重做。</Text>
+              <Text style={styles.brand}>PAI</Text>
+              <Text style={styles.subtitle}>你的个人 AI 助手</Text>
             </View>
 
+            {/* Login card */}
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>邮箱登录</Text>
-              <Text style={styles.cardHint}>登录方式沿用 Web 端邮箱体系，但界面和导航按小程序风格组织。</Text>
-
               <View style={styles.field}>
                 <Text style={styles.label}>邮箱</Text>
                 <TextInput
                   value={email}
-                  onChangeText={(value) => {
-                    setEmail(value);
-                    setLocalError(null);
-                  }}
+                  onChangeText={(v) => { setEmail(v); setLocalError(null); }}
                   autoCapitalize="none"
                   autoCorrect={false}
                   keyboardType="email-address"
                   placeholder="you@example.com"
-                  placeholderTextColor="#94a3b8"
+                  placeholderTextColor={colors.text4}
                   style={styles.input}
                 />
               </View>
@@ -100,36 +90,31 @@ export function LoginScreen() {
                 <Text style={styles.label}>密码</Text>
                 <TextInput
                   value={password}
-                  onChangeText={(value) => {
-                    setPassword(value);
-                    setLocalError(null);
-                  }}
+                  onChangeText={(v) => { setPassword(v); setLocalError(null); }}
                   secureTextEntry
-                  placeholder="请输入密码"
-                  placeholderTextColor="#94a3b8"
+                  placeholder="输入密码"
+                  placeholderTextColor={colors.text4}
                   style={styles.input}
                 />
               </View>
 
-              {!!localError && <Text style={styles.errorText}>{localError}</Text>}
+              {localError ? <Text style={styles.errorText}>{localError}</Text> : null}
 
               <Pressable
-                style={[styles.primaryButton, loginMutation.isPending && styles.primaryButtonDisabled]}
+                style={[styles.loginBtn, loginMutation.isPending && styles.loginBtnDisabled]}
                 disabled={loginMutation.isPending}
                 onPress={() => void loginMutation.mutateAsync()}
               >
                 {loginMutation.isPending ? (
-                  <ActivityIndicator color="#ffffff" />
+                  <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={styles.primaryButtonText}>登录</Text>
+                  <Text style={styles.loginBtnText}>登录</Text>
                 )}
               </Pressable>
-
-              <View style={styles.configBox}>
-                <Text style={styles.configLabel}>接口配置</Text>
-                <Text style={styles.configText}>{configHint}</Text>
-              </View>
             </View>
+
+            {/* Server info */}
+            <Text style={styles.serverHint}>{configHint}</Text>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -148,63 +133,49 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     justifyContent: "center",
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
     paddingVertical: 28,
   },
   contentWrap: {
     width: "100%",
-    maxWidth: 520,
+    maxWidth: 400,
     alignSelf: "center",
-    gap: 24,
+    gap: 28,
   },
   hero: {
     alignItems: "center",
-    gap: 8,
+    gap: 6,
   },
   logoBox: {
-    width: 88,
-    height: 88,
-    borderRadius: radii.xl,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.primary,
-    marginBottom: 10,
+    marginBottom: 8,
     ...shadowMd,
   },
-  logoText: {
-    fontSize: 30,
-    fontWeight: "800",
-    letterSpacing: 1,
-    color: "#ffffff",
+  logoEmoji: {
+    fontSize: 36,
   },
   brand: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: "800",
     color: colors.text,
+    letterSpacing: 2,
   },
   subtitle: {
-    fontSize: 14,
-    lineHeight: 20,
-    textAlign: "center",
+    fontSize: 15,
     color: colors.text3,
+    marginTop: 2,
   },
   card: {
     borderRadius: radii.lg,
     backgroundColor: colors.surface,
-    padding: 20,
-    gap: 16,
-    width: "100%",
+    padding: 22,
+    gap: 18,
     ...shadowMd,
-  },
-  cardTitle: {
-    fontSize: 22,
-    fontWeight: "700",
-    color: colors.text,
-  },
-  cardHint: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: colors.text3,
   },
   field: {
     gap: 8,
@@ -217,7 +188,7 @@ const styles = StyleSheet.create({
   input: {
     borderWidth: 1,
     borderColor: colors.borderLight,
-    borderRadius: radii.lg,
+    borderRadius: radii.md,
     backgroundColor: colors.bg,
     paddingHorizontal: 14,
     paddingVertical: 14,
@@ -226,39 +197,27 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 14,
-    lineHeight: 20,
     color: colors.danger,
   },
-  primaryButton: {
+  loginBtn: {
     alignItems: "center",
     justifyContent: "center",
     borderRadius: radii.md,
-    paddingVertical: 15,
+    paddingVertical: 16,
     backgroundColor: colors.primary,
+    marginTop: 4,
   },
-  primaryButtonDisabled: {
-    opacity: 0.65,
+  loginBtnDisabled: {
+    opacity: 0.6,
   },
-  primaryButtonText: {
+  loginBtnText: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#ffffff",
+    color: "#fff",
   },
-  configBox: {
-    borderRadius: radii.md,
-    backgroundColor: colors.primaryLight,
-    padding: 14,
-    gap: 6,
-  },
-  configLabel: {
+  serverHint: {
+    textAlign: "center",
     fontSize: 12,
-    fontWeight: "700",
-    color: colors.primaryDark,
-    textTransform: "uppercase",
-  },
-  configText: {
-    fontSize: 13,
-    lineHeight: 18,
-    color: colors.primaryDark,
+    color: colors.text4,
   },
 });

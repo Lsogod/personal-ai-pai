@@ -84,7 +84,7 @@ export function BindingPanel({ visible, token, onClose }: BindingPanelProps) {
     <PanelModal visible={visible} title="账号绑定" onClose={onClose}>
       <View style={styles.hero}>
         <Text style={styles.heroTitle}>跨端合并账号</Text>
-        <Text style={styles.heroDesc}>和小程序一样，先生成 6 位绑定码，再在另一端输入它，把数据并到同一账号。</Text>
+        <Text style={styles.heroDesc}>生成 6 位绑定码，在其他平台输入即可将数据合并到同一账号。</Text>
       </View>
 
       {notice ? <Text style={styles.notice}>{notice}</Text> : null}
@@ -102,7 +102,7 @@ export function BindingPanel({ visible, token, onClose }: BindingPanelProps) {
             <Text style={styles.cardTitle}>当前账号</Text>
             <Text style={styles.cardMeta}>{profileQuery.data?.nickname || "用户"}</Text>
             {profileQuery.data?.email ? <Text style={styles.cardSub}>{profileQuery.data.email}</Text> : null}
-            <Text style={styles.cardSub}>绑定阶段：{profileQuery.data?.binding_stage ?? 0}</Text>
+            {/* binding_stage hidden from app UI */}
           </View>
 
           <View style={styles.card}>

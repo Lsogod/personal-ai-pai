@@ -89,6 +89,24 @@ export interface LedgerItem {
   created_at: string;
 }
 
+export interface LedgerCreatePayload {
+  amount: number;
+  category?: string;
+  item?: string;
+  transaction_date?: string | null;
+}
+
+export interface LedgerUpdatePayload {
+  amount?: number;
+  category?: string | null;
+  item?: string | null;
+}
+
+export interface ResourceDeleteResponse {
+  ok: boolean;
+  id: number;
+}
+
 export interface CalendarLedgerItem {
   id: number;
   amount: number;
@@ -128,6 +146,17 @@ export interface ScheduleItem {
   created_at: string;
 }
 
+export interface ScheduleCreatePayload {
+  content: string;
+  trigger_time: string;
+}
+
+export interface ScheduleUpdatePayload {
+  content?: string | null;
+  trigger_time?: string | null;
+  status?: string | null;
+}
+
 const RAW_API_BASE = String(process.env.EXPO_PUBLIC_API_BASE_URL || "").trim();
 export const API_BASE = RAW_API_BASE.replace(/\/+$/, "");
 export const API_BASE_HELP =
@@ -150,6 +179,7 @@ function translateDetail(detail: string) {
   if (text.includes("email already exists")) return "该邮箱已注册，请直接登录。";
   if (text.includes("invalid bind code format")) return "请输入 6 位数字绑定码。";
   if (text.includes("feedback content too short")) return "反馈内容至少 4 个字。";
+  if (text.includes("invalid trigger_time format")) return "提醒时间格式不正确。";
   return detail || "请求失败。";
 }
 
@@ -348,6 +378,38 @@ export function fetchLedgers(token: string, limit = 30, beforeId?: number) {
   return apiRequest<LedgerItem[]>(path, {}, token);
 }
 
+export function createLedger(payload: LedgerCreatePayload, token: string) {
+  return apiRequest<LedgerItem>(
+    "/api/ledgers",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export function updateLedger(ledgerId: number, payload: LedgerUpdatePayload, token: string) {
+  return apiRequest<LedgerItem>(
+    `/api/ledgers/${ledgerId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export function deleteLedger(ledgerId: number, token: string) {
+  return apiRequest<ResourceDeleteResponse>(
+    `/api/ledgers/${ledgerId}`,
+    {
+      method: "DELETE",
+    },
+    token
+  );
+}
+
 export function fetchCalendar(token: string, startDate: string, endDate: string) {
   return apiRequest<CalendarResponse>(
     `/api/calendar?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`,
@@ -358,6 +420,38 @@ export function fetchCalendar(token: string, startDate: string, endDate: string)
 
 export function fetchSchedules(token: string, limit = 50) {
   return apiRequest<ScheduleItem[]>(`/api/schedules?limit=${limit}`, {}, token);
+}
+
+export function createSchedule(payload: ScheduleCreatePayload, token: string) {
+  return apiRequest<ScheduleItem>(
+    "/api/schedules",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export function updateSchedule(scheduleId: number, payload: ScheduleUpdatePayload, token: string) {
+  return apiRequest<ScheduleItem>(
+    `/api/schedules/${scheduleId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+    token
+  );
+}
+
+export function deleteSchedule(scheduleId: number, token: string) {
+  return apiRequest<ResourceDeleteResponse>(
+    `/api/schedules/${scheduleId}`,
+    {
+      method: "DELETE",
+    },
+    token
+  );
 }
 
 export function fetchSkills(token: string) {

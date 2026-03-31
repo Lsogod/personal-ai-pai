@@ -15,6 +15,8 @@ import { fetchLedgers, fetchLedgerStats, LedgerItem } from "../../lib/api";
 import { formatDateLabel, formatHmLocal, parseServerDate } from "../../lib/date";
 import { useAuthStore } from "../../store/auth";
 import { colors, radii, shadowSm, spacing, surfaceCard } from "../../design/tokens";
+import { CreateLedgerModal } from "./CreateLedgerModal";
+import { EditLedgerModal } from "./EditLedgerModal";
 
 type LedgerTabProps = {
   bottomInset: number;
@@ -41,6 +43,8 @@ export function LedgerTab({ bottomInset }: LedgerTabProps) {
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<"overview" | "list">("overview");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editingLedger, setEditingLedger] = useState<LedgerItem | null>(null);
 
   const statsQuery = useQuery({
     queryKey: ["stats", "month"],
@@ -86,13 +90,19 @@ export function LedgerTab({ bottomInset }: LedgerTabProps) {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["stats", "month"] }),
       queryClient.invalidateQueries({ queryKey: ["ledgers"] }),
+      queryClient.invalidateQueries({ queryKey: ["calendar"] }),
     ]);
   }
 
+  async function handleCreated() {
+    await refreshAll();
+  }
+
   return (
+  <>
     <ScrollView
       style={styles.page}
-      contentContainerStyle={{ paddingBottom: bottomInset + 18 }}
+      contentContainerStyle={{ paddingBottom: bottomInset + 126 }}
       refreshControl={<RefreshControl refreshing={ledgersQuery.isRefetching} onRefresh={() => void refreshAll()} />}
       showsVerticalScrollIndicator={false}
     >
@@ -153,15 +163,16 @@ export function LedgerTab({ bottomInset }: LedgerTabProps) {
             <View style={styles.card}>
               <Text style={styles.cardTitle}>最近记录</Text>
               {monthRows.slice(0, 6).map((item) => (
-                <View key={item.id} style={styles.ledgerRow}>
+                <Pressable key={item.id} style={styles.ledgerRow} onPress={() => setEditingLedger(item)}>
                   <View style={styles.ledgerMain}>
                     <Text style={styles.ledgerName}>{item.item || "未命名账单"}</Text>
                     <Text style={styles.ledgerMeta}>
                       {item.category || "未分类"} · {formatHmLocal(item.transaction_date)}
                     </Text>
                   </View>
+                  <Ionicons name="create-outline" size={16} color={colors.text4} />
                   <Text style={styles.ledgerAmount}>¥{Number(item.amount || 0).toFixed(0)}</Text>
-                </View>
+                </Pressable>
               ))}
             </View>
           </>
@@ -178,7 +189,7 @@ export function LedgerTab({ bottomInset }: LedgerTabProps) {
                   <Text style={styles.groupMeta}>¥{group.total.toFixed(0)}</Text>
                 </View>
                 {group.rows.map((row) => (
-                  <View key={row.id} style={styles.billItem}>
+                  <Pressable key={row.id} style={styles.billItem} onPress={() => setEditingLedger(row)}>
                     <View style={styles.billTop}>
                       <Text style={styles.billName}>{row.item || "未命名"}</Text>
                       <Text style={styles.billAmount}>¥{Number(row.amount || 0).toFixed(0)}</Text>
@@ -189,7 +200,7 @@ export function LedgerTab({ bottomInset }: LedgerTabProps) {
                       </Text>
                       <Ionicons name="ellipsis-horizontal" size={16} color={colors.text4} />
                     </View>
-                  </View>
+                  </Pressable>
                 ))}
               </View>
             ))}
@@ -197,6 +208,29 @@ export function LedgerTab({ bottomInset }: LedgerTabProps) {
         )}
       </View>
     </ScrollView>
+
+    <Pressable
+      style={[styles.fab, { bottom: bottomInset + 24 }]}
+      onPress={() => setCreateOpen(true)}
+    >
+      <Ionicons name="add" size={24} color="#fff" />
+    </Pressable>
+
+    <CreateLedgerModal
+      visible={createOpen}
+      token={token}
+      onClose={() => setCreateOpen(false)}
+      onCreated={handleCreated}
+    />
+
+    <EditLedgerModal
+      visible={!!editingLedger}
+      token={token}
+      ledger={editingLedger}
+      onClose={() => setEditingLedger(null)}
+      onChanged={handleCreated}
+    />
+  </>
   );
 }
 
@@ -399,5 +433,16 @@ const styles = StyleSheet.create({
   billMeta: {
     fontSize: 12,
     color: colors.text3,
+  },
+  fab: {
+    position: "absolute",
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadowSm,
   },
 });
