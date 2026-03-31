@@ -1,231 +1,243 @@
 ---
 title: "记忆系统"
-description: "PAI 长期记忆系统：跨会话持久化用户信息，支持双通道写入与全量注入"
+description: "PAI 长期记忆系统：PostgreSQL 真值库、Milvus 检索层、双通道写入与异步索引同步"
 ---
 
 ## 概述
 
-PAI 的记忆系统为每位用户维护独立的长期记忆库，实现跨会话的信息持久化。无论用户在哪个平台、哪次对话中提及的偏好、事实或目标，都会被自动提取并存储，在后续对话中按相关性注入上下文。
+PAI 为每位用户维护独立的长期记忆库，实现跨会话持久化。当前实现采用 `PostgreSQL` 保存业务真值，`Milvus` 保存向量索引；写入时先落真值，再由独立 `memory_index_worker` 异步同步索引，读取时优先做相关记忆召回，再回 PostgreSQL 取真值内容。
 
 <CardGroup cols={2}>
-  <Card title="跨会话持久化" icon="database">
-    记忆存储在数据库中，不随会话结束而丢失
+  <Card title="真值与索引解耦" icon="database">
+    PostgreSQL 保存正式记忆，Milvus 只负责召回，不承担业务真值职责。
   </Card>
   <Card title="双通道写入" icon="code-branch">
-    Agent 显式工具调用 + 异步后台提取，双管齐下
+    Agent 显式工具调用 + 对话后异步提取，最终统一写入长期记忆表。
   </Card>
-  <Card title="全量注入" icon="magnifying-glass">
-    所有活跃记忆通过 list_long_term_memories 全量注入上下文
+  <Card title="异步索引同步" icon="arrows-rotate">
+    记忆写入后先标记为 DIRTY，再由 `memory_index_worker` 批量生成 embedding 并写入 Milvus。
   </Card>
-  <Card title="语义去重" icon="clone">
-    自动识别并合并语义相似的记忆条目
+  <Card title="检索模式可切换" icon="magnifying-glass">
+    支持 `full_inject` 和 `dense` 两种模式，可按环境配置切换。
   </Card>
 </CardGroup>
 
 ## 记忆类型
 
-系统支持以下 5 种记忆类型（`profile` 类型保留给用户档案，不进入长期记忆）：
+系统支持以下 5 种长期记忆类型：
 
 | 类型 | 说明 | 示例 |
 |------|------|------|
-| `preference` | 用户偏好与习惯 | 喜欢川菜、偏好简洁回复风格 |
-| `fact` | 客观事实信息 | 生日 1999-02-07、住在武汉 |
-| `goal` | 用户的目标与计划 | 年底前考过 N1 |
-| `project` | 项目相关信息 | 正在开发 PAI 项目 |
-| `constraint` | 约束规则 | 回复不超过 200 字 |
+| `preference` | 稳定偏好与习惯 | 喜欢川菜、偏好简洁回复风格 |
+| `fact` | 持久事实信息 | 常住武汉、喜欢乌龙茶 |
+| `goal` | 长期目标与计划 | 年底前考过 N1 |
+| `project` | 长期项目上下文 | 正在开发 PAI 项目 |
+| `constraint` | 长期规则约束 | 回复尽量中文、输出不超过 200 字 |
+
+<Note>
+  `profile` 类型用于用户档案字段，不进入长期记忆表，避免昵称、AI 名称、emoji 等身份信息与记忆系统混用。
+</Note>
 
 ## 数据模型
 
-记忆存储在 `long_term_memories` 表中：
+长期记忆保存在 `long_term_memories` 表：
 
 ```sql
 CREATE TABLE long_term_memories (
-    id              SERIAL PRIMARY KEY,
-    user_id         INTEGER NOT NULL REFERENCES users(id),
-    conversation_id INTEGER REFERENCES conversations(id),
+    id                SERIAL PRIMARY KEY,
+    user_id           INTEGER NOT NULL REFERENCES users(id),
+    conversation_id   INTEGER REFERENCES conversations(id),
     source_message_id INTEGER REFERENCES messages(id),
 
-    memory_key      VARCHAR(160) NOT NULL,   -- 稳定槽位键，如 profile.birthday
-    memory_type     VARCHAR(40) DEFAULT 'fact',
-    content         VARCHAR(1000),           -- 记忆值
-    importance      INTEGER DEFAULT 3,       -- 1-5 重要度
-    confidence      FLOAT DEFAULT 0.8,       -- 0-1 置信度
+    memory_key        VARCHAR(160) NOT NULL,
+    memory_type       VARCHAR(40) DEFAULT 'fact',
+    content           VARCHAR(1000),
+    importance        INTEGER DEFAULT 3,
+    confidence        FLOAT DEFAULT 0.8,
 
-    is_active       BOOLEAN DEFAULT TRUE,
-    last_accessed_at TIMESTAMPTZ,
-    expires_at      TIMESTAMPTZ,             -- TTL 过期时间
-    created_at      TIMESTAMPTZ NOT NULL,
-    updated_at      TIMESTAMPTZ NOT NULL,
+    is_active         BOOLEAN DEFAULT TRUE,
+    last_accessed_at  TIMESTAMPTZ,
+    expires_at        TIMESTAMPTZ,
+
+    vector_status     VARCHAR(20) DEFAULT 'DIRTY',
+    vector_synced_at  TIMESTAMPTZ,
+    vector_error      TEXT,
+    vector_model      VARCHAR(120),
+    vector_version    INTEGER,
+    vector_text_hash  VARCHAR(64),
+
+    created_at        TIMESTAMPTZ NOT NULL,
+    updated_at        TIMESTAMPTZ NOT NULL,
 
     UNIQUE(user_id, memory_key)
 );
 ```
 
-<Note>
-  `memory_key` 采用点分路径或下划线命名，如 `profile.birthday`、`preference.sport`，保证同一语义槽位的记忆可被覆盖更新而非重复创建。
-</Note>
+消息表同时追踪每条用户消息的记忆处理状态：
+
+```text
+PENDING -> PROCESSED
+        -> FAILED
+        -> SKIPPED
+```
 
 ## 双通道写入
 
-记忆通过两个独立通道写入系统：
-
 ### 通道一：Agent 显式工具
 
-Agent 在对话过程中可通过以下工具直接操作记忆：
+Agent 在对话过程中可直接调用以下工具：
 
 | 工具 | 功能 |
 |------|------|
 | `memory_save` | 创建或覆盖一条记忆 |
 | `memory_append` | 追加内容到已有记忆 |
 | `memory_delete` | 删除指定记忆 |
-| `memory_list` | 查询用户记忆列表 |
+| `memory_list` | 查询用户当前记忆 |
 
-在 `feat/single-agent` 分支中，记忆工具由单一 Agent 统一使用，无节点作用域限制。
+这条路径直接写 PostgreSQL 真值，并同步标记向量状态。
 
 ### 通道二：异步提取管道
 
-后台 `memory_worker` 进程定期扫描未处理的用户消息，自动从对话中提取记忆候选。
+每轮对话结束后，系统会调度长期记忆提取管道；独立 `memory_worker` 也会补扫 `PENDING / FAILED` 的用户消息，确保最终一致性。
 
 ## 三阶段提取流程
 
-异步提取管道分为三个阶段：
-
 <Steps>
   <Step title="候选提取 (extract_memory_candidates)">
-    LLM 分析用户输入与完整会话上下文，输出结构化候选记忆数组。每条候选包含：
-    - `op`：操作类型（save / delete）
-    - `memory_type`：记忆类型
-    - `key`：稳定槽位键
-    - `content`：记忆值
-    - `importance`：重要度 1-5
-    - `confidence`：置信度 0-1
-    - `ttl_days`：可选过期天数
+    LLM 基于用户输入、助手回复、会话摘要和上下文提取结构化候选记忆。候选包含 `op`、`memory_type`、`key`、`content`、`importance`、`confidence`、`ttl_days` 等字段。
   </Step>
   <Step title="精炼去重 (_llm_refine_memory_candidates)">
-    第二轮 LLM 调用，结合用户已有记忆做最终裁决：
-    - 判断每条候选是否保留（`keep`）
-    - 语义等价的候选与已有记忆合并（`merge_target_id`）
-    - 归并表述不同但语义相同的候选为规范形式
-    - 复用已有 `memory_key` 避免重复创建
+    第二轮 LLM 调用结合用户已有记忆，对候选逐条裁决：保留、合并到已有记忆、复用既有 key，或直接丢弃。
   </Step>
-  <Step title="写入持久化 (upsert_long_term_memories)">
-    - 新记忆：插入数据库，自动设置 TTL
-    - 合并记忆：更新已有记录的 `content`、`importance`、`confidence`
-    - 删除记忆：标记 `is_active = false`
-    - 每次写入后清理语义重复项（阈值 0.9）
+  <Step title="持久化写入 (upsert_long_term_memories)">
+    最终将候选写入 `long_term_memories`，并根据 key 匹配或语义重复阈值执行覆盖、合并、删除和去重。
   </Step>
 </Steps>
 
-### 提取规则
+### 提取边界
 
-**会被提取的内容：**
-- 用户明确表达的偏好和习惯
+**会被保留为长期记忆的内容：**
+
+- 稳定偏好和习惯
 - 30 天后仍有价值的事实信息
-- 用户说"请记住"或"以后按此执行"的规则
-- 用户的长期目标和计划
+- 长期目标、长期项目、长期约束
+- 用户明确要求“以后都按这个来”的长期规则
 
-**会被过滤的内容：**
-- 短期状态和一次性任务进度
-- 天气快照、日/周汇总
-- 运维/系统/工具内部信息
-- 身份档案信息（昵称、姓名、助手名、emoji）
-- 原始数据库日志
+**不会进入长期记忆的内容：**
 
-## 全量注入
-
-`feat/single-agent` 分支采用 `list_long_term_memories` 函数，在每次对话开始时将用户所有活跃记忆全量注入上下文。
-
-### 注入流程
-
-1. 查询用户所有未过期且 `is_active = true` 的记忆
-2. 按 importance 和 updated_at 降序排列
-3. 返回上限 `retrieve_limit`（默认 6）条记忆
-4. 全部注入对话上下文，不做相关性打分
-
-### 与相关性检索的区别
-
-| 特性 | 全量注入（feat/single-agent） | 相关性检索（main） |
-|------|------|------|
-| 函数 | `list_long_term_memories` | `retrieve_relevant_long_term_memories` |
-| 策略 | 按重要度和更新时间排序，取 top-K | 基于 token 重叠 + 重要度 + 时效性综合打分 |
-| 默认条数 | 6 条 | 20 条 |
-| 上下文窗口 | 8000 字符 | 24000 字符 |
-| 优势 | 简单可靠，避免相关性误判 | 大量记忆场景下更精准 |
+- 短期提醒、待办和执行步骤
+- 今晚、明天、这周、本月这类明确时间窗要求
+- 仅在短期窗口内成立的条件规则
+- 天气快照、日/周汇总、系统日志
+- 昵称、AI 名称、emoji 等身份档案字段
 
 <Note>
-  相关性检索功能已在代码中实现但未在 `feat/single-agent` 分支启用。`main` 分支已切换为相关性检索模式，配合更大的上下文窗口和检索条数。
+  例如“下雨时提醒我带伞”可视为长期约束；“明后天有雨时提醒我带伞”属于短期规则，不会写入长期记忆。
 </Note>
+
+## 向量同步
+
+长期记忆写入 PostgreSQL 后，会统一标记为 `vector_status = DIRTY`。独立 `memory_index_worker` 定时扫描 `DIRTY / FAILED` 记录并执行：
+
+1. 构造索引文本：`[{memory_type}] {memory_key}: {content}`
+2. 调用 embedding 模型生成向量
+3. `upsert` 到 Milvus collection
+4. 成功后将对应行更新为 `SYNCED`
+
+删除或失效记忆时，也会同步删除或刷新 Milvus 中的索引项。
+
+## 检索流程
+
+系统支持两种读取模式，由 `LONG_TERM_MEMORY_RETRIEVE_MODE` 控制：
+
+| 模式 | 行为 |
+|------|------|
+| `full_inject` | 直接注入当前用户全部有效长期记忆 |
+| `dense` | 先向量召回，再回 PostgreSQL 取真值并重排 |
+
+### `dense` 模式流程
+
+```text
+1. 将 query = 用户当前问题 + 会话摘要
+2. 调用 embedding 模型生成 query vector
+3. 去 Milvus 搜索 top-N memory_id
+4. 回 PostgreSQL 取这些 memory_id 的真值内容
+5. 应用层按 retrieval_score / importance / confidence / recency / exact_key_bonus 重排
+6. 返回 top-k 注入 prompt
+```
+
+这意味着：
+
+- `PostgreSQL` 决定“这条记忆真实是什么”
+- `Milvus` 决定“当前最该召回哪几条记忆”
+
+如果向量检索不可用，系统会自动回退到词法扫描，不会中断主对话链路。
 
 ## 生命周期管理
 
 ### TTL 过期
 
-- 默认 TTL：**180 天**（约 6 个月）
-- 可通过 `ttl_days` 字段自定义每条记忆的过期时间
-- 检索时自动过滤 `expires_at` 已过期的记忆
+- 默认 TTL：`730` 天
+- 支持按条目设置 `ttl_days`
+- 检索时自动过滤已过期记忆
 
 ### 语义去重
 
-两个阈值控制去重行为：
-
-| 阈值 | 值 | 用途 |
-|------|----|------|
-| `SEMANTIC_DUPLICATE_THRESHOLD` | 0.82 | 查找语义重复项时的匹配阈值 |
-| `SEMANTIC_MERGE_STRICT_THRESHOLD` | 0.9 | 写入后清理严格重复项的阈值 |
-
-### 合并 API
-
-系统提供 `consolidate` API，可批量扫描用户记忆（上限 160 条），通过 LLM 判断是否合并、保留或删除。
-
-## 消息级追踪
-
-每条用户消息在 `messages` 表中包含记忆处理状态字段：
-
-| 字段 | 说明 |
+| 阈值 | 用途 |
 |------|------|
-| `memory_status` | 处理状态 |
-| `memory_processed_at` | 处理完成时间 |
+| `0.82` | 判定为语义重复，优先复用已有记忆 |
+| `0.90` | 写入后强制合并高相似度冗余副本 |
 
-状态流转：
+### 后台清洗
 
-```
-NULL / PENDING → PROCESSED  （成功提取）
-NULL / PENDING → FAILED     （提取失败）
-NULL / PENDING → SKIPPED    （无需提取）
-```
+系统提供 consolidate 能力，可按用户批量审查长期记忆，执行保留、删除、合并和规范化更新。
 
-## memory_worker 后台进程
+## 后台进程
 
-`memory_worker` 是独立运行的后台进程，负责定期扫描未处理消息并执行记忆提取：
+### `memory_worker`
 
-```python
-# 运行循环
-while True:
-    if long_term_memory_enabled and long_term_memory_scan_enabled:
-        await scan_unprocessed_memory_messages(
-            max_conversations=80,
-            max_messages_per_conversation=30,
-        )
-    await asyncio.sleep(interval_sec)  # 默认 120 秒
-```
+扫描 `PENDING / FAILED` 消息并重新执行提取管道，保证消息侧最终一致性。
+
+### `memory_index_worker`
+
+扫描 `DIRTY / FAILED` 记忆并同步 Milvus，保证向量索引最终一致性。
 
 ## 配置参数
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `long_term_memory_enabled` | `true` | 总开关 |
-| `long_term_memory_min_confidence` | `0.75` | 最低置信度阈值 |
-| `long_term_memory_max_write_items` | `6` | 单次最大写入条数 |
-| `long_term_memory_retrieve_limit` | `6` | 检索返回上限（top-K） |
-| `long_term_memory_retrieve_scan_limit` | `80` | 检索扫描上限 |
-| `long_term_memory_default_ttl_days` | `180` | 默认过期天数 |
-| `long_term_memory_debounce_sec` | `12` | 写入防抖间隔 |
-| `long_term_memory_extract_timeout_sec` | `90` | 提取超时 |
-| `long_term_memory_upsert_timeout_sec` | `90` | 写入超时 |
-| `long_term_memory_extract_context_max_chars` | `8000` | 提取上下文最大字符数 |
-| `long_term_memory_extract_message_max_chars` | `200` | 单条消息最大字符数 |
-| `long_term_memory_scan_enabled` | `true` | 后台扫描开关 |
-| `long_term_memory_scan_run_in_api` | `false` | 是否在 API 进程内运行扫描 |
-| `long_term_memory_scan_interval_sec` | `120` | 扫描间隔（秒） |
-| `long_term_memory_scan_max_conversations` | `80` | 每轮最大扫描会话数 |
-| `long_term_memory_scan_max_messages_per_conversation` | `30` | 每会话最大扫描消息数 |
+| `LONG_TERM_MEMORY_ENABLED` | `true` | 总开关 |
+| `LONG_TERM_MEMORY_RETRIEVE_MODE` | `full_inject` | 记忆读取模式，支持 `full_inject` / `dense` |
+| `LONG_TERM_MEMORY_MIN_CONFIDENCE` | `0.5` | 写入最低置信度 |
+| `LONG_TERM_MEMORY_MAX_WRITE_ITEMS` | `6` | 单轮最多写入条数 |
+| `LONG_TERM_MEMORY_RETRIEVE_LIMIT` | `20` | 注入 prompt 的记忆条数上限 |
+| `LONG_TERM_MEMORY_RETRIEVE_SCAN_LIMIT` | `80` | 检索候选扫描上限 |
+| `LONG_TERM_MEMORY_DEFAULT_TTL_DAYS` | `730` | 默认过期天数 |
+| `LONG_TERM_MEMORY_DEBOUNCE_SEC` | `0` | 异步提取延迟 |
+| `LONG_TERM_MEMORY_EXTRACT_TIMEOUT_SEC` | `90` | 提取超时 |
+| `LONG_TERM_MEMORY_UPSERT_TIMEOUT_SEC` | `90` | 写入超时 |
+| `LONG_TERM_MEMORY_EXTRACT_CONTEXT_MAX_CHARS` | `24000` | 提取上下文窗口 |
+| `LONG_TERM_MEMORY_SCAN_ENABLED` | `true` | `memory_worker` 开关 |
+| `LONG_TERM_MEMORY_SCAN_INTERVAL_SEC` | `120` | 后台扫描间隔 |
+| `MEMORY_INDEX_WORKER_ENABLED` | `false` | `memory_index_worker` 开关 |
+| `MEMORY_INDEX_WORKER_INTERVAL_SEC` | `30` | 向量同步轮询间隔 |
+| `MEMORY_INDEX_WORKER_BATCH_SIZE` | `32` | 每轮同步批量大小 |
+| `MEMORY_EMBEDDING_MODEL` | `text-embedding-3-small` | 记忆 embedding 模型 |
+| `MEMORY_EMBEDDING_DIM` | `1536` | 向量维度 |
+| `MEMORY_MILVUS_ENABLED` | `false` | 是否启用 Milvus 检索 |
+| `MEMORY_MILVUS_URI` | - | Milvus 连接地址 |
+| `MEMORY_MILVUS_COLLECTION` | `memory_text_v1` | 记忆向量 collection |
+
+## 关键文件
+
+| 文件 | 职责 |
+|------|------|
+| `backend/app/models/memory.py` | 记忆真值模型与向量状态字段 |
+| `backend/app/services/memory.py` | 提取、精炼、写入、检索、去重、清洗 |
+| `backend/app/services/memory_embeddings.py` | embedding 调用封装 |
+| `backend/app/services/memory_vector_store.py` | Milvus collection / upsert / search |
+| `backend/app/services/message_handler.py` | 记忆注入与异步提取调度 |
+| `backend/app/services/tool_executor.py` | `memory_save` / `memory_append` / `memory_delete` / `memory_list` |
+| `backend/app/memory_worker.py` | 后台消息补扫 |
+| `backend/app/memory_index_worker.py` | 后台索引同步 |
+| `backend/app/core/config.py` | 记忆与 Milvus 配置参数 |
