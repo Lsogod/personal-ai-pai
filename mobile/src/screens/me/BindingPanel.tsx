@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -15,6 +15,7 @@ import {
   createBindCode,
   fetchIdentities,
   fetchProfile,
+  getSourcePlatformLabel,
 } from "../../lib/api";
 import { formatMdHmLocal } from "../../lib/date";
 import { colors, radii, surfaceCard } from "../../design/tokens";
@@ -30,7 +31,20 @@ function platformLabel(platform: string) {
   const key = String(platform || "").toLowerCase();
   if (key === "web") return "邮箱 / Web";
   if (key === "miniapp") return "微信小程序";
-  return platform || "未知平台";
+  if (key === "ios") return "iOS App";
+  if (key === "android") return "Android App";
+  if (key === "app") return "移动 App";
+  return getSourcePlatformLabel(platform);
+}
+
+function platformValue(platform: string, platformId: string) {
+  const key = String(platform || "").toLowerCase();
+  const raw = String(platformId || "").trim();
+  if (key === "ios") return "当前 iPhone / iPad";
+  if (key === "android") return "当前 Android 设备";
+  if (key === "app") return "当前移动端";
+  if (raw.startsWith("web:")) return "当前 Web 会话";
+  return raw || "已绑定";
 }
 
 export function BindingPanel({ visible, token, onClose }: BindingPanelProps) {
@@ -79,6 +93,20 @@ export function BindingPanel({ visible, token, onClose }: BindingPanelProps) {
 
   const generatedCode = createMutation.data;
   const loading = profileQuery.isLoading || identitiesQuery.isLoading;
+  const identityRows = useMemo(() => {
+    const rows = [...(identitiesQuery.data || [])];
+    const currentPlatform = String(profileQuery.data?.platform || "").trim().toLowerCase();
+    if (
+      currentPlatform &&
+      !rows.some((item) => String(item.platform || "").trim().toLowerCase() === currentPlatform)
+    ) {
+      rows.unshift({
+        platform: currentPlatform,
+        platform_id: currentPlatform === "ios" ? "当前 iPhone / iPad" : currentPlatform === "android" ? "当前 Android 设备" : "当前客户端",
+      });
+    }
+    return rows;
+  }, [identitiesQuery.data, profileQuery.data?.platform]);
 
   return (
     <PanelModal visible={visible} title="账号绑定" onClose={onClose}>
@@ -107,13 +135,13 @@ export function BindingPanel({ visible, token, onClose }: BindingPanelProps) {
 
           <View style={styles.card}>
             <Text style={styles.cardTitle}>已绑定身份</Text>
-            {(identitiesQuery.data || []).length === 0 ? (
+            {identityRows.length === 0 ? (
               <Text style={styles.cardSub}>当前还没有历史身份记录</Text>
             ) : (
-              (identitiesQuery.data || []).map((item) => (
+              identityRows.map((item) => (
                 <View key={`${item.platform}-${item.platform_id}`} style={styles.identityRow}>
                   <Text style={styles.identityName}>{platformLabel(item.platform)}</Text>
-                  <Text style={styles.identityValue}>{item.platform_id}</Text>
+                  <Text style={styles.identityValue}>{platformValue(item.platform, item.platform_id)}</Text>
                 </View>
               ))
             )}

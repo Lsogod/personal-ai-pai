@@ -4,9 +4,12 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Dimensions,
   FlatList,
   Image,
-  KeyboardAvoidingView,
+  LayoutAnimation,
+  Keyboard,
+  KeyboardEvent,
   Modal,
   Platform,
   Pressable,
@@ -14,6 +17,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  UIManager,
   View,
 } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,6 +32,8 @@ import {
   fetchConversations,
   fetchHistory,
   fetchProfile,
+  getChatWsUrl,
+  getClientPlatform,
   getNotificationsWsUrl,
   sendChat,
   switchConversation,
@@ -49,6 +55,10 @@ type NoticeCard = {
   id: string;
   content: string;
   timeText: string;
+};
+
+type RenderableChatMessage = ChatMessage & {
+  __streaming?: boolean;
 };
 
 /* ------------------------------------------------------------------ */
@@ -122,6 +132,20 @@ function TypingIndicator() {
   );
 }
 
+function MessageReveal({ children }: { children: React.ReactNode }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(10)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(opacity, { toValue: 1, duration: 240, useNativeDriver: true }),
+      Animated.timing(translateY, { toValue: 0, duration: 240, useNativeDriver: true }),
+    ]).start();
+  }, [opacity, translateY]);
+
+  return <Animated.View style={{ opacity, transform: [{ translateY }] }}>{children}</Animated.View>;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Main ChatTab                                                       */
 /* ------------------------------------------------------------------ */
@@ -137,6 +161,20 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
   const [screenError, setScreenError] = useState<string | null>(null);
   const [wsState, setWsState] = useState<"connecting" | "open" | "closed">("connecting");
   const [notifyCards, setNotifyCards] = useState<NoticeCard[]>([]);
+  const [streamingReply, setStreamingReply] = useState("");
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [composerHeight, setComposerHeight] = useState(86);
+  const streamBufferRef = useRef("");
+  const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollSyncTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const streamingStartedAtRef = useRef<string>(new Date().toISOString());
+  const streamCommittedRef = useRef(false);
+  const chatSocketRef = useRef<WebSocket | null>(null);
+  const chatSocketReadyRef = useRef(false);
+  const pendingStreamResolveRef = useRef<((value: { reply: string }) => void) | null>(null);
+  const pendingStreamRejectRef = useRef<((reason?: unknown) => void) | null>(null);
+  const lastAnimatedMessageCountRef = useRef(0);
 
   useEffect(() => {
     const prefill = consumePrefill?.();
@@ -144,6 +182,23 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
       setInput(prefill);
     }
   }, [consumePrefill]);
+
+  useEffect(() => {
+    if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (streamFlushTimerRef.current !== null) {
+        clearTimeout(streamFlushTimerRef.current);
+        streamFlushTimerRef.current = null;
+      }
+      scrollSyncTimersRef.current.forEach((timer) => clearTimeout(timer));
+      scrollSyncTimersRef.current = [];
+    };
+  }, []);
 
   /* ---- Queries ---- */
 
@@ -165,6 +220,88 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
     enabled: !!token,
     queryFn: () => fetchConversations(token!),
   });
+
+  function flushStreamingReplySoon() {
+    if (streamFlushTimerRef.current !== null) return;
+    streamFlushTimerRef.current = setTimeout(() => {
+      streamFlushTimerRef.current = null;
+      setStreamingReply(streamBufferRef.current);
+    }, 40);
+  }
+
+  function scrollToBottom(animated = true) {
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToEnd({ animated });
+    });
+  }
+
+  function animateLayout() {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+  }
+
+  function runScrollSync(delays: number[], animated = false) {
+    scrollSyncTimersRef.current.forEach((timer) => clearTimeout(timer));
+    scrollSyncTimersRef.current = delays.map((delayMs) =>
+      setTimeout(() => {
+        scrollToBottom(animated);
+      }, delayMs)
+    );
+  }
+
+  function clearStreamingState() {
+    if (streamFlushTimerRef.current !== null) {
+      clearTimeout(streamFlushTimerRef.current);
+      streamFlushTimerRef.current = null;
+    }
+    streamBufferRef.current = "";
+    setStreamingReply("");
+    streamCommittedRef.current = false;
+  }
+
+  async function waitForChatSocketReady(timeoutMs = 1500) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const socket = chatSocketRef.current;
+      if (socket && chatSocketReadyRef.current && socket.readyState === WebSocket.OPEN) {
+        return socket;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return null;
+  }
+
+  function appendAssistantMessage(content: string, createdAt?: string) {
+    const text = String(content || "");
+    if (!text.trim()) return;
+    queryClient.setQueryData<ChatMessage[]>(["history"], (prev = []) => {
+      const last = prev[prev.length - 1];
+      if (last?.role === "assistant" && (last.content || "").trim() === text.trim()) {
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          role: "assistant",
+          content: text,
+          created_at: createdAt || new Date().toISOString(),
+          image_urls: [],
+        },
+      ];
+    });
+  }
+
+  function commitStreamedReply(createdAt?: string) {
+    if (streamCommittedRef.current) return;
+    const reply = streamBufferRef.current;
+    if (!reply.trim()) return;
+    appendAssistantMessage(reply, createdAt || streamingStartedAtRef.current);
+    streamCommittedRef.current = true;
+    if (streamFlushTimerRef.current !== null) {
+      clearTimeout(streamFlushTimerRef.current);
+      streamFlushTimerRef.current = null;
+    }
+    setStreamingReply("");
+  }
 
   /* ---- WebSocket ---- */
 
@@ -218,10 +355,155 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
     };
   }, [queryClient, token]);
 
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const handleKeyboardShow = (event: KeyboardEvent) => {
+      const windowHeight = Dimensions.get("window").height;
+      const overlapByScreenY = windowHeight - (event.endCoordinates?.screenY || windowHeight);
+      const nextHeight = Math.max(overlapByScreenY || event.endCoordinates?.height || 0, 0);
+      animateLayout();
+      setKeyboardHeight(nextHeight);
+      setKeyboardOpen(true);
+      runScrollSync(Platform.OS === "ios" ? [0, 120, 260, 420] : [0, 80, 180, 320], false);
+    };
+
+    const handleKeyboardHide = (_event: KeyboardEvent) => {
+      animateLayout();
+      setKeyboardHeight(0);
+      setKeyboardOpen(false);
+      runScrollSync(Platform.OS === "ios" ? [40, 140] : [20, 100], false);
+    };
+
+    const showSub = Keyboard.addListener(showEvent, handleKeyboardShow);
+    const hideSub = Keyboard.addListener(hideEvent, handleKeyboardHide);
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [insets.bottom]);
+
+  useEffect(() => {
+    if (!token) return;
+    let closedManually = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let socket: WebSocket | null = null;
+
+    const cleanupPending = (reason?: string) => {
+      if (pendingStreamRejectRef.current) {
+        pendingStreamRejectRef.current(new Error(reason || "聊天连接已断开，请重试。"));
+        pendingStreamRejectRef.current = null;
+        pendingStreamResolveRef.current = null;
+      }
+    };
+
+    const connect = () => {
+      if (closedManually) return;
+      socket = new WebSocket(getChatWsUrl(token));
+      chatSocketRef.current = socket;
+      chatSocketReadyRef.current = false;
+
+      socket.onopen = () => {
+        chatSocketReadyRef.current = true;
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data || "{}");
+          if (payload?.type === "message_chunk") {
+            const createdAt = String(payload.created_at || new Date().toISOString());
+            if (!streamBufferRef.current) {
+              streamingStartedAtRef.current = createdAt;
+              streamCommittedRef.current = false;
+            }
+            const chunk = typeof payload.chunk === "string" ? payload.chunk : "";
+            if (chunk) {
+              streamBufferRef.current += chunk;
+              flushStreamingReplySoon();
+            }
+            if (payload.done === true) {
+              const finalReply = streamBufferRef.current;
+              if (streamFlushTimerRef.current !== null) {
+                clearTimeout(streamFlushTimerRef.current);
+                streamFlushTimerRef.current = null;
+              }
+              setStreamingReply(finalReply);
+              commitStreamedReply(createdAt);
+              pendingStreamResolveRef.current?.({ reply: finalReply });
+              pendingStreamResolveRef.current = null;
+              pendingStreamRejectRef.current = null;
+              void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+            }
+            return;
+          }
+
+          if (payload?.type === "chat_error" || payload?.ok === false) {
+            const errorText = String(payload?.error || "请求失败。");
+            pendingStreamRejectRef.current?.(new Error(errorText));
+            pendingStreamResolveRef.current = null;
+            pendingStreamRejectRef.current = null;
+          }
+        } catch {}
+      };
+
+      socket.onerror = () => {
+        chatSocketReadyRef.current = false;
+      };
+
+      socket.onclose = () => {
+        chatSocketReadyRef.current = false;
+        chatSocketRef.current = null;
+        cleanupPending("聊天连接已断开，请重试。");
+        if (!closedManually) {
+          reconnectTimer = setTimeout(connect, 2000);
+        }
+      };
+    };
+
+    connect();
+    return () => {
+      closedManually = true;
+      chatSocketReadyRef.current = false;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      cleanupPending();
+      socket?.close();
+      chatSocketRef.current = null;
+    };
+  }, [queryClient, token]);
+
   /* ---- Mutations ---- */
 
   const sendMutation = useMutation({
-    mutationFn: async (content: string) => sendChat(content, token!),
+    mutationFn: async (content: string) => {
+      clearStreamingState();
+      streamingStartedAtRef.current = new Date().toISOString();
+
+      const socket = await waitForChatSocketReady();
+      if (socket && chatSocketReadyRef.current && socket.readyState === WebSocket.OPEN) {
+        return await new Promise<{ reply: string }>((resolve, reject) => {
+          pendingStreamResolveRef.current = resolve;
+          pendingStreamRejectRef.current = reject;
+          try {
+            socket.send(
+              JSON.stringify({
+                content,
+                image_urls: [],
+                source_platform: getClientPlatform(),
+                stream: true,
+              })
+            );
+          } catch (error) {
+            pendingStreamResolveRef.current = null;
+            pendingStreamRejectRef.current = null;
+            reject(error);
+          }
+        });
+      }
+
+      const result = await sendChat(content, token!, getClientPlatform());
+      return { reply: (result.responses || []).join("\n") };
+    },
     onMutate: async (content) => {
       await queryClient.cancelQueries({ queryKey: ["history"] });
       const prev = queryClient.getQueryData<ChatMessage[]>(["history"]) || [];
@@ -230,22 +512,25 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
         { role: "user", content, created_at: new Date().toISOString(), image_urls: [] },
       ]);
       setScreenError(null);
+      clearStreamingState();
+      streamingStartedAtRef.current = new Date().toISOString();
       return { prev };
     },
-    onSuccess: (data) => {
-      const msgs = (data.responses || []).map((c) => ({
-        role: "assistant",
-        content: c,
-        created_at: new Date().toISOString(),
-        image_urls: [],
-      }));
-      queryClient.setQueryData<ChatMessage[]>(["history"], (prev = []) => [...prev, ...msgs]);
+    onSuccess: async (data) => {
+      if (!streamCommittedRef.current) {
+        const fallbackReply = streamBufferRef.current.trim() ? streamBufferRef.current : data.reply;
+        if (fallbackReply.trim()) {
+          appendAssistantMessage(fallbackReply, streamingStartedAtRef.current);
+        }
+      }
+      clearStreamingState();
       setInput("");
-      void queryClient.invalidateQueries({ queryKey: ["history"] });
-      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      await queryClient.invalidateQueries({ queryKey: ["history"] });
+      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
     },
     onError: (error: Error, _v, ctx) => {
       if (ctx?.prev) queryClient.setQueryData(["history"], ctx.prev);
+      clearStreamingState();
       setScreenError(error.message);
     },
   });
@@ -288,10 +573,48 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
     () => conversationsQuery.data?.find((c) => c.active) || null,
     [conversationsQuery.data]
   );
-  const messages = historyQuery.data || [];
+
+  const baseMessages = historyQuery.data || [];
+  const messages: RenderableChatMessage[] = useMemo(() => {
+    if (!streamingReply) return baseMessages;
+    const lastHistory = baseMessages.length > 0 ? baseMessages[baseMessages.length - 1] : null;
+    if (
+      lastHistory?.role === "assistant" &&
+      (lastHistory.content || "").trim() === streamingReply.trim()
+    ) {
+      return baseMessages;
+    }
+    return [
+      ...baseMessages,
+      {
+        role: "assistant",
+        content: streamingReply,
+        created_at: streamingStartedAtRef.current,
+        image_urls: [],
+        __streaming: true,
+      },
+    ];
+  }, [baseMessages, streamingReply]);
   const loading = historyQuery.isLoading && messages.length === 0;
   const nickname = profileQuery.data?.nickname || "你";
   const aiEmoji = profileQuery.data?.ai_emoji || "✨";
+
+  useEffect(() => {
+    if (messages.length > lastAnimatedMessageCountRef.current) {
+      animateLayout();
+    }
+    lastAnimatedMessageCountRef.current = messages.length;
+    if (messages.length === 0 && !streamingReply) return;
+    scrollToBottom(!keyboardOpen && !streamingReply);
+    if (keyboardOpen) {
+      runScrollSync([0, 90], false);
+    }
+  }, [keyboardOpen, messages.length, streamingReply]);
+
+  useEffect(() => {
+    if (!keyboardOpen) return;
+    runScrollSync([0, 80], false);
+  }, [bottomInset, composerHeight, keyboardHeight, keyboardOpen]);
 
   /* ---- Handlers ---- */
 
@@ -320,7 +643,7 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
 
   /* ---- Render helpers ---- */
 
-  function renderMessage({ item, index }: { item: ChatMessage; index: number }) {
+  function renderMessage({ item, index }: { item: RenderableChatMessage; index: number }) {
     const text = getDisplayText(item);
     const isUser = item.role !== "assistant";
     const prevItem = index > 0 ? messages[index - 1] : undefined;
@@ -328,7 +651,8 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
     const hasImages = Array.isArray(item.image_urls) && item.image_urls.length > 0;
 
     return (
-      <View>
+      <MessageReveal>
+        <View>
         {timeLabel ? <Text style={styles.timeLabel}>{timeLabel}</Text> : null}
 
         {isUser ? (
@@ -359,11 +683,18 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
                   ))}
                 </View>
               ) : null}
-              {text ? <Markdown style={markdownStyles}>{text}</Markdown> : null}
+              {text ? (
+                item.__streaming ? (
+                  <Text style={styles.assistantText}>{text}</Text>
+                ) : (
+                  <Markdown style={markdownStyles}>{text}</Markdown>
+                )
+              ) : null}
             </View>
           </View>
         )}
-      </View>
+        </View>
+      </MessageReveal>
     );
   }
 
@@ -392,6 +723,9 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
   /* ================================================================ */
   /*  RENDER                                                          */
   /* ================================================================ */
+
+  const composerOffset = keyboardOpen ? keyboardHeight : bottomInset;
+  const viewportInset = composerHeight + composerOffset;
 
   return (
     <View style={styles.page}>
@@ -503,34 +837,47 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
         </Pressable>
       ) : null}
 
-      <KeyboardAvoidingView
-        style={styles.chatArea}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={0}
-      >
-        {loading ? (
-          <View style={styles.loadingWrap}>
-            <ActivityIndicator size="large" color={colors.primary} />
-          </View>
-        ) : messages.length === 0 ? (
-          renderEmptyState()
-        ) : (
-          <FlatList
-            ref={flatListRef}
-            style={styles.messageListView}
-            data={messages}
-            keyExtractor={(item, i) => `${item.created_at}-${i}`}
-            renderItem={renderMessage}
-            contentContainerStyle={styles.messageList}
-            showsVerticalScrollIndicator={false}
-            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-            onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
-            ListFooterComponent={sendMutation.isPending ? <TypingIndicator /> : null}
-            keyboardShouldPersistTaps="handled"
-          />
-        )}
+      <View style={styles.chatArea}>
+        <View style={[styles.messageViewport, { bottom: viewportInset }]}>
+          {loading ? (
+            <View style={styles.loadingWrap}>
+              <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+          ) : messages.length === 0 ? (
+            renderEmptyState()
+          ) : (
+            <FlatList
+              ref={flatListRef}
+              style={styles.messageListView}
+              data={messages}
+              keyExtractor={(item, i) => `${item.created_at}-${i}`}
+              renderItem={renderMessage}
+              contentContainerStyle={styles.messageList}
+              showsVerticalScrollIndicator={false}
+              scrollIndicatorInsets={{ bottom: 20 }}
+              onContentSizeChange={() => scrollToBottom(!keyboardOpen && !streamingReply)}
+              onLayout={() => scrollToBottom(false)}
+              ListFooterComponent={sendMutation.isPending && !streamingReply ? <TypingIndicator /> : null}
+              keyboardShouldPersistTaps="handled"
+            />
+          )}
+        </View>
 
-        <View style={[styles.composerDock, { paddingBottom: Math.max(bottomInset + 8, 14) }]}>
+        <View
+          style={[
+            styles.composerDock,
+            {
+              bottom: composerOffset,
+              paddingBottom: keyboardOpen ? 12 : 14,
+            },
+          ]}
+          onLayout={(event) => {
+            const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+            if (nextHeight > 0 && Math.abs(nextHeight - composerHeight) > 2) {
+              setComposerHeight(nextHeight);
+            }
+          }}
+        >
           <View style={styles.composer}>
             <Pressable style={styles.voiceBtn} onPress={handleVoicePress}>
               <Ionicons name="mic-outline" size={18} color={colors.primary} />
@@ -542,6 +889,9 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
               placeholder="跟 PAI 说点什么..."
               placeholderTextColor={colors.text4}
               style={styles.composerInput}
+              onFocus={() => {
+                runScrollSync([80, 180, 320], false);
+              }}
               onSubmitEditing={() => void handleSend()}
               blurOnSubmit={false}
             />
@@ -554,7 +904,7 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
             </Pressable>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
 }
@@ -570,6 +920,14 @@ const styles = StyleSheet.create({
   },
   chatArea: {
     flex: 1,
+    position: "relative",
+  },
+  messageViewport: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
 
   /* ---- Header ---- */
@@ -761,7 +1119,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingHorizontal: spacing.pageX,
     paddingTop: 12,
-    paddingBottom: 16,
+    paddingBottom: 18,
   },
   timeLabel: {
     textAlign: "center",
@@ -821,6 +1179,11 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.borderLight,
   },
+  assistantText: {
+    fontSize: 16,
+    lineHeight: 23,
+    color: colors.text,
+  },
 
   /* Images */
   imageGrid: {
@@ -866,6 +1229,10 @@ const styles = StyleSheet.create({
 
   /* ---- Composer ---- */
   composerDock: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    zIndex: 10,
     paddingHorizontal: 12,
     paddingTop: 8,
     paddingBottom: 10,

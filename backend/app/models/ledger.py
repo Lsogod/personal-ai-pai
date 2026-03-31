@@ -13,7 +13,6 @@ class Ledger(SQLModel, table=True):
 
     amount: float = Field(description="金额")
     currency: str = Field(default="CNY")
-
     category: str = Field(description="分类: 餐饮/交通/购物/居家...")
     item: str = Field(description="摘要: 麦当劳午餐")
 

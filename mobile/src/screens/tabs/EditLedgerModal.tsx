@@ -11,7 +11,15 @@ import {
 import { useMutation } from "@tanstack/react-query";
 
 import { PanelModal } from "../../components/PanelModal";
-import { deleteLedger, LedgerItem, updateLedger } from "../../lib/api";
+import {
+  deleteLedger,
+  encodeLedgerCategory,
+  getLedgerDisplayCategory,
+  getLedgerEntryKind,
+  LedgerEntryKind,
+  LedgerItem,
+  updateLedger,
+} from "../../lib/api";
 import { colors, radii, surfaceCard } from "../../design/tokens";
 
 type EditLedgerModalProps = {
@@ -24,6 +32,7 @@ type EditLedgerModalProps = {
 
 export function EditLedgerModal({ visible, token, ledger, onClose, onChanged }: EditLedgerModalProps) {
   const [amountText, setAmountText] = useState("");
+  const [entryKind, setEntryKind] = useState<LedgerEntryKind>("expense");
   const [category, setCategory] = useState("");
   const [item, setItem] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -31,7 +40,8 @@ export function EditLedgerModal({ visible, token, ledger, onClose, onChanged }: 
   useEffect(() => {
     if (!visible || !ledger) return;
     setAmountText(String(Number(ledger.amount || 0)));
-    setCategory(ledger.category || "");
+    setEntryKind(getLedgerEntryKind(ledger));
+    setCategory(getLedgerDisplayCategory(ledger.category));
     setItem(ledger.item || "");
     setNotice(null);
   }, [ledger, visible]);
@@ -44,7 +54,7 @@ export function EditLedgerModal({ visible, token, ledger, onClose, onChanged }: 
         ledger!.id,
         {
           amount,
-          category: category.trim() || "",
+          category: encodeLedgerCategory(category.trim(), entryKind) || "",
           item: item.trim() || "",
         },
         token!
@@ -86,10 +96,30 @@ export function EditLedgerModal({ visible, token, ledger, onClose, onChanged }: 
     <PanelModal visible={visible} title="编辑账单" onClose={onClose}>
       <View style={styles.hero}>
         <Text style={styles.heroTitle}>修改账单</Text>
-        <Text style={styles.heroDesc}>直接调用后端 `PATCH /api/ledgers/{'{id}'}` 和 `DELETE /api/ledgers/{'{id}'}`。</Text>
+        <Text style={styles.heroDesc}>收入和支出只按这里的手动选择保存，不再根据分类或项目文本自动判断。</Text>
       </View>
 
       <View style={styles.card}>
+        <Text style={styles.label}>类型</Text>
+        <View style={styles.segmentedWrap}>
+          <Pressable
+            style={[styles.segmentedItem, entryKind === "expense" && styles.segmentedItemActive]}
+            onPress={() => setEntryKind("expense")}
+          >
+            <Text style={[styles.segmentedText, entryKind === "expense" && styles.segmentedTextActive]}>
+              支出
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.segmentedItem, entryKind === "income" && styles.segmentedIncomeActive]}
+            onPress={() => setEntryKind("income")}
+          >
+            <Text style={[styles.segmentedText, entryKind === "income" && styles.segmentedIncomeText]}>
+              收入
+            </Text>
+          </Pressable>
+        </View>
+
         <Text style={styles.label}>金额</Text>
         <TextInput
           value={amountText}
@@ -110,7 +140,7 @@ export function EditLedgerModal({ visible, token, ledger, onClose, onChanged }: 
             setCategory(value);
             setNotice(null);
           }}
-          placeholder="例如 餐饮 / 交通"
+          placeholder={entryKind === "income" ? "例如 工资 / 奖金 / 报销" : "例如 餐饮 / 交通"}
           placeholderTextColor={colors.text4}
           style={styles.input}
         />
@@ -122,11 +152,12 @@ export function EditLedgerModal({ visible, token, ledger, onClose, onChanged }: 
             setItem(value);
             setNotice(null);
           }}
-          placeholder="例如 午饭 / 地铁"
+          placeholder={entryKind === "income" ? "例如 3月工资 / 差旅报销" : "例如 午饭 / 地铁"}
           placeholderTextColor={colors.text4}
           style={styles.input}
         />
 
+        <Text style={styles.hint}>如果要把一笔支出改成收入，直接切换上面的类型后保存即可。</Text>
         {notice ? <Text style={styles.notice}>{notice}</Text> : null}
 
         <Pressable
@@ -176,6 +207,39 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: colors.text2,
   },
+  segmentedWrap: {
+    flexDirection: "row",
+    padding: 4,
+    borderRadius: radii.md,
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: 6,
+  },
+  segmentedItem: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.sm,
+    paddingVertical: 12,
+  },
+  segmentedItemActive: {
+    backgroundColor: colors.primary,
+  },
+  segmentedIncomeActive: {
+    backgroundColor: colors.accent,
+  },
+  segmentedText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.text3,
+  },
+  segmentedTextActive: {
+    color: "#ffffff",
+  },
+  segmentedIncomeText: {
+    color: "#ffffff",
+  },
   input: {
     borderWidth: 1,
     borderColor: colors.border,
@@ -194,6 +258,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 13,
     lineHeight: 19,
+  },
+  hint: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: colors.text3,
   },
   primaryBtn: {
     alignItems: "center",

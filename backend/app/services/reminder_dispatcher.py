@@ -109,8 +109,8 @@ async def _send_target_once(
     text: str,
 ) -> tuple[bool, str]:
     try:
-        if target.platform == "web":
-            # Web reminder is delivered through realtime channel once per schedule.
+        if target.platform in {"web", "app", "ios", "android"}:
+            # Realtime reminder is delivered through websocket once per schedule.
             return True, ""
 
         if target.platform == "miniapp":
