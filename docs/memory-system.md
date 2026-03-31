@@ -2,7 +2,7 @@
 
 > 本文档描述 PAI 长期记忆系统的设计与实现。随版本迭代持续更新。
 >
-> 最后更新：2026-03-31 · 分支：`feat/single-agent`
+> 最后更新：2026-04-01 · 分支：`feat/single-agent`
 
 ---
 
@@ -99,12 +99,15 @@ messages
   输入：会话摘要 + 完整上下文（≤8000 字符）+ 用户消息 + 助手回复
   输出：候选记忆数组
   规则：
+    ✓ 提取由 user 消息触发；上下文仅用于判断稳定性与覆盖旧值
     ✓ 30 天后仍有价值
     ✓ 稳定偏好、长期事实、长期目标、长期项目、长期约束
     ✓ 用户显式"记住这个" → 提高 importance/confidence
     ✓ 用户显式"忘记这个" → op=delete
     ✓ 保持用户原始语言
     ✗ 短期状态、天气快照、日/周汇总、系统日志
+    ✗ 工具清单、系统状态、技术实现细节、流式开关、MCP 能力说明
+    ✗ finance-monthly / weekly / daily 这类短期统计与月度收入快照
     ✗ 提醒、待办、计划执行步骤、某天/某周/某月临时要求
     ✗ 今天/明天/后天/这周/本月/这次 这类短期时间窗
     ✗ 仅针对短期窗口的条件规则，例如“如果今天花费超过100，明天提醒少花”
@@ -203,6 +206,9 @@ PENDING → PROCESSED  （提取成功）
 ## 6. 安全边界
 
 - **identity 隔离**：`preferred_name`、`nickname`、`ai_name`、`ai_emoji`、`assistant_name` 以及 `memory_type=profile` 的内容不进入记忆表
+- **硬过滤噪声 key**：`weather-date_*`、`tool-*`、`system-*`、`reminder-last_*`、`finance-monthly_* / weekly_* / daily_*` 默认拒绝写入
+- **硬过滤噪声内容**：工具清单、天气快照、流式输出设置、时间格式说明、系统内部状态即使进入候选，也会在写入与读取阶段再次过滤
+- **脏槽位防御**：像 `residence_city / residence_country / residence_province / birthday` 这类档案槽位如果被抽成纯数字值，会直接视为无效记忆
 - **用户隔离**：`UNIQUE(user_id, memory_key)` 约束 + 所有查询强制 `WHERE user_id = ?`
 - **内容上限**：单条记忆最多 1000 字符
 - **写入频率**：单轮最多 6 条，有 debounce 控制（12s）
@@ -257,5 +263,6 @@ PENDING → PROCESSED  （提取成功）
 
 | 日期 | 变更 |
 |------|------|
+| 2026-04-01 | 收紧长期记忆提取边界，新增工具/系统/天气快照/月度统计等噪声过滤，并补充“user 消息驱动、上下文辅助判断”的说明 |
 | 2026-03-31 | 接入 PostgreSQL 真值 + Milvus 检索 + memory_index_worker，同步更新“短期规则不提取”说明 |
 | 2026-03-29 | 初始文档，记录 feat/single-agent 分支记忆系统架构 |
