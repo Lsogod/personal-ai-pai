@@ -175,24 +175,36 @@ MINIAPP_SUBSCRIBE_TEMPLATE_ID=your-template-id
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
 | `LONG_TERM_MEMORY_ENABLED` | 是否启用长期记忆 | `true` |
-| `LONG_TERM_MEMORY_MIN_CONFIDENCE` | 记忆提取最低置信度阈值（0-1） | `0.5` |
-| `LONG_TERM_MEMORY_TTL` | 记忆有效期（天） | `730`（2 年） |
-| `LONG_TERM_MEMORY_RETRIEVE_LIMIT` | 每次召回的最大记忆条数 | `20` |
-| `LONG_TERM_MEMORY_CONTEXT` | 记忆上下文窗口大小（字符数） | `24000` |
-| `LONG_TERM_MEMORY_DEBOUNCE` | 记忆提取防抖时间（秒），0 表示不防抖 | `0` |
+| `LONG_TERM_MEMORY_RETRIEVE_MODE` | 记忆读取模式：`full_inject` 或 `dense` | `full_inject` |
+| `LONG_TERM_MEMORY_MIN_CONFIDENCE` | 记忆提取最低置信度阈值（0-1） | `0.75` |
+| `LONG_TERM_MEMORY_MAX_WRITE_ITEMS` | 单轮最多写入的记忆条数 | `6` |
+| `LONG_TERM_MEMORY_RETRIEVE_LIMIT` | 每次召回的最大记忆条数 | `6` |
+| `LONG_TERM_MEMORY_RETRIEVE_SCAN_LIMIT` | 检索候选扫描上限 | `80` |
+| `LONG_TERM_MEMORY_DEFAULT_TTL_DAYS` | 默认记忆有效期（天） | `180`（6 个月） |
+| `LONG_TERM_MEMORY_DEBOUNCE_SEC` | 记忆提取防抖时间（秒），0 表示不防抖 | `12` |
+| `LONG_TERM_MEMORY_EXTRACT_CONTEXT_MAX_CHARS` | 提取上下文窗口大小（字符数） | `8000` |
+| `LONG_TERM_MEMORY_SCAN_ENABLED` | 是否启用 `memory_worker` 补扫 | `true` |
 
 ```dotenv
 LONG_TERM_MEMORY_ENABLED=true
-LONG_TERM_MEMORY_MIN_CONFIDENCE=0.5
-LONG_TERM_MEMORY_TTL=730
-LONG_TERM_MEMORY_RETRIEVE_LIMIT=20
-LONG_TERM_MEMORY_CONTEXT=24000
-LONG_TERM_MEMORY_DEBOUNCE=0
+LONG_TERM_MEMORY_RETRIEVE_MODE=full_inject
+LONG_TERM_MEMORY_MIN_CONFIDENCE=0.75
+LONG_TERM_MEMORY_MAX_WRITE_ITEMS=6
+LONG_TERM_MEMORY_RETRIEVE_LIMIT=6
+LONG_TERM_MEMORY_RETRIEVE_SCAN_LIMIT=80
+LONG_TERM_MEMORY_DEFAULT_TTL_DAYS=180
+LONG_TERM_MEMORY_DEBOUNCE_SEC=12
+LONG_TERM_MEMORY_EXTRACT_CONTEXT_MAX_CHARS=8000
+LONG_TERM_MEMORY_SCAN_ENABLED=true
 ```
 
 <Tip>
-  `MIN_CONFIDENCE` 控制记忆提取的精确度：值越高，提取的记忆越精确但可能遗漏；值越低，召回更全面但可能包含噪声。默认 `0.5` 是一个平衡的选择。
+  `MIN_CONFIDENCE` 控制记忆提取的精确度：值越高，提取的记忆越精确但可能遗漏；值越低，召回更全面但可能包含噪声。当前实现默认 `0.75`，并且提取由用户消息驱动，完整上下文只用于判断是否属于长期稳定信息。
 </Tip>
+
+<Note>
+  长期记忆默认不会写入天气快照、工具清单、系统状态、流式开关说明、日/周/月汇总等短期或内部信息；这些内容还会在读取阶段再次过滤。
+</Note>
 
 ---
 

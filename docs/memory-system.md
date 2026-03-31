@@ -2,7 +2,7 @@
 
 > 本文档描述 PAI 长期记忆系统的设计与实现。随版本迭代持续更新。
 >
-> 最后更新：2026-03-31 · 分支：`main`
+> 最后更新：2026-04-01 · 分支：`main`
 
 ---
 
@@ -94,19 +94,22 @@ Agent 在对话中判断出现值得记住的信息时，直接调用工具：
 
 ### 通道 2 — 后台异步提取（兜底）
 
-每轮对话结束后自动触发三阶段管道：
+每轮对话结束后自动触发三阶段管道（debounce 12s）：
 
 ```
 阶段 1: extract_memory_candidates（LLM 提取）
-  输入：会话摘要 + 完整上下文（≤24000 字符）+ 用户消息 + 助手回复
+  输入：会话摘要 + 完整上下文（≤8000 字符）+ 用户消息 + 助手回复
   输出：候选记忆数组
   规则：
+    ✓ 提取由 user 消息触发；上下文仅用于判断稳定性与覆盖旧值
     ✓ 30 天后仍有价值
     ✓ 稳定偏好、长期事实、长期目标、长期项目、长期约束
     ✓ 用户显式"记住这个" → 提高 importance/confidence
     ✓ 用户显式"忘记这个" → op=delete
     ✓ 保持用户原始语言
     ✗ 短期状态、天气快照、日/周汇总、系统日志
+    ✗ 工具清单、系统状态、技术实现细节、流式开关、MCP 能力说明
+    ✗ finance-monthly / weekly / daily 这类短期统计与月度收入快照
     ✗ 提醒、待办、计划执行步骤、某天/某周/某月临时要求
     ✗ 今天/明天/后天/这周/本月/这次 这类短期时间窗
     ✗ 仅针对短期窗口的条件规则，例如“如果今天花费超过100，明天提醒少花”
@@ -126,7 +129,7 @@ Agent 在对话中判断出现值得记住的信息时，直接调用工具：
   过滤层：
     ① identity 类型 → 丢弃
     ② 内容为空 → 丢弃
-    ③ confidence < 0.5 → 丢弃
+    ③ confidence < 0.75 → 丢弃
     ④ 每轮最多 6 条
   Key 生成：LLM 提供 → LLM 推断 → SHA1 哈希兜底
   写入：key 匹配 → 更新；语义匹配（≥0.82）→ 更新；否则新建
@@ -179,7 +182,7 @@ Agent 在对话中判断出现值得记住的信息时，直接调用工具：
 
 ### TTL 过期
 
-默认 730 天。每次检索/写入时检查 `expires_at`，超期记忆自动排除。
+默认 180 天。每次检索/写入时检查 `expires_at`，超期记忆自动排除。
 
 ### 语义去重
 
@@ -210,9 +213,12 @@ PENDING → PROCESSED  （提取成功）
 ## 6. 安全边界
 
 - **identity 隔离**：`preferred_name`、`nickname`、`ai_name`、`ai_emoji`、`assistant_name` 以及 `memory_type=profile` 的内容不进入记忆表
+- **硬过滤噪声 key**：`weather-date_*`、`tool-*`、`system-*`、`reminder-last_*`、`finance-monthly_* / weekly_* / daily_*` 默认拒绝写入
+- **硬过滤噪声内容**：工具清单、天气快照、流式输出设置、时间格式说明、系统内部状态即使进入候选，也会在写入与读取阶段再次过滤
+- **脏槽位防御**：像 `residence_city / residence_country / residence_province / birthday` 这类档案槽位如果被抽成纯数字值，会直接视为无效记忆
 - **用户隔离**：`UNIQUE(user_id, memory_key)` 约束 + 所有查询强制 `WHERE user_id = ?`
 - **内容上限**：单条记忆最多 1000 字符
-- **写入频率**：单轮最多 6 条，有 debounce 控制
+- **写入频率**：单轮最多 6 条，有 debounce 控制（12s）
 
 ---
 
@@ -221,15 +227,15 @@ PENDING → PROCESSED  （提取成功）
 | 环境变量 | 默认值 | 说明 |
 |----------|--------|------|
 | `LONG_TERM_MEMORY_ENABLED` | `true` | 总开关 |
-| `LONG_TERM_MEMORY_MIN_CONFIDENCE` | `0.5` | 写入最低置信度 |
+| `LONG_TERM_MEMORY_MIN_CONFIDENCE` | `0.75` | 写入最低置信度 |
 | `LONG_TERM_MEMORY_MAX_WRITE_ITEMS` | `6` | 单轮最多写入条数 |
-| `LONG_TERM_MEMORY_RETRIEVE_LIMIT` | `20` | 检索注入 prompt 的条数上限 |
+| `LONG_TERM_MEMORY_RETRIEVE_LIMIT` | `6` | 检索注入 prompt 的条数上限 |
 | `LONG_TERM_MEMORY_RETRIEVE_SCAN_LIMIT` | `80` | 检索候选扫描上限 |
-| `LONG_TERM_MEMORY_DEFAULT_TTL_DAYS` | `730` | 默认过期天数 |
-| `LONG_TERM_MEMORY_DEBOUNCE_SEC` | `0` | 异步提取延迟（秒） |
+| `LONG_TERM_MEMORY_DEFAULT_TTL_DAYS` | `180` | 默认过期天数 |
+| `LONG_TERM_MEMORY_DEBOUNCE_SEC` | `12` | 异步提取延迟（秒） |
 | `LONG_TERM_MEMORY_EXTRACT_TIMEOUT_SEC` | `90` | LLM 提取超时 |
 | `LONG_TERM_MEMORY_UPSERT_TIMEOUT_SEC` | `90` | 写入超时 |
-| `LONG_TERM_MEMORY_EXTRACT_CONTEXT_MAX_CHARS` | `24000` | 提取上下文窗口 |
+| `LONG_TERM_MEMORY_EXTRACT_CONTEXT_MAX_CHARS` | `8000` | 提取上下文窗口 |
 | `LONG_TERM_MEMORY_SCAN_ENABLED` | `true` | memory_worker 开关 |
 | `LONG_TERM_MEMORY_SCAN_INTERVAL_SEC` | `120` | worker 扫描间隔 |
 | `MEMORY_INDEX_WORKER_ENABLED` | `false` | 向量索引同步 worker 开关 |
@@ -264,5 +270,6 @@ PENDING → PROCESSED  （提取成功）
 
 | 日期 | 变更 |
 |------|------|
+| 2026-04-01 | 收紧长期记忆提取边界，新增工具/系统/天气快照/月度统计等噪声过滤，并补充“user 消息驱动、上下文辅助判断”的说明 |
 | 2026-03-31 | 接入 PostgreSQL 真值 + Milvus 检索 + memory_index_worker，同步补充“短期规则不提取”为长期记忆的边界说明 |
 | 2026-03-28 | 全量注入改为相关性检索（top-20）；min_confidence 0.75→0.5；TTL 180→730 天；debounce 12s→0；上下文窗口 8000→24000；schedule/ledger 节点新增记忆工具 |
