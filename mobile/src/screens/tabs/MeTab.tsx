@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { fetchProfile } from "../../lib/api";
+import { fetchConversations, fetchProfile, fetchSkills, getSourcePlatformLabel } from "../../lib/api";
 import { useAuthStore } from "../../store/auth";
 import { colors, radii, spacing, surfaceCard } from "../../design/tokens";
 import type { TabKey } from "../../components/MiniTabBar";
@@ -36,38 +36,119 @@ export function MeTab({ bottomInset, onNavigate, onLogout }: MeTabProps) {
     queryFn: () => fetchProfile(token!),
   });
 
+  const skillsQuery = useQuery({
+    queryKey: ["skills", "summary"],
+    enabled: !!token,
+    queryFn: () => fetchSkills(token!),
+  });
+
+  const conversationsQuery = useQuery({
+    queryKey: ["conversations", "summary"],
+    enabled: !!token,
+    queryFn: () => fetchConversations(token!),
+  });
+
   const profile = profileQuery.data;
+  const activeSkillCount = (skillsQuery.data || []).filter((item) => item.status === "active").length;
+  const conversationCount = (conversationsQuery.data || []).length;
+  const setupProgress = Math.min(Math.max(Number(profile?.setup_stage || 0), 1), 3);
+  const progressWidth = `${Math.max(18, Math.min(100, (setupProgress / 3) * 100))}%` as `${number}%`;
+  const platformLabel = getSourcePlatformLabel(profile?.platform);
 
   function handleMenuPress(item: (typeof MENU_ITEMS)[number]) {
     if (item.key === "skills" || item.key === "binding" || item.key === "feedback") {
       setPanel(item.key);
       return;
     }
-    Alert.alert("推送通知", "原生推送功能即将上线，敬请期待。");
+    Alert.alert("推送通知", "原生推送功能正在接入，后续这里会补推送权限、静默时段和提醒样式设置。");
   }
 
   return (
     <>
       <ScrollView
         style={styles.page}
-        contentContainerStyle={{ paddingBottom: bottomInset + 20 }}
+        contentContainerStyle={{ paddingBottom: bottomInset + 24 }}
         showsVerticalScrollIndicator={false}
       >
         <View style={[styles.inner, { paddingTop: insets.top + 8 }]}>
-          {/* ---- Profile header ---- */}
           <View style={styles.profileCard}>
-            <View style={styles.avatarRing}>
-              <Ionicons name="person" size={26} color="#fff" />
+            <View style={styles.heroGlowOne} />
+            <View style={styles.heroGlowTwo} />
+            <View style={styles.profileTop}>
+              <View style={styles.avatarRing}>
+                <Ionicons name="person" size={26} color="#fff" />
+              </View>
+              <View style={styles.profileInfo}>
+                <Text style={styles.profileName}>{profile?.nickname || "用户"}</Text>
+                <Text style={styles.profileMeta}>
+                  {profile?.email || platformLabel || "PAI 用户"}
+                </Text>
+              </View>
+              <Pressable style={styles.profileAction} onPress={() => onNavigate("chat")}>
+                <Ionicons name="sparkles" size={18} color="#fff" />
+              </Pressable>
             </View>
-            <View style={styles.profileInfo}>
-              <Text style={styles.profileName}>{profile?.nickname || "用户"}</Text>
-              <Text style={styles.profileMeta}>
-                {profile?.email || profile?.platform || "PAI 用户"}
-              </Text>
+
+            <View style={styles.progressWrap}>
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: progressWidth }]} />
+              </View>
+              <Text style={styles.progressText}>账号完成度 {setupProgress}/3</Text>
+            </View>
+
+            <View style={styles.profileStats}>
+              <View style={styles.profileStat}>
+                <Text style={styles.profileStatValue}>{activeSkillCount}</Text>
+                <Text style={styles.profileStatLabel}>启用技能</Text>
+              </View>
+              <View style={styles.profileStat}>
+                <Text style={styles.profileStatValue}>{conversationCount}</Text>
+                <Text style={styles.profileStatLabel}>对话数</Text>
+              </View>
+              <View style={styles.profileStat}>
+                <Text style={styles.profileStatValue}>{platformLabel || "云端"}</Text>
+                <Text style={styles.profileStatLabel}>当前端</Text>
+              </View>
             </View>
           </View>
 
-          {/* ---- Menu ---- */}
+          <View style={styles.quickPanel}>
+            <Pressable style={styles.quickCard} onPress={() => onNavigate("chat")}>
+              <Ionicons name="chatbubble-ellipses-outline" size={22} color={colors.primary} />
+              <Text style={styles.quickTitle}>继续对话</Text>
+              <Text style={styles.quickDesc}>直接打开助手</Text>
+            </Pressable>
+            <Pressable style={styles.quickCard} onPress={() => onNavigate("ledger")}>
+              <Ionicons name="wallet-outline" size={22} color={colors.accent} />
+              <Text style={styles.quickTitle}>查看账单</Text>
+              <Text style={styles.quickDesc}>月度支出与明细</Text>
+            </Pressable>
+            <Pressable style={styles.quickCard} onPress={() => onNavigate("calendar")}>
+              <Ionicons name="calendar-outline" size={22} color={colors.warning} />
+              <Text style={styles.quickTitle}>提醒安排</Text>
+              <Text style={styles.quickDesc}>管理待办与日程</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.summaryCard}>
+            <View style={styles.summaryHead}>
+              <Text style={styles.summaryTitle}>账号状态</Text>
+              <Text style={styles.summaryBadge}>已同步</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>主账号</Text>
+              <Text style={styles.summaryValue}>{profile?.email || "未绑定邮箱"}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>数据来源</Text>
+              <Text style={styles.summaryValue}>{platformLabel || "Web"}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>建议下一步</Text>
+              <Text style={styles.summaryValue}>{activeSkillCount > 0 ? "补推送设置" : "先启用技能"}</Text>
+            </View>
+          </View>
+
           <View style={styles.menuCard}>
             {MENU_ITEMS.map((item, index) => (
               <View key={item.key}>
@@ -86,23 +167,6 @@ export function MeTab({ bottomInset, onNavigate, onLogout }: MeTabProps) {
             ))}
           </View>
 
-          {/* ---- Quick links ---- */}
-          <View style={styles.linkRow}>
-            <Pressable style={styles.linkCard} onPress={() => onNavigate("chat")}>
-              <Ionicons name="chatbubble-outline" size={20} color={colors.primary} />
-              <Text style={styles.linkText}>对话</Text>
-            </Pressable>
-            <Pressable style={styles.linkCard} onPress={() => onNavigate("ledger")}>
-              <Ionicons name="wallet-outline" size={20} color={colors.accent} />
-              <Text style={styles.linkText}>账单</Text>
-            </Pressable>
-            <Pressable style={styles.linkCard} onPress={() => onNavigate("calendar")}>
-              <Ionicons name="calendar-outline" size={20} color={colors.warning} />
-              <Text style={styles.linkText}>日程</Text>
-            </Pressable>
-          </View>
-
-          {/* ---- Logout ---- */}
           <Pressable style={styles.logoutBtn} onPress={() => void onLogout()}>
             <Ionicons name="log-out-outline" size={18} color={colors.text3} />
             <Text style={styles.logoutText}>退出登录</Text>
@@ -126,15 +190,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.pageX,
     gap: 16,
   },
-
-  /* Profile */
   profileCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 16,
+    overflow: "hidden",
     padding: 22,
     borderRadius: radii.xl,
     backgroundColor: colors.primary,
+    gap: 18,
+  },
+  heroGlowOne: {
+    position: "absolute",
+    top: -28,
+    right: -18,
+    width: 128,
+    height: 128,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.16)",
+  },
+  heroGlowTwo: {
+    position: "absolute",
+    bottom: -42,
+    left: -20,
+    width: 132,
+    height: 132,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.1)",
+  },
+  profileTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
   },
   avatarRing: {
     width: 60,
@@ -144,7 +228,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.2)",
     borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.3)",
+    borderColor: "rgba(255,255,255,0.32)",
   },
   profileInfo: {
     flex: 1,
@@ -157,10 +241,118 @@ const styles = StyleSheet.create({
   },
   profileMeta: {
     fontSize: 14,
-    color: "rgba(255,255,255,0.75)",
+    color: "rgba(255,255,255,0.76)",
   },
-
-  /* Menu */
+  profileAction: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.15)",
+  },
+  progressWrap: {
+    gap: 8,
+  },
+  progressTrack: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: "#fff",
+  },
+  progressText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.82)",
+  },
+  profileStats: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  profileStat: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: radii.md,
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(255,255,255,0.12)",
+  },
+  profileStatValue: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#fff",
+  },
+  profileStatLabel: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.72)",
+  },
+  quickPanel: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  quickCard: {
+    flex: 1,
+    paddingVertical: 18,
+    paddingHorizontal: 12,
+    gap: 10,
+    ...surfaceCard,
+  },
+  quickTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  quickDesc: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.text3,
+  },
+  summaryCard: {
+    padding: 18,
+    gap: 12,
+    ...surfaceCard,
+  },
+  summaryHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  summaryTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  summaryBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: radii.full,
+    backgroundColor: colors.accentLight,
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#166534",
+  },
+  summaryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  summaryLabel: {
+    fontSize: 13,
+    color: colors.text3,
+  },
+  summaryValue: {
+    flex: 1,
+    textAlign: "right",
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.text2,
+  },
   menuCard: {
     paddingHorizontal: 16,
     ...surfaceCard,
@@ -196,32 +388,12 @@ const styles = StyleSheet.create({
     marginLeft: 56,
     backgroundColor: colors.borderLight,
   },
-
-  /* Quick links */
-  linkRow: {
-    flexDirection: "row",
-    gap: 10,
-  },
-  linkCard: {
-    flex: 1,
-    alignItems: "center",
-    gap: 8,
-    paddingVertical: 18,
-    ...surfaceCard,
-  },
-  linkText: {
-    fontSize: 13,
-    fontWeight: "600",
-    color: colors.text2,
-  },
-
-  /* Logout */
   logoutBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    height: 50,
+    height: 52,
     borderRadius: radii.lg,
     backgroundColor: colors.surface,
     borderWidth: 1,

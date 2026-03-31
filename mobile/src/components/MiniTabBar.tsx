@@ -25,15 +25,16 @@ const TAB_ITEMS: Array<{
 ];
 
 export const TAB_BAR_HEIGHT = 74;
-const TAB_BAR_MIN_BOTTOM_PADDING = 10;
+const TAB_BAR_MIN_BOTTOM_PADDING = 4;
+const TAB_BAR_OFFSET_REDUCTION = 8;
 
 export function getTabBarInset(bottomInset: number) {
-  return TAB_BAR_HEIGHT + Math.max(bottomInset, TAB_BAR_MIN_BOTTOM_PADDING);
+  return TAB_BAR_HEIGHT + Math.max(bottomInset - TAB_BAR_OFFSET_REDUCTION, TAB_BAR_MIN_BOTTOM_PADDING);
 }
 
 export function MiniTabBar({ currentTab, onChange }: TabBarProps) {
   const insets = useSafeAreaInsets();
-  const bottomPadding = Math.max(insets.bottom, TAB_BAR_MIN_BOTTOM_PADDING);
+  const bottomPadding = Math.max(insets.bottom - TAB_BAR_OFFSET_REDUCTION, TAB_BAR_MIN_BOTTOM_PADDING);
 
   return (
     <View pointerEvents="box-none" style={[styles.wrap, { paddingBottom: bottomPadding }]}>
@@ -100,7 +101,7 @@ const styles = StyleSheet.create({
     paddingBottom: 11,
   },
   chatItem: {
-    paddingBottom: 10,
+    paddingBottom: 8,
   },
   chatIconWrap: {
     width: 50,
@@ -109,7 +110,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.primary,
-    transform: [{ translateY: -6 }],
+    transform: [{ translateY: -2 }],
     ...shadowMd,
   },
   chatIconWrapActive: {

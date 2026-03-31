@@ -19,7 +19,6 @@ export function AppShell() {
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const tabBarInset = getTabBarInset(insets.bottom);
-  const chatBottomInset = keyboardVisible ? 0 : tabBarInset;
   const showTabBar = !(tab === "chat" && keyboardVisible);
 
   // Cross-tab prefill support: navigate to chat with pre-filled text
@@ -64,7 +63,7 @@ export function AppShell() {
     <View style={styles.container}>
       {tab === "ledger" ? <LedgerTab bottomInset={tabBarInset} /> : null}
       {tab === "calendar" ? <CalendarTab bottomInset={tabBarInset} /> : null}
-      {tab === "chat" ? <ChatTab bottomInset={chatBottomInset} consumePrefill={consumePrefill} /> : null}
+      {tab === "chat" ? <ChatTab bottomInset={tabBarInset} consumePrefill={consumePrefill} /> : null}
       {tab === "stats" ? <StatsTab bottomInset={tabBarInset} onNavigate={handleNavigate} /> : null}
       {tab === "me" ? <MeTab bottomInset={tabBarInset} onNavigate={handleNavigate} onLogout={handleLogout} /> : null}
       {showTabBar ? <MiniTabBar currentTab={tab} onChange={setTab} /> : null}

@@ -1,5 +1,19 @@
+import { Platform } from "react-native";
+
 export interface TokenResponse {
   access_token: string;
+}
+
+export interface ActionResponse {
+  ok: boolean;
+  message: string;
+}
+
+export interface SendEmailCodeResponse {
+  ok: boolean;
+  message: string;
+  expire_seconds: number;
+  cooldown_seconds: number;
 }
 
 export interface Profile {
@@ -23,6 +37,12 @@ export interface ChatMessage {
 export interface ChatSendResponse {
   responses: string[];
   debug?: Record<string, unknown> | null;
+}
+
+export interface ToolCallEvent {
+  name: string;
+  label: string;
+  status: "start" | "done";
 }
 
 export interface ConversationItem {
@@ -102,6 +122,33 @@ export interface LedgerUpdatePayload {
   item?: string | null;
 }
 
+export type LedgerEntryKind = "expense" | "income";
+
+const LEDGER_INCOME_PREFIX = "收入:";
+
+export function getLedgerEntryKind(value: { category?: string | null; item?: string | null }): LedgerEntryKind {
+  const category = String(value.category || "").trim();
+  if (category.startsWith(LEDGER_INCOME_PREFIX)) return "income";
+  return "expense";
+}
+
+export function getLedgerDisplayCategory(category?: string | null) {
+  const text = String(category || "").trim();
+  if (!text) return "";
+  if (text.startsWith(LEDGER_INCOME_PREFIX)) {
+    return text.slice(LEDGER_INCOME_PREFIX.length).trim() || "收入";
+  }
+  return text;
+}
+
+export function encodeLedgerCategory(category: string | null | undefined, kind: LedgerEntryKind) {
+  const clean = getLedgerDisplayCategory(category);
+  if (kind === "income") {
+    return `${LEDGER_INCOME_PREFIX}${clean || "收入"}`;
+  }
+  return clean || undefined;
+}
+
 export interface ResourceDeleteResponse {
   ok: boolean;
   id: number;
@@ -157,6 +204,23 @@ export interface ScheduleUpdatePayload {
   status?: string | null;
 }
 
+export type ClientPlatform = "ios" | "android";
+export type SourcePlatform = "web" | "miniapp" | "app" | "ios" | "android";
+
+export function getClientPlatform(): ClientPlatform {
+  return Platform.OS === "android" ? "android" : "ios";
+}
+
+export function getSourcePlatformLabel(platform?: string | null) {
+  const key = String(platform || "").trim().toLowerCase();
+  if (key === "ios") return "iOS";
+  if (key === "android") return "Android";
+  if (key === "web") return "Web";
+  if (key === "miniapp") return "微信小程序";
+  if (key === "app") return "移动 App";
+  return platform || "未知平台";
+}
+
 const RAW_API_BASE = String(process.env.EXPO_PUBLIC_API_BASE_URL || "").trim();
 export const API_BASE = RAW_API_BASE.replace(/\/+$/, "");
 export const API_BASE_HELP =
@@ -180,6 +244,15 @@ function translateDetail(detail: string) {
   if (text.includes("invalid bind code format")) return "请输入 6 位数字绑定码。";
   if (text.includes("feedback content too short")) return "反馈内容至少 4 个字。";
   if (text.includes("invalid trigger_time format")) return "提醒时间格式不正确。";
+  if (text.includes("verification code incorrect")) return "验证码不正确。";
+  if (text.includes("verification code expired")) return "验证码已过期，请重新获取。";
+  if (text.includes("email service not configured")) return "邮件服务未配置，当前无法发送验证码。";
+  if (text.includes("send verification code failed")) return "验证码发送失败，请稍后再试。";
+  if (text.includes("password confirmation mismatch")) return "两次输入的密码不一致。";
+  if (text.includes("verification code send too frequently")) {
+    const retryAfter = detail.match(/retry after (\d+)s/i)?.[1];
+    return retryAfter ? `发送过于频繁，请 ${retryAfter} 秒后再试。` : "发送过于频繁，请稍后再试。";
+  }
   return detail || "请求失败。";
 }
 
@@ -227,6 +300,7 @@ export async function apiRequest<T>(
   const base = ensureApiBase();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    "X-Client-Platform": getClientPlatform(),
     ...(options.headers ? (options.headers as Record<string, string>) : {}),
   };
 
@@ -251,12 +325,192 @@ export async function apiRequest<T>(
   return (await res.json()) as T;
 }
 
+export async function streamSsePost(
+  path: string,
+  payload: unknown,
+  token: string | null | undefined,
+  onChunk: (chunk: string) => void,
+  onDone?: (payload: { debug?: unknown }) => void,
+  onToolCall?: (event: ToolCallEvent) => void
+) {
+  const base = ensureApiBase();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-Client-Platform": getClientPlatform(),
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${base}${path}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    throw new Error("网络连接失败，请检查手机与后端是否可互通。");
+  }
+
+  if (!res.ok) {
+    throw new Error(await parseError(res));
+  }
+
+  if (!res.body || typeof res.body.getReader !== "function") {
+    throw new Error("当前环境不支持流式响应，请稍后再试。");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let lineBuffer = "";
+  let eventDataLines: string[] = [];
+
+  const flushEvent = (): boolean => {
+    if (eventDataLines.length === 0) return false;
+    const payloadText = eventDataLines.join("\n");
+    eventDataLines = [];
+    if (!payloadText) return false;
+    if (payloadText === "[DONE]") return true;
+
+    let parsed:
+      | {
+          chunk?: unknown;
+          done?: unknown;
+          error?: unknown;
+          debug?: unknown;
+          tool_call?: unknown;
+        }
+      | null = null;
+
+    try {
+      parsed = JSON.parse(payloadText) as {
+        chunk?: unknown;
+        done?: unknown;
+        error?: unknown;
+        debug?: unknown;
+        tool_call?: unknown;
+      };
+    } catch {
+      if (/^\s*\{/.test(payloadText) && payloadText.includes("\"chunk\"")) {
+        return false;
+      }
+      onChunk(payloadText);
+      return false;
+    }
+
+    if (parsed.done === true) {
+      onDone?.({ debug: parsed.debug });
+      return true;
+    }
+
+    if (typeof parsed.error === "string" && parsed.error.trim()) {
+      throw new Error(parsed.error);
+    }
+
+    if (parsed.tool_call && onToolCall) {
+      onToolCall(parsed.tool_call as ToolCallEvent);
+      return false;
+    }
+
+    if (typeof parsed.chunk === "string" && parsed.chunk) {
+      onChunk(parsed.chunk);
+    }
+    return false;
+  };
+
+  const consumeLines = (): boolean => {
+    while (true) {
+      const nl = lineBuffer.indexOf("\n");
+      if (nl < 0) return false;
+      let line = lineBuffer.slice(0, nl);
+      lineBuffer = lineBuffer.slice(nl + 1);
+      if (line.endsWith("\r")) {
+        line = line.slice(0, -1);
+      }
+      if (line === "") {
+        if (flushEvent()) return true;
+        continue;
+      }
+      if (line.startsWith("data:")) {
+        eventDataLines.push(line.slice(5).trimStart());
+      }
+    }
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    lineBuffer += decoder.decode(value, { stream: true });
+    if (consumeLines()) return;
+  }
+
+  lineBuffer += decoder.decode();
+  if (consumeLines()) return;
+  if (lineBuffer.trim()) {
+    let line = lineBuffer;
+    if (line.endsWith("\r")) line = line.slice(0, -1);
+    if (line.startsWith("data:")) {
+      eventDataLines.push(line.slice(5).trimStart());
+    }
+  }
+  flushEvent();
+}
+
 export function loginWithPassword(email: string, password: string) {
   return apiRequest<TokenResponse>("/api/auth/login", {
     method: "POST",
     body: JSON.stringify({
       email: email.trim(),
       password,
+    }),
+  });
+}
+
+export function sendAuthEmailCode(
+  email: string,
+  purpose: "register" | "login" | "reset_password"
+) {
+  return apiRequest<SendEmailCodeResponse>("/api/auth/email/send-code", {
+    method: "POST",
+    body: JSON.stringify({
+      email: email.trim(),
+      purpose,
+    }),
+  });
+}
+
+export function loginWithCode(email: string, code: string) {
+  return apiRequest<TokenResponse>("/api/auth/login/code", {
+    method: "POST",
+    body: JSON.stringify({
+      email: email.trim(),
+      code: code.trim(),
+    }),
+  });
+}
+
+export function registerWithCode(email: string, password: string, confirmPassword: string, code: string) {
+  return apiRequest<TokenResponse>("/api/auth/register/code", {
+    method: "POST",
+    body: JSON.stringify({
+      email: email.trim(),
+      password,
+      confirm_password: confirmPassword,
+      code: code.trim(),
+    }),
+  });
+}
+
+export function resetPassword(email: string, code: string, newPassword: string, confirmPassword: string) {
+  return apiRequest<ActionResponse>("/api/auth/password/reset", {
+    method: "POST",
+    body: JSON.stringify({
+      email: email.trim(),
+      code: code.trim(),
+      new_password: newPassword,
+      confirm_password: confirmPassword,
     }),
   });
 }
@@ -349,7 +603,7 @@ export function deleteConversation(conversationId: number, token: string) {
   );
 }
 
-export function sendChat(content: string, token: string) {
+export function sendChat(content: string, token: string, sourcePlatform: SourcePlatform = getClientPlatform()) {
   return apiRequest<ChatSendResponse>(
     "/api/chat/send",
     {
@@ -357,8 +611,7 @@ export function sendChat(content: string, token: string) {
       body: JSON.stringify({
         content,
         image_urls: [],
-        // Backend currently only recognizes web / miniapp.
-        source_platform: "web",
+        source_platform: sourcePlatform,
       }),
     },
     token
@@ -461,4 +714,9 @@ export function fetchSkills(token: string) {
 export function getNotificationsWsUrl(token: string) {
   const base = ensureApiBase();
   return `${base.replace(/^http:/, "ws:").replace(/^https:/, "wss:")}/api/notifications/ws?token=${encodeURIComponent(token)}`;
+}
+
+export function getChatWsUrl(token: string) {
+  const base = ensureApiBase();
+  return `${base.replace(/^http:/, "ws:").replace(/^https:/, "wss:")}/api/chat/ws?token=${encodeURIComponent(token)}`;
 }

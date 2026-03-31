@@ -1043,14 +1043,14 @@ async def handle_message(
         )
 
     debug_payload: dict[str, Any] | None = None
-    miniapp_stream_enabled = platform == "miniapp"
-    miniapp_stream_used = False
-    miniapp_stream_chunks: list[str] = []
-    miniapp_stream_id = f"miniapp:{conversation.id}:{int(user_message_row.id or 0)}"
-    miniapp_stream_created_at = _to_client_tz_iso(datetime.now(timezone.utc))
+    client_stream_enabled = platform == "miniapp"
+    client_stream_used = False
+    client_stream_chunks: list[str] = []
+    client_stream_id = f"{platform}:{conversation.id}:{int(user_message_row.id or 0)}"
+    client_stream_created_at = _to_client_tz_iso(datetime.now(timezone.utc))
 
-    async def _emit_miniapp_stream_chunk(chunk: str) -> None:
-        nonlocal miniapp_stream_used
+    async def _emit_client_stream_chunk(chunk: str) -> None:
+        nonlocal client_stream_used
         text = str(chunk or "")
         if not text:
             return
@@ -1064,31 +1064,31 @@ async def handle_message(
                 tool_payload = _json.loads(text[len(TOOL_EVENT_PREFIX):])
             except Exception:
                 return
-            miniapp_stream_used = True
+            client_stream_used = True
             await get_notification_hub().send_to_user(
                 user_id,
                 {
                     "type": "tool_event",
                     **tool_payload,
-                    "stream_id": miniapp_stream_id,
+                    "stream_id": client_stream_id,
                     "platform": platform,
                     "conversation_id": conversation.id,
                 },
             )
             return
 
-        miniapp_stream_chunks.append(text)
-        miniapp_stream_used = True
+        client_stream_chunks.append(text)
+        client_stream_used = True
         await get_notification_hub().send_to_user(
             user_id,
             {
                 "type": "message_chunk",
-                "stream_id": miniapp_stream_id,
+                "stream_id": client_stream_id,
                 "chunk": text,
                 "done": False,
                 "platform": platform,
                 "conversation_id": conversation.id,
-                "created_at": miniapp_stream_created_at,
+                "created_at": client_stream_created_at,
             },
         )
 
@@ -1160,12 +1160,11 @@ async def handle_message(
             tool_message_token = set_tool_message_id(int(user_message_row.id or 0) or None)
             stream_token = None
             stream_nodes_token = None
-            if miniapp_stream_enabled:
-                stream_token = set_llm_streamer(_emit_miniapp_stream_chunk)
-                # Stream only terminal NL generation nodes.
-                stream_nodes_token = set_llm_stream_nodes(
-                    {"chat_manager_final", "help_center", "complex_task_agent"}
-                )
+            if client_stream_enabled:
+                stream_token = set_llm_streamer(_emit_client_stream_chunk)
+                # Don't set stream_nodes — main_agent.astream_events handles
+                # streaming itself. Setting stream_nodes would cause
+                # TrackingChatOpenAI to ALSO stream, resulting in double output.
             try:
                 try:
                     result = await graph.ainvoke(
@@ -1198,28 +1197,28 @@ async def handle_message(
                 reset_scheduler(scheduler_token)
                 reset_session(session_token)
 
-    if miniapp_stream_enabled and responses:
+    if client_stream_enabled and responses:
         joined = "\n".join(responses)
-        streamed_text = "".join(miniapp_stream_chunks)
+        streamed_text = "".join(client_stream_chunks)
         if joined and not streamed_text:
-            await _emit_miniapp_stream_chunk(joined)
+            await _emit_client_stream_chunk(joined)
         elif joined and streamed_text and joined.startswith(streamed_text):
             suffix = joined[len(streamed_text) :]
             if suffix:
-                await _emit_miniapp_stream_chunk(suffix)
+                await _emit_client_stream_chunk(suffix)
         if joined:
-            miniapp_stream_used = True
-        if miniapp_stream_used:
+            client_stream_used = True
+        if client_stream_used:
             await get_notification_hub().send_to_user(
                 user_id,
                 {
                     "type": "message_chunk",
-                    "stream_id": miniapp_stream_id,
+                    "stream_id": client_stream_id,
                     "chunk": "",
                     "done": True,
                     "platform": platform,
                     "conversation_id": conversation.id,
-                    "created_at": miniapp_stream_created_at,
+                    "created_at": client_stream_created_at,
                 },
             )
 
@@ -1249,7 +1248,7 @@ async def handle_message(
         )
         await session.commit()
         assistant_outputs.append(text)
-        if platform != "web" and not (platform == "miniapp" and miniapp_stream_used):
+        if platform != "web" and not (client_stream_enabled and client_stream_used):
             await get_notification_hub().send_to_user(
                 user_id,
                 {

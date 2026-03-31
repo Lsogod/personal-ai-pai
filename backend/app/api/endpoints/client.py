@@ -152,6 +152,13 @@ def _default_miniapp_home_popup() -> dict:
     }
 
 
+def _normalize_client_platform(raw: str | None, default: str = "web") -> str:
+    value = str(raw or "").strip().lower()
+    if value in {"web", "miniapp", "app", "ios", "android"}:
+        return value
+    return default
+
+
 def _normalize_popup_datetime(value: str | None) -> datetime | None:
     raw = (value or "").strip()
     if not raw:
@@ -302,8 +309,14 @@ async def send_auth_email_code(payload: SendEmailCodeRequest, session: AsyncSess
 
 
 @router.post("/auth/register/code", response_model=TokenResponse)
-async def register_with_code(payload: RegisterWithCodeRequest, session: AsyncSession = Depends(get_session)):
+async def register_with_code(
+    payload: RegisterWithCodeRequest,
+    session: AsyncSession = Depends(get_session),
+    x_client_platform: Optional[str] = Header(default=None, alias="X-Client-Platform"),
+):
     email = normalize_email(str(payload.email or ""))
+    login_platform = _normalize_client_platform(x_client_platform, "web")
+    identity_platform_id = email
     password = _validate_password_strength(payload.password)
     _validate_password_confirmation(payload.password, payload.confirm_password)
 
@@ -319,24 +332,32 @@ async def register_with_code(payload: RegisterWithCodeRequest, session: AsyncSes
         raise HTTPException(status_code=400, detail="verification code expired") from exc
 
     user = User(
-        platform="web",
+        platform=login_platform,
         platform_id=email,
         email=email,
         hashed_password=hash_password(password),
     )
     session.add(user)
     await session.flush()
-    await ensure_identity(session, user.id, "web", email)
+    if login_platform in {"ios", "android", "app"}:
+        identity_platform_id = f"{login_platform}:{user.id}"
+    await ensure_identity(session, user.id, login_platform, identity_platform_id)
     await session.commit()
     await session.refresh(user)
 
-    token = create_access_token(user.id, source_platform="web")
+    token = create_access_token(user.id, source_platform=login_platform)
     return TokenResponse(access_token=token)
 
 
 @router.post("/auth/login/code", response_model=TokenResponse)
-async def login_with_code(payload: LoginWithCodeRequest, session: AsyncSession = Depends(get_session)):
+async def login_with_code(
+    payload: LoginWithCodeRequest,
+    session: AsyncSession = Depends(get_session),
+    x_client_platform: Optional[str] = Header(default=None, alias="X-Client-Platform"),
+):
     email = normalize_email(str(payload.email or ""))
+    login_platform = _normalize_client_platform(x_client_platform, "web")
+    identity_platform_id = email
     try:
         await verify_email_code(email=email, purpose=PURPOSE_LOGIN, code=payload.code)
     except EmailCodeInvalidError as exc:
@@ -348,7 +369,10 @@ async def login_with_code(payload: LoginWithCodeRequest, session: AsyncSession =
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=400, detail="email not registered")
-    token = create_access_token(user.id, source_platform="web")
+    if login_platform in {"ios", "android", "app"}:
+        identity_platform_id = f"{login_platform}:{user.id}"
+    await ensure_identity(session, user.id, login_platform, identity_platform_id)
+    token = create_access_token(user.id, source_platform=login_platform)
     return TokenResponse(access_token=token)
 
 
@@ -377,8 +401,14 @@ async def reset_password(payload: ResetPasswordRequest, session: AsyncSession = 
 
 
 @router.post("/auth/register", response_model=TokenResponse)
-async def register(payload: RegisterRequest, session: AsyncSession = Depends(get_session)):
+async def register(
+    payload: RegisterRequest,
+    session: AsyncSession = Depends(get_session),
+    x_client_platform: Optional[str] = Header(default=None, alias="X-Client-Platform"),
+):
     email = normalize_email(str(payload.email or ""))
+    login_platform = _normalize_client_platform(x_client_platform, "web")
+    identity_platform_id = email
     password = _validate_password_strength(payload.password)
     _validate_password_confirmation(payload.password, payload.confirm_password)
     result = await session.execute(select(User).where(User.email == email).limit(1))
@@ -386,24 +416,32 @@ async def register(payload: RegisterRequest, session: AsyncSession = Depends(get
         raise HTTPException(status_code=400, detail="email already exists")
 
     user = User(
-        platform="web",
+        platform=login_platform,
         platform_id=email,
         email=email,
         hashed_password=hash_password(password),
     )
     session.add(user)
     await session.flush()
-    await ensure_identity(session, user.id, "web", email)
+    if login_platform in {"ios", "android", "app"}:
+        identity_platform_id = f"{login_platform}:{user.id}"
+    await ensure_identity(session, user.id, login_platform, identity_platform_id)
     await session.commit()
     await session.refresh(user)
 
-    token = create_access_token(user.id, source_platform="web")
+    token = create_access_token(user.id, source_platform=login_platform)
     return TokenResponse(access_token=token)
 
 
 @router.post("/auth/login", response_model=TokenResponse)
-async def login(payload: LoginRequest, session: AsyncSession = Depends(get_session)):
+async def login(
+    payload: LoginRequest,
+    session: AsyncSession = Depends(get_session),
+    x_client_platform: Optional[str] = Header(default=None, alias="X-Client-Platform"),
+):
     email = normalize_email(str(payload.email or ""))
+    login_platform = _normalize_client_platform(x_client_platform, "web")
+    identity_platform_id = email
     result = await session.execute(select(User).where(User.email == email).order_by(User.id.desc()).limit(1))
     user = result.scalar_one_or_none()
     if not user:
@@ -412,7 +450,10 @@ async def login(payload: LoginRequest, session: AsyncSession = Depends(get_sessi
         raise HTTPException(status_code=401, detail="invalid credentials")
     if not verify_password(payload.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="invalid credentials")
-    token = create_access_token(user.id, source_platform="web")
+    if login_platform in {"ios", "android", "app"}:
+        identity_platform_id = f"{login_platform}:{user.id}"
+    await ensure_identity(session, user.id, login_platform, identity_platform_id)
+    token = create_access_token(user.id, source_platform=login_platform)
     return TokenResponse(access_token=token)
 
 
@@ -490,8 +531,12 @@ async def profile(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
     authorization: Optional[str] = Header(default=None),
+    x_client_platform: Optional[str] = Header(default=None, alias="X-Client-Platform"),
 ):
     current_platform = str(user.platform or "").strip().lower()
+    header_platform = _normalize_client_platform(x_client_platform, "")
+    if header_platform in {"ios", "android"}:
+        await ensure_identity(session, user.id, header_platform, f"{header_platform}:{user.id}")
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ", 1)[1]
         try:
@@ -501,6 +546,8 @@ async def profile(
                 current_platform = src
         except HTTPException:
             pass
+    if header_platform in {"ios", "android"} and current_platform in {"", "web", "app"}:
+        current_platform = header_platform
 
     return ProfileResponse(
         uuid=user.uuid,
@@ -630,6 +677,7 @@ async def user_bind_code_consume(
     payload: BindCodeConsumeRequest,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
+    x_client_platform: Optional[str] = Header(default=None, alias="X-Client-Platform"),
 ):
     code = (payload.code or "").strip()
     if not code.isdigit() or len(code) != 6:
@@ -643,7 +691,10 @@ async def user_bind_code_consume(
         return BindCodeConsumeResponse(ok=False, message=message, canonical_user_id=canonical_user_id)
     new_token = None
     if canonical_user_id and canonical_user_id != user.id:
-        new_token = create_access_token(canonical_user_id)
+        new_token = create_access_token(
+            canonical_user_id,
+            source_platform=_normalize_client_platform(x_client_platform, "web"),
+        )
     return BindCodeConsumeResponse(
         ok=True,
         message=message,
@@ -945,6 +996,125 @@ async def _sse_stream_live(
                 pass
 
 
+async def _ws_stream_live(
+    websocket: WebSocket,
+    *,
+    source_platform: str,
+    normalized: dict,
+    session: AsyncSession,
+):
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    streamed_chunks: list[str] = []
+    result_holder: dict[str, dict] = {}
+    error_holder: dict[str, str] = {}
+    created_at = _to_client_tz_iso(datetime.now(timezone.utc))
+
+    TOOL_EVENT_PREFIX = "\x00TOOL_EVENT:"
+
+    async def _on_stream_chunk(chunk: str) -> None:
+        if not chunk:
+            return
+        if chunk.startswith(TOOL_EVENT_PREFIX):
+            await queue.put(chunk)
+            return
+        streamed_chunks.append(chunk)
+        await queue.put(chunk)
+
+    async def _runner() -> None:
+        streamer_token = set_llm_streamer(_on_stream_chunk)
+        try:
+            result_holder["result"] = await handle_message(source_platform, normalized, session)
+        except Exception as exc:
+            error_holder["error"] = str(exc)
+        finally:
+            reset_llm_streamer(streamer_token)
+            await queue.put(None)
+
+    task = asyncio.create_task(_runner())
+    try:
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            if isinstance(item, str) and item.startswith(TOOL_EVENT_PREFIX):
+                try:
+                    await websocket.send_json(json.loads(item[len(TOOL_EVENT_PREFIX) :]))
+                except Exception:
+                    pass
+                continue
+            await websocket.send_json(
+                {
+                    "type": "message_chunk",
+                    "chunk": item,
+                    "done": False,
+                    "created_at": created_at,
+                }
+            )
+
+        await task
+        if error_holder.get("error"):
+            await websocket.send_json(
+                {
+                    "type": "chat_error",
+                    "error": error_holder["error"],
+                    "done": True,
+                }
+            )
+            return
+
+        result = result_holder.get("result") or {}
+        if not result.get("ok"):
+            await websocket.send_json(
+                {
+                    "type": "chat_error",
+                    "error": str(result.get("error") or "failed"),
+                    "done": True,
+                }
+            )
+            return
+
+        responses = result.get("responses") or []
+        joined = "\n".join(responses)
+        streamed_text = "".join(streamed_chunks)
+        if joined and not streamed_text:
+            await websocket.send_json(
+                {
+                    "type": "message_chunk",
+                    "chunk": joined,
+                    "done": False,
+                    "created_at": created_at,
+                }
+            )
+        elif joined and streamed_text and joined.startswith(streamed_text):
+            suffix = joined[len(streamed_text) :]
+            if suffix:
+                await websocket.send_json(
+                    {
+                        "type": "message_chunk",
+                        "chunk": suffix,
+                        "done": False,
+                        "created_at": created_at,
+                    }
+                )
+
+        done_payload: dict[str, Any] = {
+            "type": "message_chunk",
+            "chunk": "",
+            "done": True,
+            "created_at": created_at,
+        }
+        debug_payload = result.get("debug")
+        if isinstance(debug_payload, dict):
+            done_payload["debug"] = debug_payload
+        await websocket.send_json(done_payload)
+    finally:
+        if not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=0.1)
+            except Exception:
+                pass
+
+
 @router.post("/chat/send")
 async def chat_send(
     payload: ChatSendRequest,
@@ -952,8 +1122,8 @@ async def chat_send(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    source_platform = (payload.source_platform or "web").strip().lower()
-    if source_platform not in {"web", "miniapp"}:
+    source_platform = _normalize_client_platform(payload.source_platform, "web")
+    if source_platform not in {"web", "miniapp", "app", "ios", "android"}:
         source_platform = "web"
 
     platform_id = ""
@@ -974,6 +1144,9 @@ async def chat_send(
     if source_platform == "web":
         platform_id = f"web:{user.id}"
         await ensure_identity(session, user.id, "web", platform_id)
+    elif source_platform in {"app", "ios", "android"}:
+        platform_id = f"{source_platform}:{user.id}"
+        await ensure_identity(session, user.id, source_platform, platform_id)
 
     normalized = {
         "platform_id": platform_id,
@@ -1031,27 +1204,46 @@ async def chat_ws(websocket: WebSocket):
                 await websocket.close(code=4401)
                 return
             while True:
-                web_platform_id = f"web:{user.id}"
-                await ensure_identity(session, user.id, "web", web_platform_id)
                 payload = await websocket.receive_json()
+                source_platform = _normalize_client_platform(payload.get("source_platform"), "web")
+                if source_platform not in {"web", "app", "ios", "android"}:
+                    source_platform = "web"
+
+                if source_platform in {"app", "ios", "android"}:
+                    platform_id = f"{source_platform}:{user.id}"
+                    await ensure_identity(session, user.id, source_platform, platform_id)
+                else:
+                    platform_id = f"web:{user.id}"
+                    await ensure_identity(session, user.id, "web", platform_id)
+
                 content = str(payload.get("content") or "")
-                image_urls = payload.get("image_urls") or []
+                image_urls = _normalize_image_urls(payload.get("image_urls"))
+                stream = bool(payload.get("stream"))
                 normalized = {
-                    "platform_id": web_platform_id,
+                    "platform_id": platform_id,
                     "content": content,
                     "image_urls": image_urls,
-                    "message_id": f"web-ws-{datetime.utcnow().timestamp()}",
+                    "message_id": f"{source_platform}-ws-{datetime.utcnow().timestamp()}",
                     "event_ts": int(datetime.utcnow().timestamp()),
-                    "raw_data": {"web": True, "transport": "ws"},
+                    "raw_data": {"source_platform": source_platform, "transport": "ws"},
                 }
-                result = await handle_message("web", normalized, session)
-                if not result.get("ok"):
-                    await websocket.send_json({"ok": False, "error": result.get("error", "failed")})
+
+                if stream:
+                    await _ws_stream_live(
+                        websocket,
+                        source_platform=source_platform,
+                        normalized=normalized,
+                        session=session,
+                    )
                 else:
-                    payload = {"ok": True, "responses": result.get("responses", [])}
-                    if isinstance(result.get("debug"), dict):
-                        payload["debug"] = result.get("debug")
-                    await websocket.send_json(payload)
+                    result = await handle_message(source_platform, normalized, session)
+                    if not result.get("ok"):
+                        await websocket.send_json({"ok": False, "error": result.get("error", "failed")})
+                    else:
+                        response_payload = {"ok": True, "responses": result.get("responses", [])}
+                        if isinstance(result.get("debug"), dict):
+                            response_payload["debug"] = result.get("debug")
+                        await websocket.send_json(response_payload)
     except WebSocketDisconnect:
         return
 

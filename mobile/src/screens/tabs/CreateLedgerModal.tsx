@@ -10,12 +10,13 @@ import {
 import { useMutation } from "@tanstack/react-query";
 
 import { PanelModal } from "../../components/PanelModal";
-import { createLedger } from "../../lib/api";
+import { createLedger, encodeLedgerCategory, LedgerEntryKind } from "../../lib/api";
 import { colors, radii, surfaceCard } from "../../design/tokens";
 
 type CreateLedgerModalProps = {
   visible: boolean;
   token: string | null;
+  initialKind?: LedgerEntryKind;
   onClose: () => void;
   onCreated: () => Promise<void> | void;
 };
@@ -23,10 +24,12 @@ type CreateLedgerModalProps = {
 export function CreateLedgerModal({
   visible,
   token,
+  initialKind = "expense",
   onClose,
   onCreated,
 }: CreateLedgerModalProps) {
   const [amountText, setAmountText] = useState("");
+  const [entryKind, setEntryKind] = useState<LedgerEntryKind>("expense");
   const [category, setCategory] = useState("");
   const [item, setItem] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -34,10 +37,11 @@ export function CreateLedgerModal({
   useEffect(() => {
     if (!visible) return;
     setAmountText("");
+    setEntryKind(initialKind);
     setCategory("");
     setItem("");
     setNotice(null);
-  }, [visible]);
+  }, [initialKind, visible]);
 
   const amount = useMemo(() => Number(amountText.replace(/,/g, ".").trim()), [amountText]);
 
@@ -46,7 +50,7 @@ export function CreateLedgerModal({
       createLedger(
         {
           amount,
-          category: category.trim() || undefined,
+          category: encodeLedgerCategory(category.trim(), entryKind),
           item: item.trim() || undefined,
         },
         token!
@@ -64,10 +68,30 @@ export function CreateLedgerModal({
     <PanelModal visible={visible} title="新建账单" onClose={onClose}>
       <View style={styles.hero}>
         <Text style={styles.heroTitle}>手动记一笔</Text>
-        <Text style={styles.heroDesc}>直接对齐后端 `POST /api/ledgers`，保存后会刷新账单明细和本月统计。</Text>
+        <Text style={styles.heroDesc}>收入不会再按文本自动识别，必须在这里手动切到“收入”后再保存。</Text>
       </View>
 
       <View style={styles.card}>
+        <Text style={styles.label}>类型</Text>
+        <View style={styles.segmentedWrap}>
+          <Pressable
+            style={[styles.segmentedItem, entryKind === "expense" && styles.segmentedItemActive]}
+            onPress={() => setEntryKind("expense")}
+          >
+            <Text style={[styles.segmentedText, entryKind === "expense" && styles.segmentedTextActive]}>
+              支出
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.segmentedItem, entryKind === "income" && styles.segmentedIncomeActive]}
+            onPress={() => setEntryKind("income")}
+          >
+            <Text style={[styles.segmentedText, entryKind === "income" && styles.segmentedIncomeText]}>
+              收入
+            </Text>
+          </Pressable>
+        </View>
+
         <Text style={styles.label}>金额</Text>
         <TextInput
           value={amountText}
@@ -88,7 +112,7 @@ export function CreateLedgerModal({
             setCategory(value);
             setNotice(null);
           }}
-          placeholder="例如 餐饮 / 交通"
+          placeholder={entryKind === "income" ? "例如 工资 / 奖金 / 报销" : "例如 餐饮 / 交通"}
           placeholderTextColor={colors.text4}
           style={styles.input}
         />
@@ -100,12 +124,12 @@ export function CreateLedgerModal({
             setItem(value);
             setNotice(null);
           }}
-          placeholder="例如 午饭 / 地铁"
+          placeholder={entryKind === "income" ? "例如 3月工资 / 差旅报销" : "例如 午饭 / 地铁"}
           placeholderTextColor={colors.text4}
           style={styles.input}
         />
 
-        <Text style={styles.hint}>时间默认使用当前时间；分类和项目为空时由后端填默认值。</Text>
+        <Text style={styles.hint}>默认按支出保存；如果是收入，请先手动切到上面的“收入”。</Text>
         {notice ? <Text style={styles.notice}>{notice}</Text> : null}
 
         <Pressable
@@ -150,6 +174,39 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "700",
     color: colors.text2,
+  },
+  segmentedWrap: {
+    flexDirection: "row",
+    padding: 4,
+    borderRadius: radii.md,
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: 6,
+  },
+  segmentedItem: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.sm,
+    paddingVertical: 12,
+  },
+  segmentedItemActive: {
+    backgroundColor: colors.primary,
+  },
+  segmentedIncomeActive: {
+    backgroundColor: colors.accent,
+  },
+  segmentedText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.text3,
+  },
+  segmentedTextActive: {
+    color: "#ffffff",
+  },
+  segmentedIncomeText: {
+    color: "#ffffff",
   },
   input: {
     borderWidth: 1,
