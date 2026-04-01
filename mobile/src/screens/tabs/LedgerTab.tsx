@@ -31,7 +31,7 @@ import {
 } from "../../lib/api";
 import { formatDateLabel, formatHmLocal, formatMonthLabel, parseServerDate } from "../../lib/date";
 import { useAuthStore } from "../../store/auth";
-import { colors, radii, shadowSm, spacing, surfaceCard } from "../../design/tokens";
+import { colors, radii, shadowMd, shadowSm, spacing, surfaceCard } from "../../design/tokens";
 import { CreateLedgerModal } from "./CreateLedgerModal";
 import { EditLedgerModal } from "./EditLedgerModal";
 
@@ -798,17 +798,18 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderRadius: radii.xl,
     backgroundColor: colors.primary,
-    paddingHorizontal: 20,
-    paddingVertical: 18,
+    paddingHorizontal: 22,
+    paddingVertical: 20,
+    ...shadowMd,
   },
   summaryGlow: {
     position: "absolute",
     right: -30,
     bottom: -38,
-    width: 150,
-    height: 150,
+    width: 160,
+    height: 160,
     borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.09)",
+    backgroundColor: "rgba(255,255,255,0.1)",
   },
   summaryLabel: {
     fontSize: 13,
@@ -894,17 +895,19 @@ const styles = StyleSheet.create({
   },
   highlightCard: {
     flex: 1,
-    padding: 16,
-    gap: 6,
+    padding: 18,
+    gap: 8,
     ...surfaceCard,
   },
   highlightLabel: {
     fontSize: 12,
     fontWeight: "700",
     color: colors.text3,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
   },
   highlightValue: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: "800",
     color: colors.text,
   },
@@ -1130,12 +1133,12 @@ const styles = StyleSheet.create({
   fab: {
     position: "absolute",
     right: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     backgroundColor: colors.primary,
     alignItems: "center",
     justifyContent: "center",
-    ...shadowSm,
+    ...shadowMd,
   },
 });

@@ -66,10 +66,10 @@ type RenderableChatMessage = ChatMessage & {
 /* ------------------------------------------------------------------ */
 
 const SUGGESTIONS = [
-  { icon: "receipt-outline" as const, text: "午饭 35 元记一笔" },
-  { icon: "calendar-outline" as const, text: "明早 9 点提醒我开会" },
-  { icon: "search-outline" as const, text: "这个月花了多少钱？" },
-  { icon: "chatbubble-outline" as const, text: "帮我写一段自我介绍" },
+  { icon: "receipt-outline" as const, text: "午饭 35 元记一笔", color: colors.accent, bg: colors.accentLight },
+  { icon: "calendar-outline" as const, text: "明早 9 点提醒我开会", color: colors.warning, bg: colors.warningLight },
+  { icon: "search-outline" as const, text: "这个月花了多少钱？", color: colors.primary, bg: colors.primaryLight },
+  { icon: "chatbubble-outline" as const, text: "帮我写一段自我介绍", color: "#8b5cf6", bg: colors.iconBgPurple },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -162,7 +162,6 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
   const [wsState, setWsState] = useState<"connecting" | "open" | "closed">("connecting");
   const [notifyCards, setNotifyCards] = useState<NoticeCard[]>([]);
   const [streamingReply, setStreamingReply] = useState("");
-  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [composerHeight, setComposerHeight] = useState(86);
   const [showScrollDown, setShowScrollDown] = useState(false);
@@ -176,6 +175,8 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
   const pendingStreamResolveRef = useRef<((value: { reply: string }) => void) | null>(null);
   const pendingStreamRejectRef = useRef<((reason?: unknown) => void) | null>(null);
   const lastAnimatedMessageCountRef = useRef(0);
+  const didInitialListLayoutRef = useRef(false);
+  const pendingViewportSnapRef = useRef(false);
 
   useEffect(() => {
     const prefill = consumePrefill?.();
@@ -233,6 +234,14 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
   function scrollToBottom(animated = true) {
     requestAnimationFrame(() => {
       flatListRef.current?.scrollToEnd({ animated });
+    });
+  }
+
+  function flushBottomSnap(animated = false) {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToEnd({ animated });
+      });
     });
   }
 
@@ -357,33 +366,63 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
   }, [queryClient, token]);
 
   useEffect(() => {
-    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-
-    const handleKeyboardShow = (event: KeyboardEvent) => {
+    const syncKeyboardFrame = (event: KeyboardEvent) => {
       const windowHeight = Dimensions.get("window").height;
       const overlapByScreenY = windowHeight - (event.endCoordinates?.screenY || windowHeight);
       const nextHeight = Math.max(overlapByScreenY || event.endCoordinates?.height || 0, 0);
-      animateLayout();
+      const duration = Math.max(160, event.duration || (Platform.OS === "ios" ? 260 : 180));
+      if (Platform.OS === "ios" && typeof Keyboard.scheduleLayoutAnimation === "function") {
+        Keyboard.scheduleLayoutAnimation(event);
+      } else {
+        animateLayout();
+      }
+      pendingViewportSnapRef.current = true;
       setKeyboardHeight(nextHeight);
-      setKeyboardOpen(true);
-      runScrollSync(Platform.OS === "ios" ? [0, 120, 260, 420] : [0, 80, 180, 320], false);
+      runScrollSync([duration], false);
     };
 
-    const handleKeyboardHide = (_event: KeyboardEvent) => {
+    const handleAndroidShow = (event: KeyboardEvent) => {
+      syncKeyboardFrame(event);
+    };
+
+    const handleAndroidHide = () => {
       animateLayout();
+      pendingViewportSnapRef.current = true;
       setKeyboardHeight(0);
-      setKeyboardOpen(false);
-      runScrollSync(Platform.OS === "ios" ? [40, 140] : [20, 100], false);
+      runScrollSync([120], false);
     };
 
-    const showSub = Keyboard.addListener(showEvent, handleKeyboardShow);
-    const hideSub = Keyboard.addListener(hideEvent, handleKeyboardHide);
+    const handleIOSHide = (event?: KeyboardEvent) => {
+      if (event && typeof Keyboard.scheduleLayoutAnimation === "function") {
+        Keyboard.scheduleLayoutAnimation(event);
+      } else {
+        animateLayout();
+      }
+      pendingViewportSnapRef.current = true;
+      setKeyboardHeight(0);
+      runScrollSync([220], false);
+    };
+
+    const showSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillChangeFrame" : "keyboardDidShow",
+      Platform.OS === "ios" ? syncKeyboardFrame : handleAndroidShow
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      Platform.OS === "ios" ? handleIOSHide : handleAndroidHide
+    );
+    const hideFallbackSub = Platform.OS === "ios"
+      ? Keyboard.addListener("keyboardDidHide", () => {
+          setKeyboardHeight(0);
+        })
+      : null;
+
     return () => {
       showSub.remove();
       hideSub.remove();
+      hideFallbackSub?.remove();
     };
-  }, [insets.bottom]);
+  }, []);
 
   useEffect(() => {
     if (!token) return;
@@ -599,6 +638,8 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
   const loading = historyQuery.isLoading && messages.length === 0;
   const nickname = profileQuery.data?.nickname || "你";
   const aiEmoji = profileQuery.data?.ai_emoji || "✨";
+  const keyboardVisible = keyboardHeight > 0;
+  const keyboardInset = Math.max(bottomInset, keyboardHeight);
 
   useEffect(() => {
     if (messages.length > lastAnimatedMessageCountRef.current) {
@@ -606,16 +647,12 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
     }
     lastAnimatedMessageCountRef.current = messages.length;
     if (messages.length === 0 && !streamingReply) return;
-    scrollToBottom(!keyboardOpen && !streamingReply);
-    if (keyboardOpen) {
-      runScrollSync([0, 90], false);
+    if (keyboardVisible) {
+      scrollToBottom(false);
+      return;
     }
-  }, [keyboardOpen, messages.length, streamingReply]);
-
-  useEffect(() => {
-    if (!keyboardOpen) return;
-    runScrollSync([0, 80], false);
-  }, [bottomInset, composerHeight, keyboardHeight, keyboardOpen]);
+    scrollToBottom(!streamingReply);
+  }, [keyboardVisible, messages.length, streamingReply]);
 
   /* ---- Handlers ---- */
 
@@ -704,15 +741,22 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
   function renderEmptyState() {
     return (
       <View style={styles.emptyState}>
-        <View style={styles.emptyIconWrap}>
-          <Text style={styles.emptyEmoji}>{aiEmoji}</Text>
+        <View style={styles.emptyDecoOrb1} />
+        <View style={styles.emptyDecoOrb2} />
+        <View style={styles.emptyIconOuter}>
+          <View style={styles.emptyIconWrap}>
+            <Text style={styles.emptyEmoji}>{aiEmoji}</Text>
+          </View>
         </View>
-        <Text style={styles.emptyTitle}>Hi {nickname}，有什么可以帮你的？</Text>
-        <Text style={styles.emptySubtitle}>我是你的 AI 助手，可以帮你记账、设提醒、回答问题</Text>
+        <Text style={styles.emptyTitle}>Hi {nickname}，</Text>
+        <Text style={styles.emptyTitle2}>有什么可以帮你的？</Text>
+        <Text style={styles.emptySubtitle}>记账 · 提醒 · 问答 · 什么都能聊</Text>
         <View style={styles.suggestionsGrid}>
           {SUGGESTIONS.map((s) => (
             <Pressable key={s.text} style={styles.suggestionChip} onPress={() => void handleSend(s.text)}>
-              <Ionicons name={s.icon} size={16} color={colors.primary} />
+              <View style={[styles.suggestionIcon, { backgroundColor: s.bg }]}>
+                <Ionicons name={s.icon} size={15} color={s.color} />
+              </View>
               <Text style={styles.suggestionText}>{s.text}</Text>
             </Pressable>
           ))}
@@ -724,9 +768,6 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
   /* ================================================================ */
   /*  RENDER                                                          */
   /* ================================================================ */
-
-  const composerOffset = keyboardOpen ? keyboardHeight : bottomInset;
-  const viewportInset = composerHeight + composerOffset;
 
   return (
     <View style={styles.page}>
@@ -787,7 +828,7 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
         <View style={styles.headerRow}>
           <View style={styles.headerLeft}>
             <View style={styles.headerAvatar}>
-              <Text style={{ fontSize: 18 }}>{aiEmoji}</Text>
+              <Text style={{ fontSize: 18, marginTop: -1 }}>{aiEmoji}</Text>
             </View>
             <View>
               <Text style={styles.headerTitle}>PAI</Text>
@@ -839,7 +880,14 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
       ) : null}
 
       <View style={styles.chatArea}>
-        <View style={[styles.messageViewport, { bottom: viewportInset }]}>
+        <View
+          style={[styles.messageViewport, { bottom: composerHeight + keyboardInset }]}
+          onLayout={() => {
+            if (!pendingViewportSnapRef.current) return;
+            pendingViewportSnapRef.current = false;
+            flushBottomSnap(false);
+          }}
+        >
           {loading ? (
             <View style={styles.loadingWrap}>
               <ActivityIndicator size="large" color={colors.primary} />
@@ -856,8 +904,19 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
               contentContainerStyle={styles.messageList}
               showsVerticalScrollIndicator={false}
               scrollIndicatorInsets={{ bottom: 20 }}
-              onContentSizeChange={() => scrollToBottom(!keyboardOpen && !streamingReply)}
-              onLayout={() => scrollToBottom(false)}
+              onContentSizeChange={() => {
+                if (pendingViewportSnapRef.current) {
+                  pendingViewportSnapRef.current = false;
+                  flushBottomSnap(false);
+                  return;
+                }
+                scrollToBottom(!keyboardVisible && !streamingReply);
+              }}
+              onLayout={() => {
+                if (didInitialListLayoutRef.current) return;
+                didInitialListLayoutRef.current = true;
+                scrollToBottom(false);
+              }}
               onScroll={(e) => {
                 const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
                 const distanceFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
@@ -872,7 +931,7 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
 
         {showScrollDown && messages.length > 0 ? (
           <Pressable
-            style={[styles.scrollDownBtn, { bottom: composerOffset + composerHeight + 8 }]}
+            style={[styles.scrollDownBtn, { bottom: keyboardInset + composerHeight + 8 }]}
             onPress={() => { scrollToBottom(true); setShowScrollDown(false); }}
           >
             <Ionicons name="chevron-down" size={20} color={colors.primary} />
@@ -880,16 +939,18 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
         ) : null}
 
         <View
+          pointerEvents="box-none"
           style={[
             styles.composerDock,
             {
-              bottom: composerOffset,
-              paddingBottom: keyboardOpen ? 12 : 14,
+              bottom: keyboardInset,
+              paddingBottom: keyboardVisible ? 12 : 14,
             },
           ]}
           onLayout={(event) => {
             const nextHeight = Math.ceil(event.nativeEvent.layout.height);
             if (nextHeight > 0 && Math.abs(nextHeight - composerHeight) > 2) {
+              pendingViewportSnapRef.current = true;
               setComposerHeight(nextHeight);
             }
           }}
@@ -906,7 +967,7 @@ export function ChatTab({ bottomInset, consumePrefill }: ChatTabProps) {
               placeholderTextColor={colors.text4}
               style={styles.composerInput}
               onFocus={() => {
-                runScrollSync([80, 180, 320], false);
+                runScrollSync([180], false);
               }}
               onSubmitEditing={() => void handleSend()}
               blurOnSubmit={false}
@@ -949,7 +1010,7 @@ const styles = StyleSheet.create({
   /* ---- Header ---- */
   header: {
     paddingHorizontal: spacing.pageX,
-    paddingBottom: 12,
+    paddingBottom: 14,
     backgroundColor: colors.surface,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.borderLight,
@@ -965,23 +1026,24 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   headerAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: colors.primaryLight,
     alignItems: "center",
     justifyContent: "center",
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: "700",
+    fontSize: 19,
+    fontWeight: "800",
     color: colors.text,
+    letterSpacing: 0.5,
   },
   headerStatusRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
-    marginTop: 1,
+    marginTop: 2,
   },
   statusDot: {
     width: 7,
@@ -998,7 +1060,7 @@ const styles = StyleSheet.create({
   },
   headerActions: {
     flexDirection: "row",
-    gap: 4,
+    gap: 6,
   },
   headerIconBtn: {
     width: 40,
@@ -1007,6 +1069,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
   },
 
   /* ---- Notifications ---- */
@@ -1074,57 +1138,98 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 32,
+    paddingHorizontal: 28,
     paddingBottom: 20,
-    gap: 12,
+    gap: 6,
+  },
+  emptyDecoOrb1: {
+    position: "absolute",
+    top: "15%",
+    left: -20,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: "rgba(79,110,247,0.06)",
+  },
+  emptyDecoOrb2: {
+    position: "absolute",
+    bottom: "18%",
+    right: -30,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: "rgba(139,92,246,0.05)",
+  },
+  emptyIconOuter: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(79,110,247,0.06)",
+    marginBottom: 12,
   },
   emptyIconWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     backgroundColor: colors.primaryLight,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 4,
   },
   emptyEmoji: {
-    fontSize: 32,
+    fontSize: 30,
   },
   emptyTitle: {
-    fontSize: 20,
-    fontWeight: "700",
+    fontSize: 24,
+    fontWeight: "800",
     color: colors.text,
     textAlign: "center",
+  },
+  emptyTitle2: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: colors.primary,
+    textAlign: "center",
+    marginBottom: 4,
   },
   emptySubtitle: {
     fontSize: 14,
     lineHeight: 21,
     color: colors.text3,
     textAlign: "center",
-    marginBottom: 8,
+    marginBottom: 16,
+    letterSpacing: 1,
   },
   suggestionsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+    width: "100%",
     gap: 10,
-    justifyContent: "center",
     paddingHorizontal: 4,
   },
   suggestionChip: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 7,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: radii.full,
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: radii.lg,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderLight,
+    ...shadowSm,
+  },
+  suggestionIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
   },
   suggestionText: {
-    fontSize: 13,
+    flex: 1,
+    fontSize: 14,
     fontWeight: "600",
-    color: colors.text2,
+    color: colors.text,
   },
 
   /* ---- Messages ---- */
@@ -1148,20 +1253,21 @@ const styles = StyleSheet.create({
   userRow: {
     flexDirection: "row",
     justifyContent: "flex-end",
-    marginBottom: 10,
-    paddingLeft: 52,
+    marginBottom: 12,
+    paddingLeft: 56,
   },
   userBubble: {
-    maxWidth: "85%",
+    maxWidth: "82%",
     backgroundColor: colors.primary,
-    borderRadius: 20,
+    borderRadius: 22,
     borderBottomRightRadius: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    ...shadowSm,
   },
   userText: {
     fontSize: 16,
-    lineHeight: 23,
+    lineHeight: 24,
     color: "#fff",
   },
 
@@ -1169,35 +1275,36 @@ const styles = StyleSheet.create({
   assistantRow: {
     flexDirection: "row",
     alignItems: "flex-end",
-    marginBottom: 10,
-    paddingRight: 52,
-    gap: 8,
+    marginBottom: 12,
+    paddingRight: 48,
+    gap: 10,
   },
   avatarSmall: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.primaryLight,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 2,
   },
   avatarEmoji: {
-    fontSize: 16,
+    fontSize: 15,
   },
   assistantBubble: {
-    maxWidth: "85%",
+    maxWidth: "82%",
     backgroundColor: colors.surface,
-    borderRadius: 20,
+    borderRadius: 22,
     borderBottomLeftRadius: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    borderWidth: 1,
     borderColor: colors.borderLight,
+    ...shadowSm,
   },
   assistantText: {
     fontSize: 16,
-    lineHeight: 23,
+    lineHeight: 24,
     color: colors.text,
   },
 
@@ -1265,27 +1372,29 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 10,
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 10,
-    backgroundColor: colors.bg,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.borderLight,
+    paddingHorizontal: 14,
+    paddingTop: 6,
+    paddingBottom: 6,
+    backgroundColor: "transparent",
   },
   composer: {
     flexDirection: "row",
     alignItems: "flex-end",
     gap: 10,
-    minHeight: 58,
-    paddingLeft: 10,
-    paddingRight: 10,
+    minHeight: 56,
+    paddingLeft: 8,
+    paddingRight: 8,
     paddingVertical: 8,
-    ...surfaceCard,
+    borderRadius: radii.xl,
+    backgroundColor: colors.surface,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    ...shadowMd,
   },
   voiceBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.primaryLight,
@@ -1294,22 +1403,23 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 40,
     maxHeight: 120,
-    paddingHorizontal: 2,
+    paddingHorizontal: 4,
     paddingVertical: 8,
     fontSize: 16,
     lineHeight: 22,
     color: colors.text,
   },
   sendBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.primary,
+    ...shadowSm,
   },
   sendBtnDisabled: {
-    opacity: 0.35,
+    opacity: 0.3,
   },
 
   /* ---- Drawer ---- */

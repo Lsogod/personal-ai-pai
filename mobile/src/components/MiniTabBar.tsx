@@ -1,13 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef } from "react";
+import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { colors, radii, shadowMd } from "../design/tokens";
+import { colors, radii, shadowLg, shadowMd } from "../design/tokens";
 
 export type TabKey = "ledger" | "calendar" | "chat" | "stats" | "me";
 
 type TabBarProps = {
   currentTab: TabKey;
+  hidden?: boolean;
   onChange: (tab: TabKey) => void;
 };
 
@@ -32,12 +34,36 @@ export function getTabBarInset(bottomInset: number) {
   return TAB_BAR_HEIGHT + Math.max(bottomInset - TAB_BAR_OFFSET_REDUCTION, TAB_BAR_MIN_BOTTOM_PADDING);
 }
 
-export function MiniTabBar({ currentTab, onChange }: TabBarProps) {
+export function MiniTabBar({ currentTab, hidden = false, onChange }: TabBarProps) {
   const insets = useSafeAreaInsets();
   const bottomPadding = Math.max(insets.bottom - TAB_BAR_OFFSET_REDUCTION, TAB_BAR_MIN_BOTTOM_PADDING);
+  const visibility = useRef(new Animated.Value(hidden ? 0 : 1)).current;
+
+  useEffect(() => {
+    Animated.timing(visibility, {
+      toValue: hidden ? 0 : 1,
+      duration: hidden ? 180 : 240,
+      useNativeDriver: true,
+    }).start();
+  }, [hidden, visibility]);
+
+  const translateY = visibility.interpolate({
+    inputRange: [0, 1],
+    outputRange: [28, 0],
+  });
 
   return (
-    <View pointerEvents="box-none" style={[styles.wrap, { paddingBottom: bottomPadding }]}>
+    <Animated.View
+      pointerEvents={hidden ? "none" : "box-none"}
+      style={[
+        styles.wrap,
+        {
+          paddingBottom: bottomPadding,
+          opacity: visibility,
+          transform: [{ translateY }],
+        },
+      ]}
+    >
       <View style={styles.bar}>
         {TAB_ITEMS.map((item) => {
           const active = currentTab === item.key;
@@ -57,11 +83,13 @@ export function MiniTabBar({ currentTab, onChange }: TabBarProps) {
                   />
                 </View>
               ) : (
-                <Ionicons
-                  name={active ? item.activeIcon : item.icon}
-                  size={22}
-                  color={active ? colors.primary : colors.text3}
-                />
+                <View style={[styles.iconHolder, active && styles.iconHolderActive]}>
+                  <Ionicons
+                    name={active ? item.activeIcon : item.icon}
+                    size={22}
+                    color={active ? colors.primary : colors.text4}
+                  />
+                </View>
               )}
               <Text style={[styles.label, active && styles.labelActive, isChat && active && styles.labelChat]}>
                 {item.label}
@@ -70,7 +98,7 @@ export function MiniTabBar({ currentTab, onChange }: TabBarProps) {
           );
         })}
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -80,53 +108,68 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
   },
   bar: {
     height: TAB_BAR_HEIGHT,
     flexDirection: "row",
     alignItems: "flex-end",
     justifyContent: "space-around",
-    backgroundColor: "rgba(255,255,255,0.97)",
+    backgroundColor: "rgba(255,255,255,0.96)",
     borderRadius: radii.xl,
     borderWidth: 1,
-    borderColor: colors.borderLight,
-    ...shadowMd,
+    borderColor: "rgba(238,240,246,0.8)",
+    overflow: "visible",
+    ...shadowLg,
   },
   item: {
     flex: 1,
     alignItems: "center",
     justifyContent: "flex-end",
-    gap: 2,
-    paddingBottom: 11,
+    gap: 3,
+    paddingBottom: 10,
   },
   chatItem: {
-    paddingBottom: 8,
+    paddingBottom: 6,
+    zIndex: 10,
+  },
+  iconHolder: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  iconHolderActive: {
+    backgroundColor: colors.primaryLight,
   },
   chatIconWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.primary,
-    transform: [{ translateY: -6 }],
+    transform: [{ translateY: -8 }],
+    borderWidth: 3,
+    borderColor: "rgba(255,255,255,0.96)",
     ...shadowMd,
   },
   chatIconWrapActive: {
-    backgroundColor: colors.primaryDark,
-    transform: [{ translateY: -8 }],
+    backgroundColor: colors.primary,
+    transform: [{ translateY: -10 }],
   },
   label: {
     fontSize: 11,
     fontWeight: "600",
-    color: colors.text3,
+    color: colors.text4,
   },
   labelActive: {
     color: colors.primary,
+    fontWeight: "700",
   },
   labelChat: {
-    fontWeight: "700",
-    color: colors.primaryDark,
+    color: colors.primary,
+    fontWeight: "800",
   },
 });
