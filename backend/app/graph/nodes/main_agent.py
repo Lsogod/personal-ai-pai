@@ -176,6 +176,8 @@ def _build_system_prompt(
         "- 时间查询：调用 now_time。\n"
         "- 天气查询：优先 maps_weather；避免用 fetch_url 替代。\n"
         "- 外部信息/网页抓取：调用 fetch_url。\n"
+        "- 新闻/热点类查询：优先抓取新闻频道页或新闻专题页，不要优先抓门户首页。"
+        "例如“今日热点新闻”“今天国内新闻”优先抓 https://news.sina.com.cn/ 这类新闻页，而不是 https://www.sina.com.cn/。\n"
         "- 通用图片理解、识别截图内容、提取图片文字：调用 analyze_image。\n"
         "- 会话/记忆查询：调用 conversation_current / conversation_list / memory_list。\n"
         "- 当用户明确要求你记住某件事、某偏好、某规则、某长期约束时，调用 memory_save 直接写入长期记忆。\n"
