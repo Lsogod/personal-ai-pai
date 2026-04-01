@@ -33,7 +33,15 @@ def _parse_allowlist(raw: str) -> set[str]:
 def get_allowed_mcp_tool_names() -> set[str]:
     # Non-maps MCP tools.
     allowed = _parse_allowlist(get_settings().mcp_allowed_tool_names)
-    return {name for name in allowed if not name.startswith("maps_")}
+    return {
+        name
+        for name in allowed
+        if not name.startswith("maps_") and not name.startswith("bing_") and name != "crawl_webpage"
+    }
+
+
+def get_allowed_mcp_search_tool_names() -> set[str]:
+    return _parse_allowlist(get_settings().mcp_search_allowed_tool_names)
 
 
 def get_allowed_mcp_maps_tool_names() -> set[str]:
@@ -45,9 +53,16 @@ def is_maps_mcp_tool(name: str) -> bool:
     return str(name or "").strip().lower().startswith("maps_")
 
 
+def is_search_mcp_tool(name: str) -> bool:
+    tool_name = str(name or "").strip().lower()
+    return tool_name.startswith("bing_") or tool_name == "crawl_webpage"
+
+
 def get_allowed_mcp_tool_names_for(name: str) -> set[str]:
     if is_maps_mcp_tool(name):
         return get_allowed_mcp_maps_tool_names()
+    if is_search_mcp_tool(name):
+        return get_allowed_mcp_search_tool_names()
     return get_allowed_mcp_tool_names()
 
 
@@ -72,7 +87,7 @@ def list_builtin_tool_metas() -> list[ToolMeta]:
         {
             "name": "fetch_url",
             "source": "builtin",
-            "description": "通过 MCP 或直连回退方式抓取网页或 JSON 内容。",
+            "description": "通过 MCP 或直连回退方式抓取网页或 JSON 内容；若长页面首段只有导航，可用 start_index 继续读取后续片段。",
             "enabled": True,
         },
         {
@@ -208,9 +223,12 @@ def _candidate_mcp_urls() -> list[str]:
     settings = get_settings()
     rows: list[str] = []
     default_url = str(settings.mcp_fetch_url or "").strip()
+    search_url = str(settings.mcp_search_url or "").strip()
     maps_url = str(settings.mcp_maps_url or "").strip()
     if default_url:
         rows.append(default_url)
+    if search_url and search_url not in rows:
+        rows.append(search_url)
     if maps_url and maps_url not in rows:
         rows.append(maps_url)
     return rows

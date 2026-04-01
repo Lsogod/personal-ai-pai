@@ -7,7 +7,12 @@ from typing import Any, Awaitable, Callable
 from langchain.tools import ToolRuntime, tool
 from langchain_core.tools import BaseTool
 
-from app.services.runtime_context import get_tool_audit_hook
+from app.services.runtime_context import (
+    get_tool_audit_hook,
+    increment_crawl_webpage_call_count,
+    increment_fetch_url_call_count,
+    increment_mcp_tool_call_count,
+)
 from app.services.tool_executor import execute_capability_with_usage
 
 
@@ -48,6 +53,27 @@ async def _run_tool(
     name: str,
     args: dict[str, Any],
 ) -> str:
+    if source == "builtin" and name == "fetch_url":
+        fetch_count = increment_fetch_url_call_count()
+        if fetch_count > 3:
+            return "已达到本轮网页抓取上限（3 次）。请基于已有结果总结；若仍不足，请明确说明未检索到可靠来源。"
+    if source == "mcp" and name in {"bing_search", "crawl_webpage"}:
+        total_mcp_calls = increment_mcp_tool_call_count()
+        if total_mcp_calls > 5:
+            return "已达到本轮外部工具调用上限（5 次）。请基于已有搜索结果总结；若仍不足，请明确说明未检索到可靠来源。"
+        if name == "crawl_webpage":
+            crawl_count = increment_crawl_webpage_call_count()
+            if crawl_count > 3:
+                return "已达到本轮网页正文抓取上限（3 次）。请基于已有搜索结果总结；若仍不足，请明确说明未检索到可靠来源。"
+    if source == "builtin" and name == "tool_call":
+        total_mcp_calls = increment_mcp_tool_call_count()
+        if total_mcp_calls > 5:
+            return "已达到本轮外部工具调用上限（5 次）。请基于已有搜索结果总结；若仍不足，请明确说明未检索到可靠来源。"
+        target_name = str(args.get("tool_name") or "").strip().lower()
+        if target_name == "crawl_webpage":
+            crawl_count = increment_crawl_webpage_call_count()
+            if crawl_count > 3:
+                return "已达到本轮网页正文抓取上限（3 次）。请基于已有搜索结果总结；若仍不足，请明确说明未检索到可靠来源。"
     context = _resolve_runtime_context(runtime)
     result = await execute_capability_with_usage(
         source=source,
@@ -109,7 +135,7 @@ def build_langchain_tools(
             *,
             runtime: ToolRuntime[AgentToolContext],
         ) -> str:
-            """抓取网页或 JSON 内容。"""
+            """抓取网页或 JSON 内容；长页面可通过增大 start_index 继续读取后续片段。"""
             return await _run_tool(
                 runtime=runtime,
                 source="builtin",
@@ -189,6 +215,54 @@ def build_langchain_tools(
             )
 
         tools.append(maps_weather_tool)
+
+    if _enabled("bing_search"):
+        @tool("bing_search")
+        async def bing_search_tool(
+            query: str,
+            count: int = 5,
+            offset: int = 0,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
+        ) -> str:
+            """使用必应中文搜索引擎搜索信息，返回标题、链接和摘要。"""
+            return await _run_tool(
+                runtime=runtime,
+                source="mcp",
+                name="bing_search",
+                args={
+                    "query": query,
+                    "count": max(1, min(int(count or 5), 10)),
+                    "offset": max(0, int(offset or 0)),
+                },
+            )
+
+        tools.append(bing_search_tool)
+
+    if _enabled("crawl_webpage"):
+        @tool("crawl_webpage")
+        async def crawl_webpage_tool(
+            uuid: str,
+            url: str,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
+        ) -> str:
+            """根据搜索结果的 uuid 和 url 抓取单个网页正文。"""
+            target_uuid = str(uuid or "").strip()
+            target_url = str(url or "").strip()
+            if not target_uuid or not target_url:
+                return "缺少必填参数：uuid 和 url。"
+            return await _run_tool(
+                runtime=runtime,
+                source="mcp",
+                name="crawl_webpage",
+                args={
+                    "uuids": [target_uuid],
+                    "urlMap": {target_uuid: target_url},
+                },
+            )
+
+        tools.append(crawl_webpage_tool)
 
     if _enabled("analyze_receipt"):
         @tool("analyze_receipt")

@@ -7,6 +7,7 @@ from typing import Literal
 
 from langchain.agents import create_agent
 from langchain.messages import AIMessage, HumanMessage, SystemMessage
+from langgraph.errors import GraphRecursionError
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -18,7 +19,17 @@ from app.models.user import User
 from app.services.audit import log_event
 from app.services.llm import get_llm
 from app.services.memory import deactivate_identity_memories_for_user
-from app.services.runtime_context import get_session, reset_tool_audit_hook, set_tool_audit_hook
+from app.services.runtime_context import (
+    get_session,
+    reset_crawl_webpage_call_count,
+    reset_fetch_url_call_count,
+    reset_mcp_tool_call_count,
+    reset_tool_audit_hook,
+    set_crawl_webpage_call_count,
+    set_fetch_url_call_count,
+    set_mcp_tool_call_count,
+    set_tool_audit_hook,
+)
 from app.services.skills import load_skills
 from app.services.langchain_tools import AgentToolContext, ToolInvocationContext
 from app.services.toolsets import build_node_langchain_tools, invoke_node_tool_typed
@@ -487,6 +498,7 @@ def _audit_tool_call_bridge(
     user_id: int | None,
     platform: str,
     conversation_id: int | None,
+    attempt_log: list[dict[str, Any]] | None = None,
 ):
     async def _audit_bridge(
         source: str,
@@ -496,7 +508,19 @@ def _audit_tool_call_bridge(
         latency_ms: int,
         output: str,
         error: str,
-    ) -> None:
+        ) -> None:
+        if attempt_log is not None:
+            attempt_log.append(
+                {
+                    "source": source,
+                    "name": name,
+                    "ok": ok,
+                    "error": (error or "")[:300],
+                    "output_preview": (output or "")[:300],
+                }
+            )
+            if len(attempt_log) > 8:
+                del attempt_log[:-8]
         await _audit_tool_call(
             user_id=user_id,
             platform=platform,
@@ -511,6 +535,28 @@ def _audit_tool_call_bridge(
         )
 
     return _audit_bridge
+
+
+def _summarize_tool_attempts(attempt_log: list[dict[str, Any]]) -> str:
+    if not attempt_log:
+        return "未记录到有效的工具调用结果。"
+    parts: list[str] = []
+    for item in attempt_log[-4:]:
+        name = str(item.get("name") or "unknown")
+        ok = bool(item.get("ok"))
+        error = str(item.get("error") or "").strip()
+        output_preview = str(item.get("output_preview") or "").strip()
+        if error:
+            parts.append(f"{name}：{error}")
+            continue
+        if ok and output_preview:
+            preview = output_preview.replace("\n", " ").strip()
+            if len(preview) > 80:
+                preview = preview[:80] + "..."
+            parts.append(f"{name}：返回了结果，但未形成可用答案（{preview}）")
+            continue
+        parts.append(f"{name}：未得到可用结果")
+    return "；".join(parts)
 
 
 def _extract_ai_text_from_messages(messages: list[Any]) -> str:
@@ -611,26 +657,36 @@ async def _run_tool_agent(
         "只能调用“当前可用工具目录”里出现的工具名。\n"
         "必须严格遵循用户请求的时间范围/数量范围，不要擅自扩展。\n"
         "当问题依赖实时/外部信息时：\n"
-        "1) 优先调用 mcp_list_tools 查看可用工具；\n"
-        "2) 选择最匹配工具执行；\n"
-        "3) 基于工具结果给出最终中文答案。\n"
+        "1) 选择最匹配的直接工具执行；\n"
+        "2) 基于工具结果给出最终中文答案。\n"
         "若用户提到特定站点/品牌（例如 OpenAI），应优先抓取该官方站点；失败后再征求用户是否允许替代来源。\n"
         "最多调用 3 次工具；若连续失败，直接输出失败原因与下一步建议，不要盲目尝试无关站点。\n"
-        "若用户要抓取网页但未给 URL：你可自行选择可公开抓取来源并调用 fetch_url。\n"
+        "外部搜索/新闻检索：直接调用 bing_search；需要抓取搜索结果正文时，再调用 crawl_webpage。\n"
+        "凡是用户要求“最新 / 最近 / 今日 / 今天 / 近期”的信息，必须优先调用外部工具，不要仅凭已有知识直接回答。\n"
+        "新闻/热点类查询：优先检索新闻频道页或搜索结果中的新闻来源，不要优先抓门户首页。\n"
+        "新闻/搜索类问题最多抓取 3 个结果页正文；每抓完一个结果先判断信息是否已经足够，足够就立即停止，不要反复抓取相似页面。\n"
+        "如果连续尝试后仍未找到可靠来源或明确发布日期，直接说明“未检索到可靠来源”，不要继续循环搜索。\n"
+        "crawl_webpage 的参数直接来自 bing_search 返回结果：把目标结果里的 uuid 传给 uuid，把对应链接传给 url。\n"
+        "每次调用工具前先自检参数是否合理、是否匹配上一步结果。\n"
+        "如果工具报错，或返回结果明显不对题，你只能根据错误信息或上一步结果自我修正一次参数并重试一次；第二次仍不行就停止，并把具体失败原因返回给用户。\n"
+        "不要为了碰运气连续多次改关键词、改站点或重复调用同一工具。\n"
         "天气查询优先使用 MCP 天气工具（如 maps_weather）；时间查询优先调用 now_time。\n"
         "若用户上一轮已给出时间限定（例如“今天/明天/本周”）而本轮只补充城市（例如“武汉”），必须继承上一轮时间限定。\n"
         "若时间限定是“今天”，默认只回答今天天气；除非用户明确要求未来几天。\n"
         "天气回答默认先给“今天”，除非用户明确指定其他日期范围。\n"
         "当用户询问“历史会话/当前会话/session 列表”时，优先调用 conversation_list 或 conversation_current。\n"
         "当用户询问“长期记忆有哪些/记忆列表”时，优先调用 memory_list。\n"
-        "对天气类查询，不要用 fetch_url 代替 MCP 天气工具。\n"
+        "对天气类查询，不要用网页抓取代替 MCP 天气工具。\n"
         "若站点禁止抓取，请明确告知并给替代来源或让用户提供 URL。\n"
+        "只要回答基于外部搜索或网页抓取，最终回复必须追加“来源”部分，列出 1 到 3 个实际使用过的来源标题和链接；不要只给无链接的概述。\n"
+        "如果某条结论只来自单一来源，要明确这是单一来源信息；如果无法确认发布日期，也要在来源中如实说明。\n"
         "不要暴露内部链路与调试信息。\n"
         f"当前可用工具目录:\n{runtime_tools}\n\n"
         f"会话上下文:\n{context_text}\n\n"
         f"技能文档:\n{skills}"
     )
-    audit_hook = _audit_tool_call_bridge(user.id, platform, conversation_id)
+    tool_attempt_log: list[dict[str, Any]] = []
+    audit_hook = _audit_tool_call_bridge(user.id, platform, conversation_id, tool_attempt_log)
     ctx = AgentToolContext(
         user_id=user.id,
         platform=platform,
@@ -648,6 +704,9 @@ async def _run_tool_agent(
         name=f"chat_tool_agent_{user.id}_{conversation_id or 0}",
     )
     audit_hook_token = set_tool_audit_hook(audit_hook)
+    fetch_url_count_token = set_fetch_url_call_count(0)
+    mcp_tool_call_count_token = set_mcp_tool_call_count(0)
+    crawl_webpage_count_token = set_crawl_webpage_call_count(0)
     try:
         result = await agent.ainvoke(
             {
@@ -656,8 +715,20 @@ async def _run_tool_agent(
             context=ctx,
             config={"recursion_limit": 8},
         )
+    except Exception as exc:
+        if isinstance(exc, GraphRecursionError) or "recursion limit" in str(exc).lower():
+            return (
+                "我已停止继续重试。"
+                f"最近的工具尝试是：{_summarize_tool_attempts(tool_attempt_log)}。"
+                "你可以换一个更具体的关键词、来源站点，或让我只查某个细分方向。",
+                len(tool_attempt_log),
+            )
+        raise
     finally:
         reset_tool_audit_hook(audit_hook_token)
+        reset_fetch_url_call_count(fetch_url_count_token)
+        reset_mcp_tool_call_count(mcp_tool_call_count_token)
+        reset_crawl_webpage_call_count(crawl_webpage_count_token)
     if isinstance(result, dict):
         messages = result.get("messages") or []
         text = _extract_ai_text_from_messages(messages)
@@ -674,6 +745,12 @@ async def _run_tool_agent(
             )
         if text:
             return text, tool_count
+    if tool_attempt_log:
+        return (
+            "这次没有形成可用答案。"
+            f"最近的工具尝试是：{_summarize_tool_attempts(tool_attempt_log)}。",
+            len(tool_attempt_log),
+        )
     return "", 0
 
 

@@ -373,21 +373,10 @@ async def execute_capability(
                 return _result(True, output=_render_now_time(timezone))
 
             if tool_l == "fetch_url":
-                if not settings.mcp_fetch_enabled:
-                    return _result(False, error="MCP fetch is disabled.")
-                target = str(params.get("url") or "").strip()
-                if not target:
-                    return _result(False, error="missing required arg: url")
-                max_length = max(500, min(20000, int(params.get("max_length") or settings.mcp_fetch_default_max_length)))
-                start_index = max(0, int(params.get("start_index") or 0))
-                raw = bool(params.get("raw"))
-                output = await get_mcp_fetch_client().fetch(
-                    url=target,
-                    max_length=max_length,
-                    start_index=start_index,
-                    raw=raw,
+                return _result(
+                    False,
+                    error="tool `fetch_url` is disabled. Use MCP search tools such as `bing_search` and `crawl_webpage` instead.",
                 )
-                return _result(True, output=output)
 
             if tool_l == "tool_list":
                 if not settings.mcp_fetch_enabled:

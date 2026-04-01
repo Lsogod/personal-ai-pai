@@ -11,7 +11,6 @@ from app.services.tool_executor import execute_capability_with_usage
 # Shared tools usable across multiple nodes.
 SHARED_TOOL_NAMES: set[str] = {
     "now_time",
-    "fetch_url",
 }
 
 VISION_TOOL_NAMES: set[str] = {
@@ -20,9 +19,9 @@ VISION_TOOL_NAMES: set[str] = {
 
 # MCP-facing tool surface.
 MCP_TOOL_NAMES: set[str] = {
-    "mcp_list_tools",
-    "mcp_call_tool",
     "maps_weather",
+    "bing_search",
+    "crawl_webpage",
 }
 
 CONVERSATION_TOOL_NAMES: set[str] = {
@@ -127,7 +126,7 @@ async def invoke_node_tool(
 
 def _resolve_tool_source(tool_name: str) -> str:
     target = (tool_name or "").strip().lower()
-    if target == "maps_weather":
+    if target in {"maps_weather", "bing_search", "crawl_webpage"}:
         return "mcp"
     return "builtin"
 
