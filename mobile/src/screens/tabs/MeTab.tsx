@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { fetchConversations, fetchProfile, fetchSkills, getSourcePlatformLabel } from "../../lib/api";
 import { useAuthStore } from "../../store/auth";
-import { colors, radii, shadowSm, spacing, surfaceCard } from "../../design/tokens";
+import { colors, radii, shadowLg, shadowMd, shadowSm, spacing, surfaceCard } from "../../design/tokens";
 import type { TabKey } from "../../components/MiniTabBar";
 import { BindingPanel } from "../me/BindingPanel";
 import { FeedbackPanel } from "../me/FeedbackPanel";
@@ -19,10 +19,10 @@ type MeTabProps = {
 };
 
 const MENU_ITEMS = [
-  { key: "skills", title: "技能管理", desc: "查看和管理 AI 技能", icon: "sparkles-outline" as const, color: colors.iconBgPurple },
-  { key: "binding", title: "账号绑定", desc: "多平台数据同步", icon: "link-outline" as const, color: colors.iconBgPrimary },
-  { key: "notifications", title: "推送通知", desc: "日程提醒推送设置", icon: "notifications-outline" as const, color: colors.iconBgOrange },
-  { key: "feedback", title: "问题反馈", desc: "帮助我们改进", icon: "chatbubble-ellipses-outline" as const, color: colors.iconBgGreen },
+  { key: "skills", title: "技能管理", desc: "查看和管理 AI 技能", icon: "sparkles-outline" as const, color: colors.iconBgPurple, iconColor: "#9333ea" },
+  { key: "binding", title: "账号绑定", desc: "多平台数据同步", icon: "link-outline" as const, color: colors.iconBgPrimary, iconColor: colors.primary },
+  { key: "notifications", title: "推送通知", desc: "日程提醒推送设置", icon: "notifications-outline" as const, color: colors.iconBgOrange, iconColor: colors.warning },
+  { key: "feedback", title: "问题反馈", desc: "帮助我们改进", icon: "chatbubble-ellipses-outline" as const, color: colors.iconBgGreen, iconColor: colors.accent },
 ] as const;
 
 export function MeTab({ bottomInset, onNavigate, onLogout }: MeTabProps) {
@@ -30,12 +30,12 @@ export function MeTab({ bottomInset, onNavigate, onLogout }: MeTabProps) {
   const insets = useSafeAreaInsets();
   const [panel, setPanel] = useState<"skills" | "binding" | "feedback" | null>(null);
   const fadeIn = useRef(new Animated.Value(0)).current;
-  const slideUp = useRef(new Animated.Value(24)).current;
+  const slideUp = useRef(new Animated.Value(30)).current;
 
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }),
-      Animated.timing(slideUp, { toValue: 0, duration: 400, useNativeDriver: true }),
+      Animated.timing(fadeIn, { toValue: 1, duration: 500, useNativeDriver: true }),
+      Animated.spring(slideUp, { toValue: 0, friction: 8, tension: 50, useNativeDriver: true }),
     ]).start();
   }, [fadeIn, slideUp]);
 
@@ -80,12 +80,16 @@ export function MeTab({ bottomInset, onNavigate, onLogout }: MeTabProps) {
         showsVerticalScrollIndicator={false}
       >
         <Animated.View style={[styles.inner, { paddingTop: insets.top + 8, opacity: fadeIn, transform: [{ translateY: slideUp }] }]}>
+          {/* ── Profile Hero ── */}
           <View style={styles.profileCard}>
             <View style={styles.heroGlowOne} />
             <View style={styles.heroGlowTwo} />
+            <View style={styles.heroGlowThree} />
             <View style={styles.profileTop}>
-              <View style={styles.avatarRing}>
-                <Ionicons name="person" size={26} color="#fff" />
+              <View style={styles.avatarOuter}>
+                <View style={styles.avatarRing}>
+                  <Ionicons name="person" size={28} color="#fff" />
+                </View>
               </View>
               <View style={styles.profileInfo}>
                 <Text style={styles.profileName}>{profile?.nickname || "用户"}</Text>
@@ -99,10 +103,13 @@ export function MeTab({ bottomInset, onNavigate, onLogout }: MeTabProps) {
             </View>
 
             <View style={styles.progressWrap}>
+              <View style={styles.progressLabelRow}>
+                <Text style={styles.progressText}>账号完成度</Text>
+                <Text style={styles.progressText}>{setupProgress}/3</Text>
+              </View>
               <View style={styles.progressTrack}>
                 <View style={[styles.progressFill, { width: progressWidth }]} />
               </View>
-              <Text style={styles.progressText}>账号完成度 {setupProgress}/3</Text>
             </View>
 
             <View style={styles.profileStats}>
@@ -110,10 +117,12 @@ export function MeTab({ bottomInset, onNavigate, onLogout }: MeTabProps) {
                 <Text style={styles.profileStatValue}>{activeSkillCount}</Text>
                 <Text style={styles.profileStatLabel}>启用技能</Text>
               </View>
+              <View style={styles.statDivider} />
               <View style={styles.profileStat}>
                 <Text style={styles.profileStatValue}>{conversationCount}</Text>
                 <Text style={styles.profileStatLabel}>对话数</Text>
               </View>
+              <View style={styles.statDivider} />
               <View style={styles.profileStat}>
                 <Text style={styles.profileStatValue}>{platformLabel || "云端"}</Text>
                 <Text style={styles.profileStatLabel}>当前端</Text>
@@ -121,6 +130,7 @@ export function MeTab({ bottomInset, onNavigate, onLogout }: MeTabProps) {
             </View>
           </View>
 
+          {/* ── Quick Actions ── */}
           <View style={styles.quickPanel}>
             <Pressable style={styles.quickCard} onPress={() => onNavigate("chat")}>
               <View style={[styles.quickIconWrap, { backgroundColor: colors.primaryLight }]}>
@@ -145,45 +155,62 @@ export function MeTab({ bottomInset, onNavigate, onLogout }: MeTabProps) {
             </Pressable>
           </View>
 
+          {/* ── Account summary ── */}
           <View style={styles.summaryCard}>
             <View style={styles.summaryHead}>
-              <Text style={styles.summaryTitle}>账号状态</Text>
-              <Text style={styles.summaryBadge}>已同步</Text>
+              <View style={styles.summaryTitleRow}>
+                <View style={styles.summaryDot} />
+                <Text style={styles.summaryTitle}>账号状态</Text>
+              </View>
+              <View style={styles.summaryBadgeWrap}>
+                <View style={styles.summaryBadgeDot} />
+                <Text style={styles.summaryBadge}>已同步</Text>
+              </View>
             </View>
+            <View style={styles.summaryDivider} />
             <View style={styles.summaryRow}>
+              <Ionicons name="mail-outline" size={16} color={colors.text3} />
               <Text style={styles.summaryLabel}>主账号</Text>
               <Text style={styles.summaryValue}>{profile?.email || "未绑定邮箱"}</Text>
             </View>
             <View style={styles.summaryRow}>
+              <Ionicons name="cloud-outline" size={16} color={colors.text3} />
               <Text style={styles.summaryLabel}>数据来源</Text>
               <Text style={styles.summaryValue}>{platformLabel || "Web"}</Text>
             </View>
             <View style={styles.summaryRow}>
+              <Ionicons name="bulb-outline" size={16} color={colors.text3} />
               <Text style={styles.summaryLabel}>建议下一步</Text>
-              <Text style={styles.summaryValue}>{activeSkillCount > 0 ? "补推送设置" : "先启用技能"}</Text>
+              <Text style={[styles.summaryValue, styles.summaryValueHighlight]}>
+                {activeSkillCount > 0 ? "补推送设置" : "先启用技能"}
+              </Text>
             </View>
           </View>
 
+          {/* ── Menu ── */}
           <View style={styles.menuCard}>
             {MENU_ITEMS.map((item, index) => (
               <View key={item.key}>
                 <Pressable style={styles.menuRow} onPress={() => handleMenuPress(item)}>
                   <View style={[styles.menuIconWrap, { backgroundColor: item.color }]}>
-                    <Ionicons name={item.icon} size={20} color={colors.text} />
+                    <Ionicons name={item.icon} size={20} color={item.iconColor} />
                   </View>
                   <View style={styles.menuTexts}>
                     <Text style={styles.menuLabel}>{item.title}</Text>
                     <Text style={styles.menuDesc}>{item.desc}</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={18} color={colors.text4} />
+                  <View style={styles.menuArrow}>
+                    <Ionicons name="chevron-forward" size={16} color={colors.text4} />
+                  </View>
                 </Pressable>
                 {index < MENU_ITEMS.length - 1 ? <View style={styles.divider} /> : null}
               </View>
             ))}
           </View>
 
+          {/* ── Logout ── */}
           <Pressable style={styles.logoutBtn} onPress={() => void onLogout()}>
-            <Ionicons name="log-out-outline" size={18} color={colors.text3} />
+            <Ionicons name="log-out-outline" size={18} color={colors.danger} />
             <Text style={styles.logoutText}>退出登录</Text>
           </Pressable>
         </Animated.View>
@@ -205,40 +232,60 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.pageX,
     gap: 16,
   },
+
+  /* ── Profile card ── */
   profileCard: {
     overflow: "hidden",
-    padding: 22,
+    padding: 24,
     borderRadius: radii.xl,
     backgroundColor: colors.primary,
-    gap: 18,
+    gap: 20,
+    ...shadowLg,
   },
   heroGlowOne: {
     position: "absolute",
-    top: -28,
-    right: -18,
-    width: 128,
-    height: 128,
+    top: -32,
+    right: -22,
+    width: 140,
+    height: 140,
     borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(255,255,255,0.14)",
   },
   heroGlowTwo: {
     position: "absolute",
-    bottom: -42,
-    left: -20,
-    width: 132,
-    height: 132,
+    bottom: -48,
+    left: -24,
+    width: 150,
+    height: 150,
     borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  heroGlowThree: {
+    position: "absolute",
+    top: "40%",
+    right: "25%",
+    width: 80,
+    height: 80,
+    borderRadius: 999,
+    backgroundColor: "rgba(139,92,246,0.12)",
   },
   profileTop: {
     flexDirection: "row",
     alignItems: "center",
     gap: 16,
   },
+  avatarOuter: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.1)",
+  },
   avatarRing: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.22)",
@@ -250,29 +297,37 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   profileName: {
-    fontSize: 22,
-    fontWeight: "700",
+    fontSize: 24,
+    fontWeight: "800",
     color: "#fff",
   },
   profileMeta: {
     fontSize: 14,
-    color: "rgba(255,255,255,0.76)",
+    color: "rgba(255,255,255,0.72)",
   },
   profileAction: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.15)",
+    backgroundColor: "rgba(255,255,255,0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
   },
+
+  /* Progress */
   progressWrap: {
     gap: 8,
+  },
+  progressLabelRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
   },
   progressTrack: {
     height: 8,
     borderRadius: 999,
-    backgroundColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(255,255,255,0.16)",
     overflow: "hidden",
   },
   progressFill: {
@@ -283,61 +338,74 @@ const styles = StyleSheet.create({
   progressText: {
     fontSize: 12,
     fontWeight: "700",
-    color: "rgba(255,255,255,0.82)",
+    color: "rgba(255,255,255,0.78)",
   },
+
+  /* Stats row */
   profileStats: {
     flexDirection: "row",
-    gap: 10,
+    alignItems: "center",
+    paddingVertical: 14,
+    borderRadius: radii.md,
+    backgroundColor: "rgba(255,255,255,0.1)",
   },
   profileStat: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: radii.md,
     alignItems: "center",
     gap: 4,
-    backgroundColor: "rgba(255,255,255,0.12)",
+  },
+  statDivider: {
+    width: 1,
+    height: 32,
+    backgroundColor: "rgba(255,255,255,0.16)",
   },
   profileStatValue: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: "800",
     color: "#fff",
   },
   profileStatLabel: {
     fontSize: 12,
-    color: "rgba(255,255,255,0.72)",
+    color: "rgba(255,255,255,0.68)",
   },
+
+  /* ── Quick actions ── */
   quickPanel: {
     flexDirection: "row",
     gap: 10,
   },
   quickCard: {
     flex: 1,
-    paddingVertical: 16,
+    paddingVertical: 18,
     paddingHorizontal: 12,
     gap: 8,
+    alignItems: "center",
     ...surfaceCard,
   },
   quickIconWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 2,
   },
   quickTitle: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "700",
     color: colors.text,
   },
   quickDesc: {
-    fontSize: 12,
-    lineHeight: 17,
+    fontSize: 11,
+    lineHeight: 16,
     color: colors.text3,
+    textAlign: "center",
   },
+
+  /* ── Summary card ── */
   summaryCard: {
-    padding: 18,
-    gap: 12,
+    padding: 20,
+    gap: 14,
     ...surfaceCard,
   },
   summaryHead: {
@@ -345,87 +413,127 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
+  summaryTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  summaryDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.primary,
+  },
   summaryTitle: {
     fontSize: 17,
     fontWeight: "700",
     color: colors.text,
   },
-  summaryBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+  summaryBadgeWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: radii.full,
     backgroundColor: colors.accentLight,
-    fontSize: 11,
+  },
+  summaryBadgeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.accent,
+  },
+  summaryBadge: {
+    fontSize: 12,
     fontWeight: "700",
     color: "#166534",
+  },
+  summaryDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.borderLight,
   },
   summaryRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
+    gap: 10,
   },
   summaryLabel: {
-    fontSize: 13,
+    fontSize: 14,
     color: colors.text3,
   },
   summaryValue: {
     flex: 1,
     textAlign: "right",
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: "700",
     color: colors.text2,
   },
+  summaryValueHighlight: {
+    color: colors.primary,
+  },
+
+  /* ── Menu ── */
   menuCard: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
     ...surfaceCard,
   },
   menuRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 14,
-    paddingVertical: 16,
+    paddingVertical: 18,
   },
   menuIconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: "center",
     justifyContent: "center",
   },
   menuTexts: {
     flex: 1,
-    gap: 2,
+    gap: 3,
   },
   menuLabel: {
     fontSize: 16,
-    fontWeight: "600",
+    fontWeight: "700",
     color: colors.text,
   },
   menuDesc: {
     fontSize: 12,
     color: colors.text3,
   },
+  menuArrow: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.bg,
+  },
   divider: {
     height: StyleSheet.hairlineWidth,
-    marginLeft: 56,
+    marginLeft: 58,
     backgroundColor: colors.borderLight,
   },
+
+  /* ── Logout ── */
   logoutBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    height: 52,
+    height: 54,
     borderRadius: radii.lg,
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
+    borderWidth: 1.5,
+    borderColor: colors.dangerLight,
     ...shadowSm,
   },
   logoutText: {
     fontSize: 15,
-    fontWeight: "600",
-    color: colors.text3,
+    fontWeight: "700",
+    color: colors.danger,
   },
 });

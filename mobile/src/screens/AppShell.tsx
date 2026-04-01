@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Keyboard, Platform, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -14,12 +14,10 @@ import { MeTab } from "./tabs/MeTab";
 
 export function AppShell() {
   const [tab, setTab] = useState<TabKey>("chat");
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const setToken = useAuthStore((state) => state.setToken);
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const tabBarInset = getTabBarInset(insets.bottom);
-  const showTabBar = !(tab === "chat" && keyboardVisible);
 
   // Cross-tab prefill support: navigate to chat with pre-filled text
   const chatPrefillRef = useRef<string | undefined>(undefined);
@@ -33,17 +31,6 @@ export function AppShell() {
     const text = chatPrefillRef.current;
     chatPrefillRef.current = undefined;
     return text;
-  }, []);
-
-  useEffect(() => {
-    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSub = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
-    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
   }, []);
 
   const handleNavigate = useCallback((target: TabKey, prefill?: string) => {
@@ -66,7 +53,7 @@ export function AppShell() {
       {tab === "chat" ? <ChatTab bottomInset={tabBarInset} consumePrefill={consumePrefill} /> : null}
       {tab === "stats" ? <StatsTab bottomInset={tabBarInset} onNavigate={handleNavigate} /> : null}
       {tab === "me" ? <MeTab bottomInset={tabBarInset} onNavigate={handleNavigate} onLogout={handleLogout} /> : null}
-      {showTabBar ? <MiniTabBar currentTab={tab} onChange={setTab} /> : null}
+      <MiniTabBar currentTab={tab} onChange={setTab} />
     </View>
   );
 }
