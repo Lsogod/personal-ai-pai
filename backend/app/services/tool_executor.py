@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from datetime import datetime, timedelta
 from typing import Any, TypedDict
+from urllib.parse import urlparse
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+import httpx
 from sqlalchemy import delete, select
 
 from app.core.config import get_settings
@@ -25,7 +28,11 @@ from app.services.memory import (
     mark_long_term_memory_vector_dirty,
     upsert_long_term_memories,
 )
-from app.services.mcp_fetch import get_mcp_client_for_tool, get_mcp_fetch_client
+from app.services.mcp_fetch import (
+    get_mcp_client_for_tool,
+    get_mcp_fetch_client,
+    get_mcp_search_fallback_client,
+)
 from app.services.memory_vector_store import delete_memory_vectors
 from app.services.runtime_context import get_scheduler, get_session, get_tool_message_id
 from app.services.scheduler_tasks import send_reminder_job
@@ -64,6 +71,74 @@ BUILTIN_TOOL_ALIAS: dict[str, str] = {
     "mcp_list_tools": "tool_list",
     "mcp_call_tool": "tool_call",
 }
+
+COMMUNITY_DOMAIN_HINTS: tuple[str, ...] = (
+    "zhihu.com",
+    "tieba.baidu.com",
+    "xiaohongshu.com",
+    "weibo.com",
+    "bilibili.com",
+    "douyin.com",
+)
+
+AUTHORITATIVE_DOMAIN_HINTS: tuple[str, ...] = (
+    ".gov.cn",
+    ".edu.cn",
+    "gov.cn",
+    "edu.cn",
+    "people.com.cn",
+    "xinhuanet.com",
+    "cctv.com",
+)
+
+DETAIL_QUERY_HINTS: tuple[str, ...] = (
+    "新闻",
+    "热点",
+    "怎么回事",
+    "发生了什么",
+    "原因",
+    "详情",
+    "详细",
+    "价格",
+    "售价",
+    "多少钱",
+    "配置",
+    "参数",
+    "发布",
+    "发布时间",
+    "上市",
+    "官方",
+    "官网",
+)
+
+SUBJECTIVE_QUERY_HINTS: tuple[str, ...] = (
+    "体验",
+    "评价",
+    "怎么看",
+    "怎么样",
+    "如何看待",
+    "哪个好",
+    "好不好",
+    "值得",
+)
+
+INSTITUTION_QUERY_HINTS: tuple[str, ...] = (
+    "学校",
+    "中学",
+    "小学",
+    "大学",
+    "学院",
+    "医院",
+    "公司",
+    "集团",
+    "教育局",
+    "政府",
+    "研究院",
+    "协会",
+    "中心官网",
+    "一中",
+    "二中",
+)
 
 
 def _to_client_tz_iso(value: datetime | None, *, assume_utc: bool) -> str:
@@ -159,6 +234,21 @@ def _try_parse_json_payload(text: str) -> Any | None:
         return None
 
 
+def _decode_nested_json_payload(value: Any) -> Any | None:
+    payload = value
+    for _ in range(3):
+        if not isinstance(payload, str):
+            break
+        text = payload.strip()
+        if not text:
+            return None
+        try:
+            payload = json.loads(text)
+        except Exception:
+            return payload
+    return payload
+
+
 def _resolve_user_id(value: Any) -> int:
     try:
         user_id = int(value or 0)
@@ -209,6 +299,416 @@ def _parse_utc_naive_arg(value: Any) -> datetime | None:
         return dt.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
     local_tz = ZoneInfo(get_settings().timezone)
     return dt.replace(tzinfo=local_tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+
+def _domain_from_url(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        host = (urlparse(text).netloc or "").strip().lower()
+    except Exception:
+        return ""
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def _source_type_from_domain(domain: str) -> str:
+    host = str(domain or "").strip().lower()
+    if not host:
+        return "unknown"
+    if any(hint in host for hint in AUTHORITATIVE_DOMAIN_HINTS):
+        return "authoritative"
+    if any(hint in host for hint in COMMUNITY_DOMAIN_HINTS):
+        return "community"
+    return "general"
+
+
+def _query_has_any(query: str, hints: tuple[str, ...]) -> bool:
+    text = str(query or "").strip().lower()
+    return any(hint.lower() in text for hint in hints)
+
+
+def _query_prefers_discussion(query: str) -> bool:
+    return _query_has_any(query, SUBJECTIVE_QUERY_HINTS)
+
+
+def _looks_like_institution_query(query: str) -> bool:
+    text = str(query or "").strip()
+    if not text:
+        return False
+    if _query_has_any(text, INSTITUTION_QUERY_HINTS):
+        return True
+    return bool(re.fullmatch(r"[\u4e00-\u9fffA-Za-z0-9·]{2,10}", text))
+
+
+def _parse_search_results(text: str) -> tuple[str, list[dict[str, Any]], int]:
+    payload = _try_parse_json_payload(text)
+    if not isinstance(payload, dict):
+        return "", [], 0
+    query = str(payload.get("query") or "").strip()
+    total_results = 0
+    try:
+        total_results = int(payload.get("totalResults") or 0)
+    except Exception:
+        total_results = 0
+    rows: list[dict[str, Any]] = []
+    for item in list(payload.get("results") or []):
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()
+        url = str(item.get("url") or "").strip()
+        snippet = str(item.get("snippet") or "").strip()
+        uuid = str(item.get("uuid") or "").strip()
+        if not url or not title:
+            continue
+        domain = _domain_from_url(url)
+        rows.append(
+            {
+                "uuid": uuid,
+                "title": title,
+                "url": url,
+                "snippet": snippet,
+                "display_url": str(item.get("displayUrl") or "").strip(),
+                "domain": domain,
+                "source_type": _source_type_from_domain(domain),
+            }
+        )
+    return query, rows, total_results
+
+
+def _parse_web_search_prime_results(text: str) -> list[dict[str, Any]]:
+    payload = _decode_nested_json_payload(text)
+    if isinstance(payload, str):
+        payload = _decode_nested_json_payload(payload)
+    if not isinstance(payload, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()
+        url = str(item.get("link") or item.get("url") or "").strip()
+        content = str(item.get("content") or "").strip()
+        if not title or not url:
+            continue
+        domain = _domain_from_url(url)
+        rows.append(
+            {
+                "title": title,
+                "url": url,
+                "snippet": content[:400].strip(),
+                "content_preview": content[:2000].strip(),
+                "domain": domain,
+                "source_type": _source_type_from_domain(domain),
+                "refer": str(item.get("refer") or "").strip(),
+                "crawl_error": "",
+            }
+        )
+    return rows
+
+
+def _parse_web_search_api_results(payload: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
+    rows: list[dict[str, Any]] = []
+    for item in list(payload.get("search_result") or []):
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()
+        url = str(item.get("link") or "").strip()
+        content = str(item.get("content") or "").strip()
+        if not title:
+            continue
+        domain = _domain_from_url(url)
+        rows.append(
+            {
+                "title": title,
+                "url": url,
+                "snippet": content[:400].strip(),
+                "content_preview": content[:2500].strip(),
+                "domain": domain,
+                "source_type": _source_type_from_domain(domain),
+                "media": str(item.get("media") or "").strip(),
+                "icon": str(item.get("icon") or "").strip(),
+                "publish_date": str(item.get("publish_date") or "").strip(),
+                "refer": str(item.get("refer") or "").strip(),
+                "crawl_error": "",
+            }
+        )
+    return rows, len(rows)
+
+
+async def _call_web_search_api(query: str, *, max_results: int) -> tuple[list[dict[str, Any]], int]:
+    settings = get_settings()
+    api_key = str(settings.web_search_api_key or "").strip()
+    if not api_key:
+        raise RuntimeError("WEB_SEARCH_API_KEY is empty")
+    url = str(settings.web_search_api_url or "").strip()
+    if not url:
+        raise RuntimeError("WEB_SEARCH_API_URL is empty")
+
+    payload = {
+        "search_query": query,
+        "search_engine": str(settings.web_search_engine or "search_pro_sogou").strip() or "search_pro_sogou",
+        "search_intent": bool(settings.web_search_intent),
+        "count": max(1, min(max_results, 10)),
+        "content_size": str(settings.web_search_content_size or "medium").strip() or "medium",
+    }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=float(settings.mcp_fetch_timeout_sec), trust_env=False) as client:
+            response = await client.post(url, headers=headers, json=payload)
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"web_search_api request failed: {exc}") from exc
+
+    body_text = str(response.text or "").strip()
+    if response.status_code >= 400:
+        raise RuntimeError(f"web_search_api http {response.status_code}: {body_text[:500]}")
+
+    data = _try_parse_json_payload(body_text)
+    if not isinstance(data, dict):
+        raise RuntimeError("web_search_api invalid response")
+    error = data.get("error")
+    if isinstance(error, dict) and error:
+        raise RuntimeError(str(error.get("message") or "web_search_api error"))
+
+    return _parse_web_search_api_results(data)
+
+
+def _dedupe_search_results(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    seen_titles: set[str] = set()
+    for item in rows:
+        url = str(item.get("url") or "").strip()
+        title = str(item.get("title") or "").strip().lower()
+        if not url or url in seen_urls or (title and title in seen_titles):
+            continue
+        seen_urls.add(url)
+        if title:
+            seen_titles.add(title)
+        merged.append(item)
+    return merged
+
+
+def _extract_crawl_error(text: str) -> str:
+    payload: Any | None = None
+    try:
+        payload = json.loads(text or "")
+    except Exception:
+        payload = None
+    if isinstance(payload, list):
+        first = payload[0] if payload else None
+        if isinstance(first, dict):
+            error = str(first.get("error") or "").strip()
+            if error:
+                return error
+    if isinstance(payload, dict):
+        error = str(payload.get("error") or "").strip()
+        if error:
+            return error
+    lowered = str(text or "").lower()
+    if "禁止抓取" in str(text or "") or "blacklist" in lowered:
+        return str(text or "").strip()[:500]
+    return ""
+
+
+def _should_retry_with_official_terms(query: str, rows: list[dict[str, Any]]) -> bool:
+    text = str(query or "").strip()
+    if not text or _query_prefers_discussion(text):
+        return False
+    if "官网" in text or "官方" in text:
+        return False
+    if not _looks_like_institution_query(text):
+        return False
+    top = rows[:5]
+    if not top:
+        return False
+    return all(str(item.get("source_type") or "") == "community" for item in top)
+
+
+def _pick_results_for_crawl(query: str, rows: list[dict[str, Any]], *, limit: int = 2) -> list[dict[str, Any]]:
+    preferred: list[dict[str, Any]] = []
+    backups: list[dict[str, Any]] = []
+    wants_detail = _query_has_any(query, DETAIL_QUERY_HINTS)
+    for item in rows[:5]:
+        source_type = str(item.get("source_type") or "")
+        if source_type != "community":
+            preferred.append(item)
+        elif wants_detail:
+            backups.append(item)
+    picked = preferred[:limit]
+    if len(picked) < limit:
+        for item in backups:
+            if item not in picked:
+                picked.append(item)
+            if len(picked) >= limit:
+                break
+    return picked[:limit]
+
+
+async def _execute_web_search(query: str, *, focus: str, max_results: int) -> dict[str, Any]:
+    original_query = str(query or "").strip()
+    focus_text = str(focus or "").strip()
+    search_query = original_query
+    if focus_text:
+        search_query = f"{original_query} {focus_text}".strip()
+
+    settings = get_settings()
+    executed_queries: list[str] = []
+
+    def _build_payload(
+        *,
+        rows: list[dict[str, Any]],
+        total_results: int,
+        failure_reason: str = "",
+    ) -> dict[str, Any]:
+        source_rows = rows[: max(1, min(max_results, 5))]
+        for item in source_rows:
+            item.setdefault("content_preview", "")
+            item.setdefault("crawl_error", "")
+
+        if not source_rows:
+            return {
+                "query": original_query,
+                "executed_queries": executed_queries,
+                "status": "no_results",
+                "answer_ready": False,
+                "summary": "未检索到可用结果。",
+                "failure_reason": failure_reason or "no_results",
+                "sources": [],
+                "total_results": total_results,
+            }
+
+        source_types = {str(item.get("source_type") or "") for item in source_rows}
+        all_community = bool(source_rows) and source_types.issubset({"community"})
+        status = "ok"
+        answer_ready = True
+        summary = f"已检索到 {len(rows)} 条候选结果。"
+        if all_community and not _query_prefers_discussion(original_query):
+            status = "results_low_authority"
+            answer_ready = False
+            summary = "已检索到结果，但当前结果主要来自社区讨论或问答站点，缺少更权威的来源。"
+            failure_reason = failure_reason or "results_low_authority"
+        elif all(
+            not str(item.get("snippet") or "").strip() and not str(item.get("content_preview") or "").strip()
+            for item in source_rows
+        ):
+            status = "results_insufficient"
+            answer_ready = False
+            summary = "已检索到结果，但结果摘要和正文信息都不足以支撑稳定回答。"
+            failure_reason = failure_reason or "results_insufficient"
+
+        normalized_sources: list[dict[str, Any]] = []
+        for item in source_rows:
+            normalized_sources.append(
+                {
+                    "title": str(item.get("title") or "").strip(),
+                    "url": str(item.get("url") or "").strip(),
+                    "domain": str(item.get("domain") or "").strip(),
+                    "source_type": str(item.get("source_type") or "").strip(),
+                    "snippet": str(item.get("snippet") or "").strip(),
+                    "content_preview": str(item.get("content_preview") or "").strip(),
+                    "crawl_error": str(item.get("crawl_error") or "").strip(),
+                }
+            )
+
+        return {
+            "query": original_query,
+            "executed_queries": executed_queries,
+            "status": status,
+            "answer_ready": answer_ready,
+            "summary": summary,
+            "failure_reason": failure_reason,
+            "sources": normalized_sources,
+            "total_results": total_results,
+        }
+
+    primary_error = ""
+    if str(settings.web_search_api_url or "").strip() and str(settings.web_search_api_key or "").strip():
+        executed_queries.append(search_query)
+        try:
+            rows, total_results = await _call_web_search_api(search_query, max_results=max_results)
+            rows = _dedupe_search_results(rows)
+            if rows:
+                primary_payload = _build_payload(rows=rows, total_results=total_results)
+                if str(primary_payload.get("status") or "") == "ok":
+                    return primary_payload
+                primary_error = str(primary_payload.get("failure_reason") or primary_payload.get("status") or "")
+            else:
+                primary_error = "primary_search_empty"
+        except Exception as exc:
+            primary_error = str(exc)
+
+    search_client = get_mcp_search_fallback_client()
+    crawl_client = get_mcp_search_fallback_client()
+
+    async def _search_once(text: str) -> tuple[list[dict[str, Any]], int]:
+        executed_queries.append(text)
+        raw = await search_client.call_tool(
+            name="bing_search",
+            arguments={"query": text, "count": max(3, min(max_results, 8)), "offset": 0},
+        )
+        _, parsed_rows, total_results = _parse_search_results(raw)
+        return parsed_rows, total_results
+
+    try:
+        rows, total_results = await _search_once(search_query)
+    except Exception as exc:
+        reason = primary_error or str(exc)
+        return {
+            "query": original_query,
+            "executed_queries": executed_queries or [search_query],
+            "status": "network_error",
+            "answer_ready": False,
+            "summary": "联网搜索失败，暂时无法获得外部结果。",
+            "failure_reason": reason,
+            "sources": [],
+            "total_results": 0,
+        }
+
+    rows = _dedupe_search_results(rows)
+    if _should_retry_with_official_terms(original_query, rows):
+        try:
+            retry_rows, retry_total = await _search_once(f"{original_query} 官网 官方")
+            rows = _dedupe_search_results(rows + retry_rows)
+            total_results = max(total_results, retry_total)
+        except Exception:
+            pass
+
+    crawled_sources: list[dict[str, Any]] = []
+    for item in _pick_results_for_crawl(original_query, rows, limit=2):
+        uuid = str(item.get("uuid") or "").strip()
+        url = str(item.get("url") or "").strip()
+        if not uuid or not url:
+            continue
+        try:
+            content = await crawl_client.call_tool(
+                name="crawl_webpage",
+                arguments={"uuids": [uuid], "urlMap": {uuid: url}},
+            )
+            preview = str(content or "").strip()
+            if preview:
+                item = dict(item)
+                crawl_error = _extract_crawl_error(preview)
+                if crawl_error:
+                    item["crawl_error"] = crawl_error[:500]
+                    item["content_preview"] = ""
+                else:
+                    item["content_preview"] = preview[:2000]
+                crawled_sources.append(item)
+        except Exception as exc:
+            item = dict(item)
+            item["crawl_error"] = str(exc)
+            crawled_sources.append(item)
+
+    source_rows = crawled_sources if crawled_sources else rows
+    return _build_payload(rows=source_rows, total_results=total_results)
 
 
 def _ledger_to_payload(row: Ledger) -> dict[str, Any]:
@@ -371,6 +871,19 @@ async def execute_capability(
             if tool_l == "now_time":
                 timezone = str(params.get("timezone") or settings.timezone or "Asia/Shanghai").strip()
                 return _result(True, output=_render_now_time(timezone))
+
+            if tool_l == "web_search":
+                query = str(params.get("query") or "").strip()
+                focus = str(params.get("focus") or "").strip()
+                max_results = max(1, min(8, int(params.get("max_results") or 5)))
+                if not query:
+                    return _result(False, error="missing required arg: query")
+                payload = await _execute_web_search(query, focus=focus, max_results=max_results)
+                return _result(
+                    True,
+                    output=json.dumps(payload, ensure_ascii=False),
+                    output_data=payload,
+                )
 
             if tool_l == "fetch_url":
                 return _result(

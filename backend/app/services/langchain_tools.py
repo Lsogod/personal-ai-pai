@@ -216,6 +216,29 @@ def build_langchain_tools(
 
         tools.append(maps_weather_tool)
 
+    if _enabled("web_search"):
+        @tool("web_search")
+        async def web_search_tool(
+            query: str,
+            focus: str = "",
+            max_results: int = 5,
+            *,
+            runtime: ToolRuntime[AgentToolContext],
+        ) -> str:
+            """统一联网查询工具：自动搜索、按需抓取正文，并返回结构化来源结果。"""
+            return await _run_tool(
+                runtime=runtime,
+                source="builtin",
+                name="web_search",
+                args={
+                    "query": query,
+                    "focus": focus,
+                    "max_results": max(1, min(int(max_results or 5), 8)),
+                },
+            )
+
+        tools.append(web_search_tool)
+
     if _enabled("bing_search"):
         @tool("bing_search")
         async def bing_search_tool(
@@ -422,7 +445,7 @@ def build_langchain_tools(
             *,
             runtime: ToolRuntime[AgentToolContext],
         ) -> str:
-            """返回最近账单记录的 JSON 列表。"""
+            """只返回最近几条账单记录；不能替代今天/本周/本月/指定日期等时间范围查询。"""
             return await _run_tool(
                 runtime=runtime,
                 source="builtin",
@@ -445,7 +468,7 @@ def build_langchain_tools(
             *,
             runtime: ToolRuntime[AgentToolContext],
         ) -> str:
-            """按可选的 id、日期、分类、摘要条件列出账单，并返回 JSON 列表。"""
+            """按日期范围、分类、摘要或指定 id 查询账单；今天/本周/本月等时间范围查询优先使用它。"""
             safe_ids: list[int] = []
             for item in list(ledger_ids or []):
                 try:

@@ -59,7 +59,18 @@ class Settings(BaseSettings):
 
     mcp_fetch_enabled: bool = True
     mcp_fetch_url: str = ""
+    mcp_fetch_api_key: str = ""
+    web_search_api_url: str = "https://open.bigmodel.cn/api/paas/v4/web_search"
+    web_search_api_key: str = ""
+    web_search_engine: str = "search_pro_sogou"
+    web_search_intent: bool = True
+    web_search_content_size: str = "medium"
     mcp_search_url: str = ""
+    mcp_search_api_key: str = ""
+    mcp_search_primary_tool_name: str = "web_search_prime"
+    mcp_search_content_size: str = "medium"
+    mcp_search_fallback_url: str = ""
+    mcp_search_fallback_api_key: str = ""
     mcp_maps_url: str = ""
     mcp_fetch_timeout_sec: int = 30
     mcp_fetch_default_max_length: int = 5000

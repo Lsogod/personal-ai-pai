@@ -14,6 +14,7 @@ from app.core.config import get_settings
 class MCPFetchError(RuntimeError):
     pass
 
+
 def _json_or_empty(text: str) -> dict[str, Any]:
     try:
         payload = json.loads(text or "{}")
@@ -24,11 +25,30 @@ def _json_or_empty(text: str) -> dict[str, Any]:
         return {}
 
 
+def _extract_rpc_payload(text: str) -> dict[str, Any]:
+    payload = _json_or_empty(text)
+    if payload:
+        return payload
+    latest: dict[str, Any] = {}
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("data:"):
+            continue
+        chunk = line[5:].strip()
+        if not chunk or chunk == "[DONE]":
+            continue
+        parsed = _json_or_empty(chunk)
+        if parsed:
+            latest = parsed
+    return latest
+
+
 class MCPFetchClient:
-    def __init__(self, *, url: str | None = None) -> None:
+    def __init__(self, *, url: str | None = None, api_key: str | None = None) -> None:
         settings = get_settings()
         resolved_url = (url if url is not None else settings.mcp_fetch_url) or ""
         self.url = str(resolved_url).strip()
+        self.api_key = str(api_key if api_key is not None else settings.mcp_fetch_api_key or "").strip()
         self.timeout = float(settings.mcp_fetch_timeout_sec)
         self.default_max_length = int(settings.mcp_fetch_default_max_length)
         self._fetch_tool_name_cache: str | None = None
@@ -36,6 +56,8 @@ class MCPFetchClient:
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
         }
+        if self.api_key:
+            self._http_headers["Authorization"] = f"Bearer {self.api_key}"
 
     async def _post_rpc(
         self,
@@ -58,7 +80,7 @@ class MCPFetchClient:
             headers["mcp-session-id"] = session_id
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, trust_env=False) as client:
                 response = await client.post(
                     self.url,
                     headers=headers,
@@ -68,8 +90,11 @@ class MCPFetchClient:
             raise MCPFetchError(f"mcp request failed: {exc}") from exc
 
         if response.status_code >= 400:
+            detail = str(response.text or "").strip()
+            if detail:
+                raise MCPFetchError(f"mcp http {response.status_code}: {detail[:500]}")
             raise MCPFetchError(f"mcp http {response.status_code}")
-        data = _json_or_empty(response.text)
+        data = _extract_rpc_payload(response.text)
         if data.get("error"):
             err = data.get("error") or {}
             raise MCPFetchError(str(err.get("message") or "mcp rpc error"))
@@ -171,6 +196,7 @@ class MCPFetchClient:
                 follow_redirects=True,
                 headers={"User-Agent": "pai-backend/1.0"},
                 verify=verify,
+                trust_env=False,
             ) as client:
                 return await client.get(target)
 
@@ -392,8 +418,8 @@ class MCPFetchClient:
         return "\n\n".join(texts).strip()
 
 
-def get_mcp_fetch_client(*, url: str | None = None) -> MCPFetchClient:
-    return MCPFetchClient(url=url)
+def get_mcp_fetch_client(*, url: str | None = None, api_key: str | None = None) -> MCPFetchClient:
+    return MCPFetchClient(url=url, api_key=api_key)
 
 
 def get_mcp_maps_client() -> MCPFetchClient:
@@ -408,14 +434,27 @@ def get_mcp_search_client() -> MCPFetchClient:
     settings = get_settings()
     search_url = str(settings.mcp_search_url or "").strip()
     if search_url:
+        return MCPFetchClient(url=search_url, api_key=settings.mcp_search_api_key)
+    return MCPFetchClient(url=(settings.mcp_fetch_url or "").strip(), api_key=settings.mcp_fetch_api_key)
+
+
+def get_mcp_search_fallback_client() -> MCPFetchClient:
+    settings = get_settings()
+    fallback_url = str(settings.mcp_search_fallback_url or "").strip()
+    if fallback_url:
+        return MCPFetchClient(url=fallback_url, api_key=settings.mcp_search_fallback_api_key)
+    search_url = str(settings.mcp_search_url or "").strip()
+    if search_url and not str(settings.mcp_search_api_key or "").strip():
         return MCPFetchClient(url=search_url)
-    return MCPFetchClient(url=(settings.mcp_fetch_url or "").strip())
+    return MCPFetchClient(url=(settings.mcp_fetch_url or "").strip(), api_key=settings.mcp_fetch_api_key)
 
 
 def get_mcp_client_for_tool(tool_name: str) -> MCPFetchClient:
     name = str(tool_name or "").strip().lower()
     if name.startswith("maps_"):
         return get_mcp_maps_client()
-    if name.startswith("bing_") or name == "crawl_webpage":
+    if name == "web_search_prime":
         return get_mcp_search_client()
+    if name.startswith("bing_") or name == "crawl_webpage":
+        return get_mcp_search_fallback_client()
     return get_mcp_fetch_client()

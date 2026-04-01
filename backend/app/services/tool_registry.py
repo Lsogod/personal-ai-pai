@@ -55,7 +55,7 @@ def is_maps_mcp_tool(name: str) -> bool:
 
 def is_search_mcp_tool(name: str) -> bool:
     tool_name = str(name or "").strip().lower()
-    return tool_name.startswith("bing_") or tool_name == "crawl_webpage"
+    return tool_name.startswith("bing_") or tool_name in {"crawl_webpage", "web_search_prime"}
 
 
 def get_allowed_mcp_tool_names_for(name: str) -> set[str]:
@@ -82,6 +82,12 @@ def list_builtin_tool_metas() -> list[ToolMeta]:
             "name": "now_time",
             "source": "builtin",
             "description": "按时区返回当前本地时间。",
+            "enabled": True,
+        },
+        {
+            "name": "web_search",
+            "source": "builtin",
+            "description": "统一联网查询工具：自动搜索、按需抓取正文，并返回结构化来源、摘要与状态。",
             "enabled": True,
         },
         {
@@ -147,13 +153,13 @@ def list_builtin_tool_metas() -> list[ToolMeta]:
         {
             "name": "ledger_list_recent",
             "source": "builtin",
-            "description": "列出最近的账单记录。",
+            "description": "列出最近几条账单记录；不适用于今天/本月/指定日期等时间范围查询。",
             "enabled": True,
         },
         {
             "name": "ledger_list",
             "source": "builtin",
-            "description": "按可选的 id、日期、分类、摘要条件列出账单记录。",
+            "description": "按日期范围、分类、摘要或指定 id 列出账单记录；今天/本周/本月等时间范围查询优先使用它。",
             "enabled": True,
         },
         {
@@ -224,14 +230,31 @@ def _candidate_mcp_urls() -> list[str]:
     rows: list[str] = []
     default_url = str(settings.mcp_fetch_url or "").strip()
     search_url = str(settings.mcp_search_url or "").strip()
+    search_fallback_url = str(settings.mcp_search_fallback_url or "").strip()
     maps_url = str(settings.mcp_maps_url or "").strip()
     if default_url:
         rows.append(default_url)
     if search_url and search_url not in rows:
         rows.append(search_url)
+    if search_fallback_url and search_fallback_url not in rows:
+        rows.append(search_fallback_url)
     if maps_url and maps_url not in rows:
         rows.append(maps_url)
     return rows
+
+
+def _api_key_for_mcp_url(url: str) -> str | None:
+    settings = get_settings()
+    target = str(url or "").strip()
+    if not target:
+        return None
+    if target == str(settings.mcp_search_url or "").strip():
+        return str(settings.mcp_search_api_key or "").strip() or None
+    if target == str(settings.mcp_search_fallback_url or "").strip():
+        return str(settings.mcp_search_fallback_api_key or "").strip() or None
+    if target == str(settings.mcp_fetch_url or "").strip():
+        return str(settings.mcp_fetch_api_key or "").strip() or None
+    return None
 
 
 async def list_runtime_tool_metas() -> list[ToolMeta]:
@@ -274,7 +297,7 @@ async def _list_runtime_tool_metas_uncached() -> list[ToolMeta]:
     all_mcp_tools: list[dict[str, Any]] = []
     for url in _candidate_mcp_urls():
         try:
-            tools = await get_mcp_fetch_client(url=url).list_tools()
+            tools = await get_mcp_fetch_client(url=url, api_key=_api_key_for_mcp_url(url)).list_tools()
         except Exception:
             continue
         if isinstance(tools, list):
