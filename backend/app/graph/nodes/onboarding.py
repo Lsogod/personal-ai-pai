@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.graph.context import render_conversation_context
 from app.graph.state import GraphState
-from app.models.user import SetupStage, User
+from app.models.user import BindingStage, SetupStage, User
 from app.services.llm import get_llm
 from app.services.memory import deactivate_identity_memories_for_user
 from app.services.runtime_context import get_session
@@ -181,8 +181,10 @@ async def onboarding_node(state: GraphState) -> GraphState:
     context_text = render_conversation_context(state)
 
     # Optional cross-platform account binding prompt for first-time users.
-    if user.setup_stage == SetupStage.NEW and int(user.binding_stage or 0) == 0:
-        user.binding_stage = 1
+    binding_stage = int(user.binding_stage or BindingStage.UNASKED)
+
+    if user.setup_stage == SetupStage.NEW and binding_stage == BindingStage.UNASKED:
+        user.binding_stage = BindingStage.AWAITING_ANSWER
         session.add(user)
         await session.commit()
         return {
@@ -192,15 +194,15 @@ async def onboarding_node(state: GraphState) -> GraphState:
             ],
         }
 
-    if user.setup_stage == SetupStage.NEW and int(user.binding_stage or 0) == 1:
+    if user.setup_stage == SetupStage.NEW and binding_stage == BindingStage.AWAITING_ANSWER:
         answer = (message.content or "").strip()
         decision = await _understand_binding_answer(answer, context_text)
         if decision in {"no_account", "continue"}:
-            user.binding_stage = 2
+            user.binding_stage = BindingStage.READY_TO_PROCEED
             session.add(user)
             await session.commit()
         elif decision == "has_account":
-            user.binding_stage = 2
+            user.binding_stage = BindingStage.AWAITING_BIND_OR_CONTINUE
             session.add(user)
             await session.commit()
             return {
@@ -214,6 +216,21 @@ async def onboarding_node(state: GraphState) -> GraphState:
                 **state,
                 "responses": [
                     "请回复“有”或“没有”。如果要立即绑定，也可直接使用 `/bind new` 或 `/bind <6位码>`。"
+                ],
+            }
+
+    if user.setup_stage == SetupStage.NEW and binding_stage == BindingStage.AWAITING_BIND_OR_CONTINUE:
+        answer = (message.content or "").strip()
+        decision = await _understand_binding_answer(answer, context_text)
+        if decision in {"continue", "no_account"}:
+            user.binding_stage = BindingStage.READY_TO_PROCEED
+            session.add(user)
+            await session.commit()
+        else:
+            return {
+                **state,
+                "responses": [
+                    "如果你已有其他客户端账号，请先在已有账号端发送 `/bind new`，再回到这里发送 `/bind <6位码>` 完成绑定；如果暂时不绑定，请回复“继续”。"
                 ],
             }
 

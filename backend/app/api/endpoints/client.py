@@ -12,7 +12,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session, AsyncSessionLocal
-from app.models.user import User, SetupStage
+from app.models.user import BindingStage, SetupStage, User
 from app.models.conversation import Conversation as ConversationModel
 from app.models.message import Message
 from app.models.ledger import Ledger
@@ -721,9 +721,12 @@ async def chat_history(
     )
     messages = list(reversed(result.scalars().all()))
     if not messages and user.setup_stage == SetupStage.NEW:
-        if int(user.binding_stage or 0) < 2:
+        binding_stage = int(user.binding_stage or BindingStage.UNASKED)
+        if binding_stage in {BindingStage.UNASKED, BindingStage.AWAITING_ANSWER}:
             greeting = "在其他客户端有账号吗？回复“有”或“没有”。有的话可稍后用 `/bind new` 与 `/bind <6位码>` 绑定数据。"
-            user.binding_stage = 1
+            user.binding_stage = BindingStage.AWAITING_ANSWER
+        elif binding_stage == BindingStage.AWAITING_BIND_OR_CONTINUE:
+            greeting = "如果你已有其他客户端账号，请先在已有账号端发送 `/bind new`，再回到这里发送 `/bind <6位码>` 完成绑定；如果暂时不绑定，请回复“继续”。"
         else:
             greeting = "你好！我是您的私人助理 PAI。初次见面，请问我该怎么称呼您？"
             user.setup_stage = SetupStage.USER_NAMED

@@ -145,6 +145,18 @@ function buildOnboardingView(profile) {
     };
   }
 
+  if (setupStage === 0 && bindingStage === 3) {
+    return {
+      guideVisible: true,
+      onboardingTitle: "继续绑定或跳过",
+      onboardingHint: "如果你已有其他客户端账号，请先在已有账号端发送 /bind new，再回到这里输入 /bind <6位码>；如果暂时不绑定，可直接回复继续。",
+      onboardingPlaceholder: "输入 /bind <6位码> 或 继续",
+      onboardingSuggestions: [
+        { label: "继续", text: "继续" },
+      ],
+    };
+  }
+
   if (setupStage <= 1) {
     return {
       guideVisible: true,
@@ -212,6 +224,7 @@ Page({
     this._streaming = false;
     this._streamTimer = null;
     this._scrollTimers = [];
+    this._scrollRequestToken = 0;
     this._pendingReplyTimer = null;
     this._pendingNonce = 0;
     this._subscribePromptAt = 0;
@@ -539,7 +552,7 @@ Page({
         ...msg,
         content_nodes: markdownToRichNodes(msg.content),
       };
-      this.setData({ messages });
+      this.setData({ messages }, () => this.scrollToBottom(true));
       this._seenKeys.add(this.messageKey(msg));
     }
     this.clearPendingByAssistantSignal();
@@ -618,15 +631,18 @@ Page({
       cursor = Math.min(fullText.length, cursor + step);
       const partial = fullText.slice(0, cursor);
       const path = `messages[${current.index}]`;
-      this.setData({
-        [`${path}.display_content`]: partial,
-        [`${path}.content_nodes`]: markdownToRichNodes(partial),
-      });
+      this.setData(
+        {
+          [`${path}.display_content`]: partial,
+          [`${path}.content_nodes`]: markdownToRichNodes(partial),
+        },
+        () => this.scrollToBottom()
+      );
       if (cursor < fullText.length) {
         this._streamTimer = setTimeout(tick, 18);
       } else {
         this._streaming = false;
-        this.scrollToBottom();
+        this.scrollToBottom(true);
         this.runStreamQueue();
       }
     };
@@ -662,13 +678,25 @@ Page({
   },
 
   scrollToBottom(immediate = false) {
+    const token = ++this._scrollRequestToken;
     this.clearScrollRetry();
-    const delays = immediate ? [0, 150, 500] : [50, 300];
-    this._scrollTimers = delays.map((delay) =>
-      setTimeout(() => {
-        wx.pageScrollTo({ scrollTop: 999999, duration: 0 });
-      }, delay)
-    );
+    const delays = immediate ? [0, 80, 180, 360, 720] : [0, 80, 180, 360];
+    const scrollOnce = () => {
+      if (token !== this._scrollRequestToken) return;
+      const query = wx.createSelectorQuery();
+      query.select("#scroll-bottom").boundingClientRect();
+      query.selectViewport().scrollOffset();
+      query.exec((res) => {
+        if (token !== this._scrollRequestToken) return;
+        const anchor = res && res[0];
+        const viewport = res && res[1];
+        const anchorTop = anchor && typeof anchor.top === "number" ? anchor.top : 0;
+        const currentTop = viewport && typeof viewport.scrollTop === "number" ? viewport.scrollTop : 0;
+        const targetTop = Math.max(0, Math.ceil(currentTop + anchorTop));
+        wx.pageScrollTo({ scrollTop: targetTop, duration: 0 });
+      });
+    };
+    this._scrollTimers = delays.map((delay) => setTimeout(scrollOnce, delay));
   },
 
   clearScrollRetry() {
@@ -842,7 +870,7 @@ Page({
             toolStepsDone: false,
             toolStepsExpanded: true,
             pendingState: "",
-          });
+          }, () => this.scrollToBottom(true));
         } else if (event === "done" || event === "tool_end") {
           const toolSteps = [...(this.data.toolSteps || [])];
           const idx = toolSteps.findIndex(s => s.name === toolLabel && s.status === "running");
@@ -856,14 +884,13 @@ Page({
             toolStepsDoneCount: doneCount,
             toolStepsDone: allDone,
             toolStepsExpanded: !allDone,
-          });
+          }, () => this.scrollToBottom(true));
           // 通过对话创建提醒后，检查订阅状态，未授权则弹出授权
           const tn = toolName.toLowerCase();
           if (tn === "schedule_insert" || tn === "schedule_update") {
             this.requestReminderSubscribe(true);
           }
         }
-        this.scrollToBottom();
         return;
       }
 

@@ -16,6 +16,13 @@ class SetupStage(IntEnum):
     COMPLETED = 3
 
 
+class BindingStage(IntEnum):
+    UNASKED = 0
+    AWAITING_ANSWER = 1
+    READY_TO_PROCEED = 2
+    AWAITING_BIND_OR_CONTINUE = 3
+
+
 class User(SQLModel, table=True):
     __tablename__ = "users"
     __table_args__ = (
@@ -31,7 +38,7 @@ class User(SQLModel, table=True):
     email: Optional[str] = Field(default=None, index=True)
     hashed_password: Optional[str] = Field(default=None)
     active_conversation_id: Optional[int] = Field(default=None, index=True)
-    binding_stage: int = Field(default=0, index=True)
+    binding_stage: int = Field(default=BindingStage.UNASKED, index=True)
 
     nickname: str = Field(default="主人")
     ai_name: str = Field(default="PAI")

@@ -400,6 +400,10 @@
   padding-bottom: 12rpx;
   border-bottom: 1rpx solid var(--c-border-light);
 }
+.tool-steps-panel {
+  border: 1rpx solid var(--c-border-light);
+  background: linear-gradient(180deg, rgba(79,110,247,0.04) 0%, #ffffff 100%);
+}
 .tool-steps-header {
   display: flex;
   align-items: center;
