@@ -4,7 +4,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import User
+from app.models.user import BindingStage, User
 from app.services.binding import consume_bind_code, create_bind_code
 from app.services.conversations import (
     create_new_conversation,
@@ -70,9 +70,11 @@ async def handle_conversation_command(
         if canonical_user_id:
             canonical = await session.get(User, canonical_user_id)
             if canonical:
-                canonical.binding_stage = 2
+                canonical.binding_stage = BindingStage.READY_TO_PROCEED
                 session.add(canonical)
-                await session.commit()
+        user.binding_stage = BindingStage.READY_TO_PROCEED
+        session.add(user)
+        await session.commit()
         return ([msg], conversation)
 
     if command == "/new":
@@ -135,4 +137,3 @@ async def handle_conversation_command(
         )
 
     return None
-

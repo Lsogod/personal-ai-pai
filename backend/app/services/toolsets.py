@@ -4,14 +4,19 @@ import json
 from typing import Iterable
 
 from langchain_core.tools import BaseTool
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.langchain_tools import ToolInvocationContext, build_langchain_tools
 from app.services.tool_executor import execute_capability_with_usage
+from app.services.user_mcp_tools import get_user_mcp_langchain_tools
 
 # Shared tools usable across multiple nodes.
 SHARED_TOOL_NAMES: set[str] = {
     "now_time",
-    "fetch_url",
+}
+
+WEB_TOOL_NAMES: set[str] = {
+    "web_search",
 }
 
 VISION_TOOL_NAMES: set[str] = {
@@ -20,8 +25,6 @@ VISION_TOOL_NAMES: set[str] = {
 
 # MCP-facing tool surface.
 MCP_TOOL_NAMES: set[str] = {
-    "mcp_list_tools",
-    "mcp_call_tool",
     "maps_weather",
 }
 
@@ -62,6 +65,7 @@ PROFILE_TOOL_NAMES: set[str] = {
 # Main agent: single tool-calling agent with full tool access.
 MAIN_AGENT_TOOL_NAMES: set[str] = (
     SHARED_TOOL_NAMES
+    | WEB_TOOL_NAMES
     | VISION_TOOL_NAMES
     | MCP_TOOL_NAMES
     | CONVERSATION_TOOL_NAMES
@@ -86,17 +90,27 @@ def get_node_tool_names(node_name: str) -> set[str]:
     return set(base)
 
 
-def build_node_langchain_tools(
+async def build_node_langchain_tools(
     *,
     node_name: str,
     extra_tool_names: Iterable[str] | None = None,
+    user_id: int | None = None,
+    session: AsyncSession | None = None,
 ) -> list[BaseTool]:
     enabled = get_node_tool_names(node_name)
     if extra_tool_names:
         enabled.update(str(item).strip().lower() for item in extra_tool_names if str(item).strip())
-    return build_langchain_tools(
+    tools = build_langchain_tools(
         enabled_tool_names=enabled,
     )
+    if user_id and session:
+        try:
+            user_mcp_tools = await get_user_mcp_langchain_tools(user_id, session)
+            if user_mcp_tools:
+                tools.extend(user_mcp_tools)
+        except Exception:
+            pass  # Don't block agent on user MCP failures
+    return tools
 
 
 def find_tool_by_name(tools: list[BaseTool], name: str) -> BaseTool | None:
@@ -132,7 +146,7 @@ async def invoke_node_tool(
 
 def _resolve_tool_source(tool_name: str) -> str:
     target = (tool_name or "").strip().lower()
-    if target == "maps_weather":
+    if target in {"maps_weather", "bing_search", "crawl_webpage"}:
         return "mcp"
     return "builtin"
 

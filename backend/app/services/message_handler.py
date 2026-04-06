@@ -365,11 +365,43 @@ def _friendly_graph_error_message(exc: Exception) -> tuple[str, str]:
             "当前模型额度已用尽（free tier），请在模型管理端关闭“仅免费额度”或切换到可用付费模型后再试。",
             "llm_quota_exhausted",
         )
+    if (
+        "input text data may contain inappropriate content" in lowered
+        or "datainspectionfailed" in lowered and "input" in lowered
+    ):
+        return (
+            "当前请求触发了模型服务的内容审查，暂时无法直接处理这类表述。你可以换一种更中性的问法，或让我只整理公开来源与时间线。",
+            "llm_input_blocked",
+        )
+    if (
+        "output data may contain inappropriate content" in lowered
+        or "datainspectionfailed" in lowered and "output" in lowered
+    ):
+        return (
+            "当前模型在生成回答时触发了内容审查，未返回可展示结果。你可以换一种更中性的问法，或让我只列公开来源与客观信息。",
+            "llm_output_blocked",
+        )
     if "rate limit" in lowered or "too many requests" in lowered:
         return ("当前模型请求过于频繁，请稍后重试。", "llm_rate_limited")
     if "permissiondeniederror" in lowered or "error code: 403" in lowered:
         return ("当前模型调用被拒绝（403），请检查模型权限或账号额度后重试。", "llm_permission_denied")
-    return ("处理消息时发生错误，请稍后重试。", "graph_invoke_failed")
+    if (
+        "timed out" in lowered
+        or "timeout" in lowered
+        or "readtimeout" in lowered
+        or "apitimeouterror" in lowered
+        or "connection timed out" in lowered
+        or "peer closed connection" in lowered
+    ):
+        return ("当前模型或外部服务响应超时。你可以稍后重试，或换更短、更具体的请求。", "upstream_timeout")
+    if "recursion limit" in lowered or "graphrecursionerror" in lowered:
+        return ("这次请求在多轮工具调用后仍未收敛，我已停止继续重试。你可以换更具体的关键词、站点或范围。", "graph_recursion_limited")
+    detail = text.replace("\n", " ").strip()
+    if len(detail) > 120:
+        detail = detail[:120].rstrip() + "..."
+    if detail:
+        return (f"这次请求未成功完成。系统返回：{detail}", "graph_invoke_failed")
+    return ("这次请求未成功完成，但没有返回更具体的错误信息。", "graph_invoke_failed")
 
 
 async def _run_long_term_memory_pipeline(

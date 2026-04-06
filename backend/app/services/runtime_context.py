@@ -30,6 +30,18 @@ _tool_audit_hook_ctx: ContextVar[
     "pai_tool_audit_hook_ctx",
     default=None,
 )
+_fetch_url_call_count_ctx: ContextVar[int] = ContextVar(
+    "pai_fetch_url_call_count_ctx",
+    default=0,
+)
+_mcp_tool_call_count_ctx: ContextVar[int] = ContextVar(
+    "pai_mcp_tool_call_count_ctx",
+    default=0,
+)
+_crawl_webpage_call_count_ctx: ContextVar[int] = ContextVar(
+    "pai_crawl_webpage_call_count_ctx",
+    default=0,
+)
 
 
 def set_session(session: AsyncSession):
@@ -175,3 +187,57 @@ def reset_tool_audit_hook(token) -> None:
 
 def get_tool_audit_hook() -> Callable[[str, str, dict[str, Any], bool, int, str, str], Awaitable[None]] | None:
     return _tool_audit_hook_ctx.get()
+
+
+def set_fetch_url_call_count(count: int = 0):
+    return _fetch_url_call_count_ctx.set(max(0, int(count)))
+
+
+def reset_fetch_url_call_count(token) -> None:
+    _fetch_url_call_count_ctx.reset(token)
+
+
+def get_fetch_url_call_count() -> int:
+    return int(_fetch_url_call_count_ctx.get() or 0)
+
+
+def increment_fetch_url_call_count() -> int:
+    count = get_fetch_url_call_count() + 1
+    _fetch_url_call_count_ctx.set(count)
+    return count
+
+
+def set_mcp_tool_call_count(count: int = 0):
+    return _mcp_tool_call_count_ctx.set(max(0, int(count)))
+
+
+def reset_mcp_tool_call_count(token) -> None:
+    _mcp_tool_call_count_ctx.reset(token)
+
+
+def get_mcp_tool_call_count() -> int:
+    return int(_mcp_tool_call_count_ctx.get() or 0)
+
+
+def increment_mcp_tool_call_count() -> int:
+    count = get_mcp_tool_call_count() + 1
+    _mcp_tool_call_count_ctx.set(count)
+    return count
+
+
+def set_crawl_webpage_call_count(count: int = 0):
+    return _crawl_webpage_call_count_ctx.set(max(0, int(count)))
+
+
+def reset_crawl_webpage_call_count(token) -> None:
+    _crawl_webpage_call_count_ctx.reset(token)
+
+
+def get_crawl_webpage_call_count() -> int:
+    return int(_crawl_webpage_call_count_ctx.get() or 0)
+
+
+def increment_crawl_webpage_call_count() -> int:
+    count = get_crawl_webpage_call_count() + 1
+    _crawl_webpage_call_count_ctx.set(count)
+    return count

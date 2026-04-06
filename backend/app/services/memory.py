@@ -40,6 +40,7 @@ IDENTITY_MEMORY_KEYS = {
     "residence_country",
     "residence-province",
     "residence_province",
+    "has_other_client_accounts",
 }
 MEMORY_CONSOLIDATE_SCAN_LIMIT = 160
 SEMANTIC_DUPLICATE_THRESHOLD = 0.82
@@ -392,9 +393,18 @@ def _is_identity_memory_candidate(
 ) -> bool:
     key_tail = (memory_key.split(":", 1)[-1] if memory_key else "").strip().lower()
     normalized_key = _normalize_key_for_match(memory_key)
+    key_tail_normalized = _normalize_key_for_match(key_tail)
+    key_segments = [segment for segment in re.split(r"[_:\-]+", normalized_key) if segment]
+    joined_tail = "_".join(key_segments[-2:]) if len(key_segments) >= 2 else (key_segments[-1] if key_segments else "")
     if key_tail in IDENTITY_MEMORY_KEYS:
         return True
+    if key_tail_normalized in NORMALIZED_IDENTITY_MEMORY_KEYS:
+        return True
     if normalized_key in NORMALIZED_IDENTITY_MEMORY_KEYS:
+        return True
+    if joined_tail in NORMALIZED_IDENTITY_MEMORY_KEYS:
+        return True
+    if any(normalized_key.endswith(f"_{item}") for item in NORMALIZED_IDENTITY_MEMORY_KEYS):
         return True
     if memory_type == "profile":
         return True

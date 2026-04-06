@@ -1,5 +1,5 @@
-from langchain.messages import BaseMessage
-from langchain.prompts import ChatPromptTemplate
+from langchain_core.messages import BaseMessage
+from langchain_core.prompts import ChatPromptTemplate
 
 
 SCHEDULE_INTENT_PROMPT = ChatPromptTemplate.from_messages(

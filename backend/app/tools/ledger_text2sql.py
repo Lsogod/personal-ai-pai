@@ -25,6 +25,9 @@ _OTHER_TABLES = re.compile(
 _USER_FILTER = re.compile(r"(?:\w+\.)?user_id\s*=\s*:user_id", re.IGNORECASE)
 _DELETE_ALL_HINT = re.compile(r"(所有|全部|清空|all)", re.IGNORECASE)
 _LIMIT_PATTERN = re.compile(r"\blimit\s+(\d+|:\w+)\b", re.IGNORECASE)
+_INSERT_COLUMNS_PATTERN = re.compile(
+    r"(?is)^\s*insert\s+into\s+ledgers\s*\((.*?)\)\s*values\b"
+)
 
 
 class LedgerText2SQLPlan(BaseModel):
@@ -141,8 +144,19 @@ def _is_safe_sql(sql: str, intent: str, user_message: str) -> tuple[bool, str]:
     if intent == "insert":
         if not lower.startswith("insert into ledgers"):
             return False, "intent_mismatch"
-        if "user_id" not in lower:
+        match = _INSERT_COLUMNS_PATTERN.search(stmt)
+        if not match:
+            return False, "missing_insert_columns"
+        raw_columns = match.group(1)
+        columns = {
+            str(part or "").strip().strip('"').split(".")[-1].strip().lower()
+            for part in raw_columns.split(",")
+            if str(part or "").strip()
+        }
+        if "user_id" not in columns:
             return False, "missing_user_id_column"
+        if "id" in columns or "created_at" in columns:
+            return False, "forbidden_insert_column"
         return True, ""
 
     if intent in {"update", "delete"}:
@@ -234,6 +248,7 @@ async def _plan_sql(message: str, conversation_context: str = "") -> dict[str, A
         "使用具名参数（例如 :user_id）。\n"
         "对于 select/update/delete：SQL 必须包含 WHERE user_id = :user_id。\n"
         "对于 insert：插入列中必须显式包含 user_id。\n"
+        "对于 insert：绝对不要显式写入 id 或 created_at；让数据库自己生成。\n"
         "允许插入的列只有：user_id, amount, currency, category, item, transaction_date, image_url。\n"
         "不要使用不存在的列。\n"
         "category/item 的文本字面量保持用户原始措辞或语言。\n"
@@ -243,6 +258,10 @@ async def _plan_sql(message: str, conversation_context: str = "") -> dict[str, A
         f"用户时区：{local_tz}。当前本地时间：{now_local}。当前 UTC 时间：{now}。\n"
         "相对时间表达（今天/昨天/本月/上月）必须先按用户本地时区计算，再换算为 UTC-naive 参数。\n"
         "时间范围优先使用左闭右开区间 [start, end)，例如“今天”应使用次日零点作为 end。\n"
+        "如果一条用户消息里包含两笔或多笔独立账单（例如“借出5000 转账1300”“早餐12，午饭25”），"
+        "优先生成一条单独的 INSERT INTO ledgers ... VALUES (...), (...)\n"
+        "一次性完成多笔插入，而不是只插入第一笔。\n"
+        "对于 insert，优先使用 RETURNING item, amount, currency, category, transaction_date 返回新增结果，便于向用户逐条确认。\n"
     )
     result = await runnable.ainvoke(
         [
@@ -757,15 +776,32 @@ async def try_execute_ledger_text2sql(
 
             if intent == "insert":
                 result = await db.execute(stmt, params)
+                rows = result.mappings().all() if result.returns_rows else []
                 await db.commit()
-                first = result.mappings().first() if result.returns_rows else None
-                if first:
-                    return (
-                        "已记账："
-                        f"{first.get('item', '消费')} "
-                        f"{float(first.get('amount') or 0):.2f} "
-                        f"{first.get('currency', 'CNY')}，分类 {first.get('category', '其他')}。"
-                    )
+                if rows:
+                    if len(rows) == 1:
+                        first = rows[0]
+                        return (
+                            "已记账："
+                            f"{first.get('item', '消费')} "
+                            f"{float(first.get('amount') or 0):.2f} "
+                            f"{first.get('currency', 'CNY')}，分类 {first.get('category', '其他')}。"
+                        )
+                    lines = [f"已记账 {len(rows)} 笔："]
+                    for row in rows[:10]:
+                        row_item = str(row.get("item") or "消费")
+                        row_amount = float(row.get("amount") or 0)
+                        row_currency = str(row.get("currency") or "CNY")
+                        row_category = str(row.get("category") or "其他")
+                        transaction_date = row.get("transaction_date") or row.get("created_at") or ""
+                        time_text = _to_client_tz_text(transaction_date, assume_utc=True)
+                        suffix = f"，时间 {time_text[:16]}" if time_text else ""
+                        lines.append(
+                            f"- {row_item} {row_amount:.2f} {row_currency}，分类 {row_category}{suffix}"
+                        )
+                    if len(rows) > 10:
+                        lines.append(f"- 其余 {len(rows) - 10} 笔已省略显示")
+                    return "\n".join(lines)
                 return "已新增账单记录。"
 
             if intent == "update":

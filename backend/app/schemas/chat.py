@@ -79,5 +79,9 @@ class ProfileResponse(BaseModel):
     ai_emoji: str
     platform: str
     email: Optional[str] = None
+    residence_city: Optional[str] = None
+    residence_province: Optional[str] = None
+    residence_country: Optional[str] = None
+    has_other_client_accounts: Optional[bool] = None
     setup_stage: int
     binding_stage: int = 0

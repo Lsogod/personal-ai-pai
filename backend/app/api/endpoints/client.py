@@ -12,7 +12,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_session, AsyncSessionLocal
-from app.models.user import User, SetupStage
+from app.models.user import BindingStage, User, SetupStage
 from app.models.conversation import Conversation as ConversationModel
 from app.models.message import Message
 from app.models.ledger import Ledger
@@ -86,7 +86,15 @@ from app.services.message_handler import (
     schedule_conversation_memory_backfill,
 )
 from app.api.deps import get_or_create_user
+from app.models.user_mcp_server import UserMcpServer
+from app.schemas.user_mcp_server import (
+    KV,
+    UserMcpServerCreate,
+    UserMcpServerResponse,
+    UserMcpServerUpdate,
+)
 from app.services.mcp_fetch import MCPFetchError, get_mcp_fetch_client
+from app.services.user_mcp_tools import invalidate_user_mcp_cache
 from app.services.conversations import (
     create_new_conversation,
     delete_conversation,
@@ -556,6 +564,10 @@ async def profile(
         ai_emoji=user.ai_emoji,
         platform=current_platform,
         email=user.email,
+        residence_city=user.residence_city,
+        residence_province=user.residence_province,
+        residence_country=user.residence_country,
+        has_other_client_accounts=user.has_other_client_accounts,
         setup_stage=user.setup_stage,
         binding_stage=int(user.binding_stage or 0),
     )
@@ -721,9 +733,12 @@ async def chat_history(
     )
     messages = list(reversed(result.scalars().all()))
     if not messages and user.setup_stage == SetupStage.NEW:
-        if int(user.binding_stage or 0) < 2:
+        binding_stage = int(user.binding_stage or BindingStage.UNASKED)
+        if binding_stage in {BindingStage.UNASKED, BindingStage.AWAITING_ANSWER}:
             greeting = "在其他客户端有账号吗？回复“有”或“没有”。有的话可稍后用 `/bind new` 与 `/bind <6位码>` 绑定数据。"
-            user.binding_stage = 1
+            user.binding_stage = BindingStage.AWAITING_ANSWER
+        elif binding_stage == BindingStage.AWAITING_BIND_OR_CONTINUE:
+            greeting = "如果你已有其他客户端账号，请先在已有账号端发送 `/bind new`，再回到这里发送 `/bind <6位码>` 完成绑定；如果暂时不绑定，请回复“继续”。"
         else:
             greeting = "你好！我是您的私人助理 PAI。初次见面，请问我该怎么称呼您？"
             user.setup_stage = SetupStage.USER_NAMED
@@ -1802,3 +1817,130 @@ async def skills_disable(
         source="user",
         read_only=False,
     )
+
+
+# ── User MCP Server CRUD ──
+
+
+def _serialize_kv(items: list[KV]) -> str:
+    return json.dumps([{"key": item.key, "value": item.value} for item in items], ensure_ascii=False)
+
+
+def _deserialize_kv(raw: str) -> list[KV]:
+    try:
+        items = json.loads(raw or "[]")
+        return [KV(key=item.get("key", ""), value=item.get("value", "")) for item in items if isinstance(item, dict)]
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def _mcp_server_to_response(server: UserMcpServer) -> UserMcpServerResponse:
+    return UserMcpServerResponse(
+        id=server.id,
+        name=server.name,
+        transport=server.transport,
+        url=server.url,
+        headers=_deserialize_kv(server.headers_json),
+        env=_deserialize_kv(server.env_json),
+        enabled=server.is_enabled,
+        created_at=server.created_at,
+        updated_at=server.updated_at,
+    )
+
+
+@router.get("/user/mcp-servers", response_model=list[UserMcpServerResponse])
+async def list_user_mcp_servers(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    stmt = select(UserMcpServer).where(UserMcpServer.user_id == user.id).order_by(UserMcpServer.id)
+    result = await session.execute(stmt)
+    servers = result.scalars().all()
+    return [_mcp_server_to_response(s) for s in servers]
+
+
+@router.get("/user/mcp-servers/{server_id}", response_model=UserMcpServerResponse)
+async def get_user_mcp_server(
+    server_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    stmt = select(UserMcpServer).where(UserMcpServer.id == server_id, UserMcpServer.user_id == user.id)
+    result = await session.execute(stmt)
+    server = result.scalar_one_or_none()
+    if not server:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+    return _mcp_server_to_response(server)
+
+
+@router.post("/user/mcp-servers", response_model=UserMcpServerResponse, status_code=201)
+async def create_user_mcp_server(
+    body: UserMcpServerCreate,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    server = UserMcpServer(
+        user_id=user.id,
+        name=body.name.strip(),
+        transport=body.transport or "http",
+        url=(body.url or "").strip(),
+        api_key=(body.api_key or "").strip(),
+        headers_json=_serialize_kv(body.headers or []),
+        env_json=_serialize_kv(body.env or []),
+        is_enabled=body.enabled,
+    )
+    session.add(server)
+    await session.commit()
+    await session.refresh(server)
+    invalidate_user_mcp_cache(user.id)
+    return _mcp_server_to_response(server)
+
+
+@router.patch("/user/mcp-servers/{server_id}", response_model=UserMcpServerResponse)
+async def update_user_mcp_server(
+    server_id: int,
+    body: UserMcpServerUpdate,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    stmt = select(UserMcpServer).where(UserMcpServer.id == server_id, UserMcpServer.user_id == user.id)
+    result = await session.execute(stmt)
+    server = result.scalar_one_or_none()
+    if not server:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+    if body.name is not None:
+        server.name = body.name.strip()
+    if body.transport is not None:
+        server.transport = body.transport
+    if body.url is not None:
+        server.url = body.url.strip()
+    if body.api_key is not None:
+        server.api_key = body.api_key.strip()
+    if body.headers is not None:
+        server.headers_json = _serialize_kv(body.headers)
+    if body.env is not None:
+        server.env_json = _serialize_kv(body.env)
+    if body.enabled is not None:
+        server.is_enabled = body.enabled
+    session.add(server)
+    await session.commit()
+    await session.refresh(server)
+    invalidate_user_mcp_cache(user.id)
+    return _mcp_server_to_response(server)
+
+
+@router.delete("/user/mcp-servers/{server_id}")
+async def delete_user_mcp_server(
+    server_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    stmt = select(UserMcpServer).where(UserMcpServer.id == server_id, UserMcpServer.user_id == user.id)
+    result = await session.execute(stmt)
+    server = result.scalar_one_or_none()
+    if not server:
+        raise HTTPException(status_code=404, detail="MCP server not found")
+    await session.delete(server)
+    await session.commit()
+    invalidate_user_mcp_cache(user.id)
+    return {"ok": True}
