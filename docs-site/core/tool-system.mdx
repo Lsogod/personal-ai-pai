@@ -1,170 +1,263 @@
 ---
 title: "工具系统"
-description: "PAI 工具体系：24 个内建工具 + MCP 外部工具，单 Agent 全量可用"
+description: "PAI 工具系统的真实实现：LangChain 工具定义、节点级暴露、统一执行器，以及每个工具的实现说明与示例"
 ---
 
 ## 概述
 
-PAI 提供 24 个内建工具，涵盖时间、视觉、记账、对话、记忆、日程、用户档案等能力。同时通过 MCP（Model Context Protocol）协议接入外部工具，实现地图天气等扩展能力。
+当前分支的工具系统不是“单文件里注册 24 个工具”这么简单，而是由 4 层共同组成：
 
-在 `feat/single-agent` 分支中，所有工具通过 `langchain_tools.py` 统一注册，单一 Agent 拥有全部工具的访问权限，自主决策调用哪些工具，无节点作用域隔离。
-
-## 工具分类
-
-### 时间与通用工具
-
-| 工具名 | 功能 |
-|--------|------|
-| `now_time` | 获取当前时间 |
-| `fetch_url` | 抓取 URL 内容 |
-
-### 视觉工具
-
-| 工具名 | 功能 |
-|--------|------|
-| `analyze_image` | 通用图片分析（OCR、内容理解） |
-| `analyze_receipt` | 小票/支付截图结构化解析 |
-
-### 记账工具
-
-| 工具名 | 功能 |
-|--------|------|
-| `ledger_text2sql` | 自然语言转 SQL 查询 |
-| `ledger_insert` | 新增记账条目 |
-| `ledger_update` | 更新记账条目 |
-| `ledger_delete` | 删除记账条目 |
-| `ledger_get_latest` | 获取最近一条记录 |
-| `ledger_list_recent` | 获取最近记录列表 |
-| `ledger_list` | 按条件查询记录列表 |
-
-### 对话工具
-
-| 工具名 | 功能 |
-|--------|------|
-| `conversation_current` | 获取当前对话信息 |
-| `conversation_list` | 查询历史对话列表 |
-
-### 记忆工具
-
-| 工具名 | 功能 |
-|--------|------|
-| `memory_list` | 查询用户长期记忆 |
-| `memory_save` | 创建或覆盖记忆 |
-| `memory_append` | 追加内容到已有记忆 |
-| `memory_delete` | 删除指定记忆 |
-
-### 日程工具
-
-| 工具名 | 功能 |
-|--------|------|
-| `schedule_insert` | 创建日程提醒 |
-| `schedule_update` | 更新日程 |
-| `schedule_delete` | 删除日程 |
-| `schedule_get_latest` | 获取最近日程 |
-| `schedule_list_recent` | 获取最近日程列表 |
-| `schedule_list` | 按条件查询日程 |
-
-### 用户档案工具
-
-| 工具名 | 功能 |
-|--------|------|
-| `update_user_profile` | 更新用户档案 |
-| `query_user_profile` | 查询用户档案 |
-
-### MCP 外部工具
-
-| 工具名 | 功能 |
-|--------|------|
-| `mcp_list_tools` | 列出可用的 MCP 工具 |
-| `mcp_call_tool` | 调用指定 MCP 工具 |
-| `maps_weather` | 地图天气查询（MCP 提供） |
-
-## 工具注册
-
-`feat/single-agent` 分支通过 `langchain_tools.py` 统一注册所有工具到单一 Agent：
-
-```python
-# langchain_tools.py
-# 所有工具统一注册，Agent 全量可用
-ALL_TOOLS = [
-    # 时间与通用
-    now_time, fetch_url,
-    # 视觉分析
-    analyze_image, analyze_receipt,
-    # 记账管理
-    ledger_text2sql, ledger_insert, ledger_update, ledger_delete,
-    ledger_get_latest, ledger_list_recent, ledger_list,
-    # 日程管理
-    schedule_insert, schedule_update, schedule_delete,
-    schedule_get_latest, schedule_list_recent, schedule_list,
-    # 记忆管理
-    memory_list, memory_save, memory_append, memory_delete,
-    # 对话管理
-    conversation_current, conversation_list,
-    # 用户档案
-    update_user_profile, query_user_profile,
-    # MCP 扩展
-    mcp_list_tools, mcp_call_tool, maps_weather,
-]
-```
+1. `backend/app/services/langchain_tools.py`
+   定义 LangChain 可见的标准工具，负责参数 schema、工具描述和 LangChain 适配。
+2. `backend/app/services/toolsets.py`
+   按节点决定哪些工具默认可见。`main_agent` 并不会自动拿到所有定义过的工具。
+3. `backend/app/services/tool_executor.py`
+   统一执行大多数内建工具，做参数校验、数据库读写、MCP 转发、结果序列化和使用日志记录。
+4. `backend/app/services/tool_registry.py`
+   聚合运行时工具目录，合并 admin 开关、MCP allowlist 和用户自定义 MCP 工具。
 
 <Note>
-  与 `main` 分支不同，`feat/single-agent` 分支没有 `toolsets.py` 和节点级工具权限隔离。Agent 自主判断使用哪些工具，可以在单次推理中跨领域调用多个工具（如同时记账 + 创建日程提醒）。
+  下文中的“示例”是 Agent 内部的工具调用形态，不是对外 REST API。对外接口请看 API 文档。
 </Note>
 
-## 工具执行流程
+## 当前代码中的工具层次
 
-工具调用遵循统一的执行路径：
+| 层次 | 数量 | 说明 |
+|------|------|------|
+| `build_langchain_tools()` 定义的标准工具 | `31` | LangChain 侧完整工具面 |
+| `main_agent` 默认可见工具 | `26` | 由 `toolsets.py` 控制 |
+| 默认不暴露给 `main_agent` 的工具 | `5` | `fetch_url`、`mcp_list_tools`、`mcp_call_tool`、`bing_search`、`crawl_webpage` |
+
+`main_agent` 默认可见工具如下：
+
+```text
+时间: now_time
+联网: web_search
+视觉: analyze_image, analyze_receipt
+MCP 天气: maps_weather
+账单: ledger_text2sql, ledger_insert, ledger_update, ledger_delete, ledger_get_latest, ledger_list_recent, ledger_list
+会话: conversation_current, conversation_list
+记忆: memory_list, memory_save, memory_append, memory_delete
+日程: schedule_insert, schedule_update, schedule_delete, schedule_get_latest, schedule_list_recent, schedule_list
+档案: update_user_profile, query_user_profile
+```
+
+## 统一执行链路
+
+大多数工具都走下面这条路径：
 
 <Steps>
-  <Step title="LLM 函数调用">
-    LLM 在对话推理中决定调用某工具，输出 `function_call` 消息（工具名 + 参数 JSON）
+  <Step title="节点装配工具">
+    `main_agent.py` 调用 `build_node_langchain_tools(node_name="main_agent")`，得到当前节点可见的 LangChain 工具集合。
   </Step>
-  <Step title="LangChain 工具分发">
-    LangChain 框架接收函数调用，匹配到对应的 `BaseTool` 实例
+  <Step title="LLM 决定调用">
+    LangChain Agent 在推理中选择工具，并把参数传给 `langchain_tools.py` 中的工具包装器。
   </Step>
-  <Step title="能力执行">
-    通过 `execute_capability_with_usage` 执行实际逻辑，区分 `builtin`（内建）和 `mcp`（外部）两种来源
+  <Step title="运行时上下文注入">
+    工具包装器从 `ToolRuntime` 里拿到 `user_id`、`conversation_id`、图片列表等上下文。
+  </Step>
+  <Step title="统一执行">
+    `_run_tool()` 会处理每轮调用限额、审计钩子，然后把请求交给 `execute_capability_with_usage()`。
   </Step>
   <Step title="结果返回">
-    执行结果序列化为字符串返回给 LLM，包含 `ok` 状态、`output` 数据、`latency_ms` 延迟等信息
+    `tool_executor.py` 完成数据库/MCP/视觉模型调用后，统一返回 `ok / output / output_data / latency_ms`。
   </Step>
 </Steps>
 
+```text
+LLM function call
+→ langchain_tools.py
+→ _run_tool()
+→ execute_capability_with_usage()
+→ tool_executor.py / MCP client / DB / scheduler / vision model
+→ 结构化结果返回给 LLM
 ```
-用户消息 → LLM 推理 → function_call
-        → LangChain BaseTool
-        → execute_capability_with_usage(source, name, args)
-        → 结果 JSON → LLM 继续推理 → 最终回复
-```
 
-## MCP 集成
+### 这条链路里的几个关键点
 
-PAI 通过 MCP 协议接入外部工具服务器：
+- `runtime_context.py` 用 `ContextVar` 注入 session、scheduler、audit hook、图片列表和每轮调用计数器。
+- `main_agent.py` 在每轮开始时重置联网计数：外部 MCP 工具总计最多 `5` 次，`crawl_webpage` 最多 `3` 次。
+- `tool_registry.py` 会用 `30s` TTL 缓存运行时工具目录，避免每次都去 MCP `tools/list`。
+- `mcp_list_tools` / `mcp_call_tool` 在执行器内部会映射到 builtin 名称 `tool_list` / `tool_call`。
+- `update_user_profile` / `query_user_profile` 是特例：它们直接在 `langchain_tools.py` 中实现，不经过 `tool_executor.py`。
 
-- `fetch_url`：通过 MCP 抓取网页内容
-- `maps_weather`：地图天气查询服务
+## 工具明细
 
-工具来源通过 `_resolve_tool_source` 函数判断：`maps_weather` 路由到 MCP，其余默认为 builtin。
+### 时间与联网工具
 
-## 管理功能
+#### `now_time`
+实现：`tool_executor.py` 里的 `_render_now_time()` 直接用 `ZoneInfo` 计算指定时区当前时间，并返回格式化文本。  
+示例：`now_time({"timezone": "Asia/Shanghai"})`
 
-### 工具开关
+#### `web_search`
+实现：`tool_executor.py` 的 `_execute_web_search()` 会先尝试 `WEB_SEARCH_API_URL`，失败后回退到 MCP `bing_search`，必要时再挑选结果调用 `crawl_webpage` 抓正文；随后做去重、来源域名分类和 `answer_ready` 判定，返回 `sources`、`summary`、`status` 等结构化结果。  
+示例：`web_search({"query": "2026 款 Model Y 上市时间", "focus": "官方发布", "max_results": 5})`
 
-管理员可通过 Admin API 控制单个工具的启用/禁用状态，实现运行时工具管理。
+#### `bing_search`
+实现：`langchain_tools.py` 把参数规范化后，按 `source="mcp"` 交给 `tool_executor.py`，后者通过 `get_mcp_client_for_tool("bing_search")` 调用 MCP 搜索服务。这个工具当前代码里有定义，但默认不暴露给 `main_agent`。  
+示例：`bing_search({"query": "OpenAI GPT-5.4 发布", "count": 5, "offset": 0})`
+
+#### `crawl_webpage`
+实现：该工具会把单个 `uuid + url` 封装成 MCP `crawl_webpage` 需要的 `{"uuids": [...], "urlMap": {...}}` 结构，再走 MCP 客户端抓网页正文；每轮正文抓取默认最多 `3` 次。这个工具当前代码里有定义，但默认不暴露给 `main_agent`。  
+示例：`crawl_webpage({"uuid": "result-1", "url": "https://example.com/news/123"})`
+
+#### `fetch_url`
+实现：底层逻辑在 `mcp_fetch.py` 的 `MCPFetchClient.fetch()`，会优先发现 MCP 侧的 fetch 工具名并调用，失败时回退为直接 HTTP 拉取，还内置了 GitHub Trending HTML 特判。但当前分支在 `tool_executor.py` 中已硬禁用，提示改用 `web_search`、`bing_search`、`crawl_webpage`。  
+示例：`fetch_url({"url": "https://example.com", "max_length": 5000})`
+
+#### `mcp_list_tools`
+实现：LangChain 名称是 `mcp_list_tools`，执行时会映射成 builtin `tool_list`。`tool_executor.py` 会读取 `tool_registry.py` 聚合出的运行时工具目录，再合并用户自定义 MCP 工具，并格式化为可读文本。这个工具当前代码里有定义，但默认不暴露给 `main_agent`。  
+示例：`mcp_list_tools({})`
+
+#### `mcp_call_tool`
+实现：LangChain 名称是 `mcp_call_tool`，执行时映射为 builtin `tool_call`。它会先解析 `arguments_json`，再做 allowlist 校验、admin 启停校验，最后通过 `get_mcp_client_for_tool()` 调用目标 MCP 工具。这个工具当前代码里有定义，但默认不暴露给 `main_agent`。  
+示例：`mcp_call_tool({"tool_name": "maps_weather", "arguments_json": "{\"city\":\"上海\"}"})`
+
+#### `maps_weather`
+实现：该工具直接按 `source="mcp"` 执行，`tool_executor.py` 会把它路由到 `get_mcp_maps_client()`，再由 MCP 地图/天气服务完成查询。  
+示例：`maps_weather({"city": "上海"})`
+
+### 视觉工具
+
+#### `analyze_image`
+实现：`langchain_tools.py` 会先从 `runtime.context.image_urls` 里选中当前消息的图片；`tool_executor.py` 再调用 `app/tools/vision.py` 的 `analyze_image()`。视觉层支持 `https://`、`data:image/...`、`feishu://` 三种图片引用，统一转成 data URL 后交给多模态模型，并用 `GenericImageAnswer` 约束输出为结构化 JSON。  
+示例：`analyze_image({"question": "图里写了什么？", "image_index": 1})`
+
+#### `analyze_receipt`
+实现：同样由 `vision.py` 执行，但使用的是 `VisionExtraction` 结构化 schema。模型会抽取 `amount`、`merchant`、`category`、`item` 等字段；如果模型没稳定给出金额，代码还会用正则从文本里补提取 `amount_candidates`。  
+示例：`analyze_receipt({"image_ref": "https://example.com/receipt.jpg"})`
+
+### 账单工具
+
+#### `ledger_text2sql`
+实现：`tool_executor.py` 会把请求交给 `app/tools/ledger_text2sql.py`。这个模块先用 LLM 生成 SQL 计划，再做强约束校验：只能操作 `ledgers` 表、禁止 DDL、`select/update/delete` 必须带 `user_id` 条件、写操作支持“预览影响记录”与“按 id 确认提交”两阶段机制。时间参数还会统一换算到数据库使用的 UTC-naive 格式。  
+示例：`ledger_text2sql({"message": "这个月餐饮花了多少", "conversation_context": ""})`
+
+#### `ledger_insert`
+实现：`tool_executor.py` 解析金额、分类、条目和时间后，调用 `app/tools/finance.py` 的 `insert_ledger()` 插入 `Ledger` 行，并写审计日志。若未给时间，默认使用当前时间。  
+示例：`ledger_insert({"amount": 32, "category": "餐饮", "item": "午饭"})`
+
+#### `ledger_update`
+实现：执行器会先校验 `ledger_id` 和用户归属，再调用 `finance.py` 的 `update_ledger()`；只更新传入的字段，最后返回更新后的账单行 JSON。  
+示例：`ledger_update({"ledger_id": 123, "amount": 28, "item": "咖啡"})`
+
+#### `ledger_delete`
+实现：执行器按 `ledger_id` 找到账单后，调用 `finance.py` 的 `delete_ledger()` 删除，并把删除前的快照作为返回值。  
+示例：`ledger_delete({"ledger_id": 123})`
+
+#### `ledger_get_latest`
+实现：通过 SQLAlchemy 查询当前用户 `id desc limit 1` 的账单记录；没有记录时返回空 JSON。  
+示例：`ledger_get_latest({})`
+
+#### `ledger_list_recent`
+实现：调用 `finance.py` 的 `list_recent_ledgers()`，按主键倒序返回最近 N 条记录；适合“最近几笔”，不适合“今天/本月”这类区间查询。  
+示例：`ledger_list_recent({"limit": 10})`
+
+#### `ledger_list`
+实现：执行器直接拼 SQLAlchemy 查询，可按 `ledger_ids`、`start_at`、`end_at`、`category`、`item_like`、`order` 组合筛选；如果 `end_at` 只给日期，会自动补成次日零点实现左闭右开区间。  
+示例：`ledger_list({"start_at": "2026-04-01", "end_at": "2026-04-30", "category": "餐饮", "limit": 100})`
+
+### 会话工具
+
+#### `conversation_current`
+实现：`tool_executor.py` 会先确保当前用户存在 active conversation；若没有，就调用 `conversations.py` 的 `ensure_active_conversation()` 创建默认会话并补挂未归属消息。  
+示例：`conversation_current({})`
+
+#### `conversation_list`
+实现：先保证 active conversation 存在，再调用 `conversations.py` 的 `list_conversations()` 按最近活跃时间列出会话，并在返回结果里标出 `active`。  
+示例：`conversation_list({"limit": 20})`
+
+### 记忆工具
+
+#### `memory_list`
+实现：调用 `memory.py` 的 `list_long_term_memories()`。该函数会过滤已过期记忆和一批内部噪声记忆，同时更新 `last_accessed_at`，最后返回面向用户的 JSON 列表。  
+示例：`memory_list({"limit": 50})`
+
+#### `memory_save`
+实现：这是“显式记住”通道。执行器会直接调用 `upsert_long_term_memories(..., bypass_refine=True)`，把用户明确要求记住的内容写进长期记忆，并标记向量状态为 DIRTY，后续由异步索引 worker 同步。  
+示例：`memory_save({"content": "我喜欢无糖乌龙茶", "memory_type": "preference", "importance": 4, "ttl_days": 365})`
+
+#### `memory_append`
+实现：先通过 `find_active_long_term_memory()` 按 `memory_id`、`memory_key` 或 `target_hint` 找目标记忆，再把新内容拼接进去；如果追加内容已存在，则直接返回 `unchanged`。成功追加后会标记向量需要重建。  
+示例：`memory_append({"memory_key": "drink_preference", "content": "也喜欢美式", "separator": "；"})`
+
+#### `memory_delete`
+实现：同样先定位目标记忆，再删除 PostgreSQL 行；若已有向量索引，还会同步调用 `delete_memory_vectors()` 删除对应向量。  
+示例：`memory_delete({"memory_key": "drink_preference"})`
+
+### 日程工具
+
+#### `schedule_insert`
+实现：执行器会校验 `content`，再把 `trigger_time` 解析成系统时区下的本地时间；随后写入 `Schedule` 表，并在状态为 `PENDING` 时通过 `scheduler.add_job()` 注册 APScheduler 单次任务，触发时执行 `send_reminder_job`。  
+示例：`schedule_insert({"content": "提醒我开会", "trigger_time": "2026-04-07 09:30:00"})`
+
+#### `schedule_update`
+实现：先读取原日程，再按传入字段覆盖；随后无论是否改时间，都会先尝试移除旧的 APScheduler job，如果更新后状态仍是 `PENDING`，则重新注册新 job。  
+示例：`schedule_update({"schedule_id": 45, "trigger_time": "2026-04-07 10:00:00", "status": "PENDING"})`
+
+#### `schedule_delete`
+实现：删除前先移除 APScheduler job，再清理 `ReminderDelivery` 记录，最后删除 `Schedule` 行。  
+示例：`schedule_delete({"schedule_id": 45})`
+
+#### `schedule_get_latest`
+实现：按 `id desc limit 1` 读取当前用户最近创建的一条日程，没有则返回空 JSON。  
+示例：`schedule_get_latest({})`
+
+#### `schedule_list_recent`
+实现：按主键倒序读取最近 N 条日程记录，适合“最近几条提醒”的场景。  
+示例：`schedule_list_recent({"limit": 10})`
+
+#### `schedule_list`
+实现：执行器直接构造 SQLAlchemy 查询，可按 `schedule_ids`、`status`、`start_at`、`end_at`、`content_like`、`order` 过滤；状态参数还支持中英文别名，如 `已完成 -> EXECUTED`、`待办 -> PENDING`。  
+示例：`schedule_list({"status": "PENDING", "start_at": "2026-04-01", "end_at": "2026-04-30", "order": "asc"})`
+
+### 用户档案工具
+
+#### `update_user_profile`
+实现：这个工具没有经过 `tool_executor.py`，而是直接在 `langchain_tools.py` 中打开 `AsyncSessionLocal` 更新 `User` 表。若昵称、AI 名称或 emoji 发生变化，还会调用 `deactivate_identity_memories_for_user()` 清掉旧身份记忆，避免长期记忆和用户档案冲突。  
+示例：`update_user_profile({"nickname": "老李", "ai_name": "小派", "ai_emoji": "🤖"})`
+
+#### `query_user_profile`
+实现：同样直接在 `langchain_tools.py` 查询 `User` 表，并把昵称、助手名称、表情、平台、邮箱拼成文本返回。  
+示例：`query_user_profile({})`
+
+## MCP 与运行时管理
+
+### MCP 工具发现
+
+- `tool_registry.py` 会先加载内建工具，再去候选 MCP 地址执行 `tools/list`
+- 候选地址包括默认 MCP、搜索 MCP、搜索回退 MCP、地图 MCP
+- 结果会经过 allowlist 过滤，并与 admin 启停状态合并
+- 最终目录会缓存 `30` 秒
+
+### 工具启停
+
+管理员可以按 `(source, name)` 粒度控制某个 builtin 或 MCP 工具是否启用；执行器在真正调用前会做一次启停校验。
 
 ### 使用日志
 
-每次工具调用都会记录审计信息：
+`execute_capability_with_usage()` 每次执行完成后，都会调用 `enqueue_tool_usage()` 记录：
 
 | 字段 | 说明 |
 |------|------|
-| `source` | 工具来源（builtin / mcp） |
-| `name` | 工具名称 |
-| `args` | 调用参数 |
-| `ok` | 是否成功 |
-| `latency_ms` | 执行耗时（毫秒） |
-| `output` | 输出内容 |
-| `error` | 错误信息（如有） |
+| `tool_source` | `builtin` 或 `mcp` |
+| `tool_name` | 工具名 |
+| `success` | 是否成功 |
+| `latency_ms` | 执行耗时 |
+| `error` | 错误信息 |
+| `user_id / platform / conversation_id` | 调用上下文 |
 
-通过审计钩子（`audit_hook`）回调记录，可用于后续分析工具使用频率、延迟分布和错误率。
+## 什么时候该用哪个工具
+
+| 需求 | 优先工具 | 原因 |
+|------|----------|------|
+| 查外部资料并带来源 | `web_search` | 已内置主搜索、回退搜索和正文抓取逻辑 |
+| 只想直接转发到某个 MCP 工具 | `mcp_call_tool` | 适合受控透传，但默认不开放给主 Agent |
+| 看图说话/OCR | `analyze_image` | 通用视觉问答 |
+| 小票/支付截图入账 | `analyze_receipt` + `ledger_insert` | 先结构化提取，再落账单 |
+| 简单单笔记账 | `ledger_insert` | 逻辑最短，确定性最高 |
+| 复杂批量改账/查账 | `ledger_text2sql` | 有 SQL 安全护栏和写前预览机制 |
+| 简单提醒创建 | `schedule_insert` | 直接写库并注册 APScheduler job |
+| 长期记住用户偏好 | `memory_save` | 走长期记忆真值库 |
+| 更新昵称/助手名 | `update_user_profile` | 不应写进普通长期记忆 |
+
