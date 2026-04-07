@@ -133,6 +133,26 @@ flowchart TB
 
 ---
 
+## 🆕 更新日志
+
+### 2026-04-07：记忆系统与 MCP 能力更新
+
+#### 记忆系统
+- **接入向量数据库**：长期记忆改为 `PostgreSQL` 保存业务真值，`Milvus` 保存向量索引；读取时先做 dense 召回，再回 PostgreSQL 获取真实记忆内容。
+- **异步索引同步**：新增 `memory_index_worker`，后台扫描 `DIRTY / FAILED` 记忆，生成 embedding 后写入 Milvus；写入失败会标记 `FAILED`，主对话链路不被阻塞。
+- **双通道写入**：Agent 可通过 `memory_save` / `memory_append` / `memory_delete` 显式维护记忆；对话结束后仍保留异步提取管道作为兜底。
+- **检索降级机制**：Milvus 或 embedding 不可用时，会自动回退到词法扫描，避免记忆检索失败影响正常回复。
+- **记忆边界收紧**：身份档案、工具清单、天气快照、短期统计、提醒/待办等临时信息不再写入长期记忆，降低脏记忆污染。
+
+#### MCP
+- **系统 MCP 分层**：保留系统级 MCP Fetch/Search/Maps 能力，支持 `bing_search`、`crawl_webpage`、`maps_weather` 等外部工具，并通过 allowlist 与管理开关控制可用范围。
+- **用户自定义 MCP**：新增用户级 MCP Server 配置能力，用户可保存自己的 `stdio` 或 `http` MCP 服务，系统会按用户动态发现工具并注入 Agent。
+- **MCP 工具命名隔离**：用户 MCP 工具内部使用 `umcp_{server_id}_{tool_name}` 形式避免与内置工具冲突，对外展示时优先显示“服务名 / 原始工具名”。
+- **缓存与失效机制**：用户 MCP 工具发现结果会短期缓存；新增、编辑、删除 MCP 服务后会主动失效缓存，保证下一轮对话使用最新工具集。
+- **前端与小程序入口**：Web 右侧面板和小程序“我的”页新增 MCP 服务管理入口，可查看、添加、编辑、启停和删除自定义 MCP 服务。
+
+---
+
 ## 🚀 快速开始
 
 ### 1. 环境准备
