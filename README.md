@@ -147,6 +147,26 @@ flowchart TB
 
 ---
 
+## 🆕 更新日志
+
+### 2026-04-07：记忆系统与 MCP 能力更新
+
+#### 记忆系统
+- **接入向量数据库**：长期记忆改为 `PostgreSQL` 保存业务真值，`Milvus` 保存向量索引；读取时先做 dense 召回，再回 PostgreSQL 获取真实记忆内容。
+- **异步索引同步**：新增 `memory_index_worker`，后台扫描 `DIRTY / FAILED` 记忆，生成 embedding 后写入 Milvus；写入失败会标记 `FAILED`，主对话链路不被阻塞。
+- **双通道写入**：Agent 可通过 `memory_save` / `memory_append` / `memory_delete` 显式维护记忆；对话结束后仍保留异步提取管道作为兜底。
+- **检索降级机制**：Milvus 或 embedding 不可用时，会自动回退到词法扫描，避免记忆检索失败影响正常回复。
+- **记忆边界收紧**：身份档案、工具清单、天气快照、短期统计、提醒/待办等临时信息不再写入长期记忆，降低脏记忆污染。
+
+#### MCP
+- **系统 MCP 分层**：保留系统级 MCP Fetch/Search/Maps 能力，支持 `bing_search`、`crawl_webpage`、`maps_weather` 等外部工具，并通过 allowlist 与管理开关控制可用范围。
+- **搜索与抓取链路更新**：`fetch_url` 不再作为长网页读取的主路径，搜索类查询优先走 MCP Search，必要时再用 `crawl_webpage` 抓取正文片段。
+- **工具目录与显式调用**：`mcp_list_tools` 用于查看可用外部工具，`mcp_call_tool` 用于按工具名和参数显式调用 MCP 工具。
+- **MCP 服务分流**：支持为 fetch、search、maps 配置不同 MCP Server 地址和 API Key，避免所有外部能力都绑在同一个 MCP 服务上。
+- **调用护栏**：对搜索和网页抓取类工具增加调用次数限制与错误降级，减少循环抓取和外部服务异常对主对话链路的影响。
+
+---
+
 ## 🚀 快速开始
 
 ### 1. 环境准备
